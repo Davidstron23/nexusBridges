@@ -1,4 +1,4 @@
-# Nexo
+# NexusBridges
 
 Send files and folders between your own devices on the same Wi-Fi. No cables, no USB sticks, no cloud, no accounts.
 
@@ -6,9 +6,9 @@ Send files and folders between your own devices on the same Wi-Fi. No cables, no
 
 ## What it is
 
-Nexo is a peer-to-peer file transfer app for a local network. Every device runs the same app, finds the others on the network, and sends files straight to them. There is no central server in the middle.
+NexusBridges is a peer-to-peer file transfer app for a local network. Every device runs the same app, finds the others on the network, and sends files straight to them. There is no central server in the middle.
 
-The idea that drives it: you are working on a project on one computer and you need that folder on another one, including things you would never push to GitHub. You open Nexo, drag the folder in, pick the other device, pick the folder where it should land, and it goes there.
+The idea that drives it: you are working on a project on one computer and you need that folder on another one, including things you would never push to GitHub. You open NexusBridges, drag the folder in, pick the other device, pick the folder where it should land, and it goes there.
 
 ## Planned for the first version (0.1.0, Windows)
 
@@ -38,7 +38,7 @@ Coming with the project skeleton. It will need Flutter (stable channel) and Visu
 
 ## Inspiration
 
-[LocalSend](https://github.com/localsend/localsend) is a mature open source app that solves the same problem. Nexo is a separate project written from scratch in Dart, built to learn how this kind of protocol works.
+[LocalSend](https://github.com/localsend/localsend) is a mature open source app that solves the same problem. NexusBridges is a separate project written from scratch in Dart, built to learn how this kind of protocol works.
 
 ## License
 
@@ -46,7 +46,7 @@ MIT, see `LICENSE`.
 
 ---
 
-# Nexo (castellano)
+# NexusBridges (castellano)
 
 Envía archivos y carpetas entre tus propios dispositivos conectados a la misma Wi-Fi. Sin cables, sin pendrives, sin nube y sin cuentas.
 
@@ -54,9 +54,9 @@ Envía archivos y carpetas entre tus propios dispositivos conectados a la misma 
 
 ## Qué es
 
-Nexo es una app de transferencia de archivos entre dispositivos de una red local, de igual a igual. Todos los dispositivos ejecutan la misma app, se encuentran en la red y se envían los archivos directamente. No hay un servidor central en medio.
+NexusBridges es una app de transferencia de archivos entre dispositivos de una red local, de igual a igual. Todos los dispositivos ejecutan la misma app, se encuentran en la red y se envían los archivos directamente. No hay un servidor central en medio.
 
-La idea que lo mueve: estás trabajando en un proyecto en un ordenador y necesitas esa carpeta en otro, incluso con cosas que nunca subirías a GitHub. Abres Nexo, arrastras la carpeta, eliges el otro dispositivo, eliges la carpeta donde debe quedar y se envía.
+La idea que lo mueve: estás trabajando en un proyecto en un ordenador y necesitas esa carpeta en otro, incluso con cosas que nunca subirías a GitHub. Abres NexusBridges, arrastras la carpeta, eliges el otro dispositivo, eliges la carpeta donde debe quedar y se envía.
 
 ## Previsto para la primera versión (0.1.0, Windows)
 
@@ -86,7 +86,7 @@ Llegará con el esqueleto del proyecto. Hará falta Flutter (canal estable) y, e
 
 ## Inspiración
 
-[LocalSend](https://github.com/localsend/localsend) es una app de código abierto madura que resuelve el mismo problema. Nexo es un proyecto aparte, escrito desde cero en Dart, para aprender cómo funciona este tipo de protocolo.
+[LocalSend](https://github.com/localsend/localsend) es una app de código abierto madura que resuelve el mismo problema. NexusBridges es un proyecto aparte, escrito desde cero en Dart, para aprender cómo funciona este tipo de protocolo.
 
 ## Licencia
 
