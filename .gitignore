@@ -1,0 +1,30 @@
+# Dart and Flutter
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+**/windows/flutter/ephemeral/
+*.iml
+
+# Installer output
+installer/Output/
+
+# Environment (the app has no secrets, but never commit real values)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# AI tooling (also in the global gitignore)
+.claude/
+.agents/
