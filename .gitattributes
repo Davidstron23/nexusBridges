@@ -1,0 +1,5 @@
+# Normalise line endings; shell scripts and git hooks must keep LF or they break on Windows.
+* text=auto
+*.sh text eol=lf
+.githooks/* text eol=lf
+*.ps1 text eol=crlf
