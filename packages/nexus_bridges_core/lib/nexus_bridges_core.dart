@@ -1,4 +1,4 @@
 /// Protocol, networking and security core of NexusBridges.
 library;
 
-export 'src/protocol_version.dart';
+export 'src/protocol/protocol_version.dart';
