@@ -20,7 +20,7 @@ jobs:
         with:
           channel: stable
           flutter-version-file: apps/nexus_bridges/pubspec.yaml
-          cache: true
+          # No cache: restoring it took longer than installing Flutter (measured on 2026-10-20).
 
       # One pub get at the root resolves the whole workspace.
       - run: flutter pub get
@@ -49,7 +49,7 @@ jobs:
         with:
           channel: stable
           flutter-version-file: apps/nexus_bridges/pubspec.yaml
-          cache: true
+          # No cache: restoring it took longer than installing Flutter (measured on 2026-10-20).
 
       - name: Install Inno Setup
         run: choco install innosetup -y
