@@ -1,0 +1,10 @@
+name: nexus_bridges_workspace
+description: Workspace that holds the NexusBridges core package and the desktop app.
+publish_to: none
+
+environment:
+  sdk: ^3.13.5
+
+workspace:
+  - packages/nexus_bridges_core
+  - apps/nexus_bridges
