@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The Flutter version comes from apps/nexus_bridges/pubspec.yaml, so CI
+      # and every developer machine use exactly the same one.
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: apps/nexus_bridges/pubspec.yaml
+          cache: true
+
+      # One pub get at the root resolves the whole workspace.
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze
+
+      - name: Test nexus_bridges_core
+        run: dart test
+        working-directory: packages/nexus_bridges_core
+
+      - name: Test the app
+        run: flutter test
+        working-directory: apps/nexus_bridges
+
+      - name: Build the Windows app
+        run: flutter build windows --release
+        working-directory: apps/nexus_bridges
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks lists the commits of a PR through the API
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history, so gitleaks scans every commit
+
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

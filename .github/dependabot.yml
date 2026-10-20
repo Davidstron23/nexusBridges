@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: pub
+    directory: / # the workspace lockfile lives at the repository root
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3 # don't propose versions published less than 3 days ago
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
