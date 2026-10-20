@@ -34,7 +34,26 @@ No accounts and no analytics. Nothing leaves your local network. The app has no 
 
 ## Build from source
 
-Coming with the project skeleton. It will need Flutter (stable channel) and Visual Studio Build Tools with the C++ workload on Windows.
+You need Windows, Git, Flutter (the exact version pinned in `apps/nexus_bridges/pubspec.yaml`) and Visual Studio Build Tools 2022 with the "Desktop development with C++" workload. To build the installer you also need [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+
+```powershell
+git clone https://github.com/Davidstron23/nexusBridges.git
+cd nexusBridges
+powershell -File tool/bootstrap.ps1
+```
+
+`bootstrap.ps1` checks the Flutter version, installs the dependencies and enables the git hooks. Then:
+
+```powershell
+cd apps/nexus_bridges
+flutter run -d windows
+```
+
+To run the tests: `dart test` inside `packages/nexus_bridges_core` and `flutter test` inside `apps/nexus_bridges`.
+
+To build the installer, run `powershell -File tool/build-installer.ps1`. It leaves `NexusBridges-Setup-<version>.exe` in `installer/Output/`.
+
+The installer is not code-signed, so Windows SmartScreen may show a "Windows protected your PC" warning the first time you run it. Choose "More info" and then "Run anyway".
 
 ## Inspiration
 
@@ -82,7 +101,26 @@ Sin cuentas y sin analíticas. Nada sale de tu red local. La app no tiene secret
 
 ## Compilar desde el código
 
-Llegará con el esqueleto del proyecto. Hará falta Flutter (canal estable) y, en Windows, Visual Studio Build Tools con la carga de trabajo de C++.
+Necesitas Windows, Git, Flutter (la versión exacta que fija `apps/nexus_bridges/pubspec.yaml`) y Visual Studio Build Tools 2022 con la carga de trabajo "Desarrollo para el escritorio con C++". Para generar el instalador también hace falta [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+
+```powershell
+git clone https://github.com/Davidstron23/nexusBridges.git
+cd nexusBridges
+powershell -File tool/bootstrap.ps1
+```
+
+`bootstrap.ps1` comprueba la versión de Flutter, instala las dependencias y activa los hooks de git. Después:
+
+```powershell
+cd apps/nexus_bridges
+flutter run -d windows
+```
+
+Para ejecutar los tests: `dart test` dentro de `packages/nexus_bridges_core` y `flutter test` dentro de `apps/nexus_bridges`.
+
+Para generar el instalador, ejecuta `powershell -File tool/build-installer.ps1`. Deja `NexusBridges-Setup-<versión>.exe` en `installer/Output/`.
+
+El instalador no está firmado, así que Windows SmartScreen puede mostrar el aviso "Windows protegió su PC" la primera vez. Elige "Más información" y después "Ejecutar de todas formas".
 
 ## Inspiración
 
