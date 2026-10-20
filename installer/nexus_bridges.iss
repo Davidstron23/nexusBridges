@@ -5,6 +5,10 @@
   #define AppVersion "0.0.0"
 #endif
 
+#ifndef CrtDir
+  #error CrtDir is not defined. Build the installer with tool/build-installer.ps1.
+#endif
+
 #define AppName "NexusBridges"
 #define AppExeName "nexus_bridges.exe"
 #define ReleaseDir "..\apps\nexus_bridges\build\windows\x64\runner\Release"
@@ -33,6 +37,10 @@ WizardStyle=modern
 
 [Files]
 Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Visual C++ runtime, installed next to the exe (app-local deployment) so the app starts on a clean Windows.
+Source: "{#CrtDir}\msvcp140.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CrtDir}\vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CrtDir}\vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
