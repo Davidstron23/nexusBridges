@@ -1,12 +1,7 @@
-// Guards principle 3 (modules with boundaries) and principle 2 (the core is
-// pure Dart) by reading the directives of every file under lib/.
 import 'dart:io';
 
 import 'package:test/test.dart';
 
-/// Modules each module may import, from the module table in the plan of
-/// spec 001 (and CLAUDE.md). `transfer` and `browse` are future modules
-/// already listed there.
 const Map<String, Set<String>> allowedImports = {
   'storage': {},
   'identity': {'storage'},
@@ -32,7 +27,6 @@ const Map<String, Set<String>> allowedImports = {
   },
 };
 
-/// The only files the root library may export (plan, "Módulos del núcleo").
 const Set<String> allowedRootExports = {
   'src/node/node.dart',
   'src/settings/settings.dart',
@@ -42,8 +36,6 @@ const Set<String> allowedRootExports = {
 const String packageName = 'nexus_bridges_core';
 const String rootLibrary = 'nexus_bridges_core.dart';
 
-/// Returns every boundary violation found in [files], which maps a path
-/// relative to `lib/` (with `/` separators) to the file's source.
 List<String> findViolations(Map<String, String> files) {
   final violations = <String>[];
   for (final MapEntry(key: path, value: source) in files.entries) {
@@ -57,7 +49,7 @@ List<String> findViolations(Map<String, String> files) {
         continue;
       }
       final target = _resolve(path, uri);
-      if (target == null) continue; // dart: or another package
+      if (target == null) continue;
       if (path == rootLibrary) {
         if (!allowedRootExports.contains(target)) {
           violations.add('$where: the root library may not expose $target');
@@ -90,8 +82,6 @@ List<String> findViolations(Map<String, String> files) {
   return violations;
 }
 
-/// URIs of every import, export and part directive (including the
-/// alternatives of conditional imports), skipping `part of`.
 Iterable<String> _directiveUris(String source) sync* {
   final directive = RegExp(
     r'^\s*(?:import|export|part)\b(?!\s+of\b)([^;]*);',
@@ -105,8 +95,6 @@ Iterable<String> _directiveUris(String source) sync* {
   }
 }
 
-/// Path relative to `lib/` that [uri] points to from [fromPath], or null when
-/// it points outside this package.
 String? _resolve(String fromPath, String uri) {
   if (uri.startsWith('dart:')) return null;
   if (uri.startsWith('package:')) {
@@ -118,14 +106,12 @@ String? _resolve(String fromPath, String uri) {
   return resolved.startsWith(base) ? resolved.substring(base.length) : null;
 }
 
-/// Module of a path relative to `lib/` (`src/<module>/...`), or null.
 String? _moduleOf(String path) {
   final segments = path.split('/');
   if (segments.length < 3 || segments.first != 'src') return null;
   return segments[1];
 }
 
-/// Reads every Dart file under the package's `lib/` folder.
 Map<String, String> _readLib() {
   final lib = Directory('lib');
   final files = <String, String>{};
