@@ -6,10 +6,8 @@ import 'dart:typed_data';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
-/// A valid fingerprint: 64 uppercase hex characters.
 final String validFingerprint = '0123456789ABCDEF' * 4;
 
-/// A fresh, valid `DeviceInfo` JSON map that each test can change freely.
 Map<String, Object?> validInfoJson() => {
   'name': 'David PC',
   'fingerprint': validFingerprint,
@@ -18,7 +16,6 @@ Map<String, Object?> validInfoJson() => {
   'deviceType': 'desktop',
 };
 
-/// A fresh, valid announcement JSON map (a `DeviceInfo` plus `kind`).
 Map<String, Object?> validAnnouncementJson() => {
   'kind': 'hello',
   ...validInfoJson(),
@@ -46,7 +43,6 @@ void expectSameInfo(DeviceInfo actual, DeviceInfo expected) {
   expect(actual.deviceType, expected.deviceType);
 }
 
-/// Random JSON-like value for the fuzz tests, biased towards valid fields.
 Object? randomValue(Random random, int depth) {
   switch (random.nextInt(depth > 2 ? 9 : 11)) {
     case 0:
@@ -83,9 +79,6 @@ Object? randomValue(Random random, int depth) {
   }
 }
 
-/// Random JSON map for the fuzz tests. Each field is usually present and
-/// usually plausible for its key, so a share of the maps is valid and the
-/// invariants of accepted values are really exercised.
 Map<String, Object?> randomMap(Random random, int depth) {
   final map = <String, Object?>{};
   void maybe(String key, int presentOutOf, Object? Function() plausible) {
@@ -105,7 +98,6 @@ Map<String, Object?> randomMap(Random random, int depth) {
   return map;
 }
 
-/// Random name mixing letters, spaces, control characters and emojis.
 String randomName(Random random) {
   const pieces = ['a', 'Z', ' ', '\t', '\u0000', '\x7F', 'é', '😀', '💻'];
   return [
@@ -233,7 +225,6 @@ void main() {
     expectRejected('a string', 'not a map');
     expectRejected('an empty map', <String, Object?>{});
 
-    // Keys.
     expectRejected(
       'a map without fingerprint',
       validInfoJson()..remove('fingerprint'),
@@ -262,7 +253,6 @@ void main() {
         ..['Fingerprint'] = validFingerprint,
     );
 
-    // Fingerprint.
     expectRejected(
       'a lowercase fingerprint',
       withValue('fingerprint', validFingerprint.toLowerCase()),
@@ -286,7 +276,6 @@ void main() {
     expectRejected('a numeric fingerprint', withValue('fingerprint', 12345));
     expectRejected('a null fingerprint', withValue('fingerprint', null));
 
-    // Port.
     expectRejected('port 0', withValue('port', 0));
     expectRejected('port -1', withValue('port', -1));
     expectRejected('port 65536', withValue('port', 65536));
@@ -298,7 +287,6 @@ void main() {
       expect(DeviceInfo.tryParse(withValue('port', 65535))?.port, 65535);
     });
 
-    // Protocol.
     expectRejected('protocol "2.0"', withValue('protocol', '2.0'));
     expectRejected('protocol "0.9"', withValue('protocol', '0.9'));
     expectRejected('protocol "1"', withValue('protocol', '1'));
@@ -320,7 +308,6 @@ void main() {
       );
     });
 
-    // Device type.
     expectRejected('an unknown deviceType', withValue('deviceType', 'tv'));
     expectRejected(
       'an uppercase deviceType',
@@ -329,7 +316,6 @@ void main() {
     expectRejected('a numeric deviceType', withValue('deviceType', 0));
     expectRejected('a null deviceType', withValue('deviceType', null));
 
-    // Name type.
     expectRejected('a numeric name', withValue('name', 42));
     expectRejected('a list name', withValue('name', ['David']));
     test('accepts a null name', () {
@@ -395,8 +381,6 @@ void main() {
     });
 
     test('never splits a pair that straddles the 64-rune boundary', () {
-      // 63 ASCII runes, then an emoji (2 UTF-16 units), then more text: the
-      // 64th rune is the whole emoji.
       final name = parsedName('${'a' * 63}😀bcd')!;
       expect(name, '${'a' * 63}😀');
       expect(name.runes.length, 64);
@@ -454,7 +438,6 @@ void main() {
     });
 
     test('the largest valid announcement fits in one datagram', () {
-      // 64 runes of 4 UTF-8 bytes each is the biggest name tryParse keeps.
       final info = sampleInfo(name: '😀' * Limits.maxNameLength);
       final bytes = Announcement(AnnouncementKind.hello, info).encode();
       expect(bytes.length, lessThanOrEqualTo(maxDatagramBytes));
@@ -499,7 +482,6 @@ void main() {
       );
     });
 
-    // The plan cases.
     expectRejectedBytes('invalid JSON', utf8.encode('{"kind": "hello",'));
     expectRejectedJson(
       'a map without fingerprint',
@@ -523,7 +505,6 @@ void main() {
       expect(Announcement.tryDecode(bytes), isNull);
     });
 
-    // Size boundary.
     Uint8List paddedTo(int length) {
       final json = jsonEncode(validAnnouncementJson());
       return Uint8List.fromList(
@@ -546,7 +527,6 @@ void main() {
       expect(Announcement.tryDecode(bytes), isNull);
     });
 
-    // Encoding and shape.
     expectRejectedBytes('no bytes at all', []);
     expectRejectedBytes('invalid UTF-8', [0x7B, 0xFF, 0xFE, 0x7D]);
     expectRejectedBytes(
@@ -568,7 +548,6 @@ void main() {
       utf8.encode('${'[' * 500}${']' * 500}'),
     );
 
-    // Kind.
     expectRejectedJson(
       'a map without kind',
       validAnnouncementJson()..remove('kind'),
@@ -583,7 +562,6 @@ void main() {
         ..['extra'] = 'x',
     );
 
-    // DeviceInfo fields, through the datagram.
     expectRejectedJson(
       'a fingerprint of 63 characters',
       withValue('fingerprint', validFingerprint.substring(1)),
@@ -643,7 +621,6 @@ void main() {
     const iterations = 5000;
     final controlCharacters = RegExp(r'[\x00-\x1F\x7F]');
 
-    /// Checks every invariant that an accepted `DeviceInfo` must satisfy.
     void expectValidInfo(DeviceInfo info, Object input) {
       expect(
         info.fingerprint,
@@ -657,8 +634,6 @@ void main() {
         expect(name, isNotEmpty, reason: '$input');
         expect(name.runes.length, lessThanOrEqualTo(64), reason: '$input');
         expect(controlCharacters.hasMatch(name), isFalse, reason: '$input');
-        // The plan trims before truncating, so only the start is guaranteed
-        // to have no spaces: a cut can leave a trailing one.
         expect(name, name.trimLeft(), reason: '$input');
       }
     }
@@ -679,8 +654,6 @@ void main() {
           expectValidInfo(info, input);
         }
       }
-      // The generator is biased towards valid values, so some inputs pass:
-      // the invariants above are really exercised.
       expect(accepted, greaterThan(0));
     });
 
@@ -748,7 +721,6 @@ void main() {
         }
         if (decoded != null) {
           expectValidInfo(decoded.info, input);
-          // Whatever is accepted can be sent again and decodes the same.
           final again = Announcement.tryDecode(decoded.encode());
           expect(again, isNotNull, reason: '$input');
           expect(again!.kind, decoded.kind);
