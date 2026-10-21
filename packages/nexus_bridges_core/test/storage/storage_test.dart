@@ -63,6 +63,196 @@ void main() {
     );
   });
 
+  group('writeFileAtomic serializes per file (plan v2.6, point 9)', () {
+    final tempName = RegExp(r'^data\.json\.\d+\.\d+\.tmp$');
+
+    test(
+      '50 concurrent writes to one file: no failure, last one wins',
+      () async {
+        final file = fileIn('data.json');
+
+        final results = await Future.wait([
+          for (var i = 0; i < 50; i++)
+            writeFileAtomic(
+              file,
+              utf8.encode('{"write": $i, "padding": "${'x' * (i * 97)}"}'),
+            ).then<Object?>((_) => null, onError: (Object e) => e),
+        ]);
+
+        expect(results.whereType<Object>(), isEmpty);
+        expect(
+          await file.readAsString(),
+          '{"write": 49, "padding": "${'x' * (49 * 97)}"}',
+        );
+        expect(await namesIn(temp), ['data.json']);
+      },
+    );
+
+    test('concurrent writes complete in the order they were asked', () async {
+      final file = fileIn('data.json');
+      final completed = <int>[];
+
+      await Future.wait([
+        for (var i = 0; i < 20; i++)
+          writeFileAtomic(
+            file,
+            utf8.encode('$i'),
+          ).then((_) => completed.add(i)),
+      ]);
+
+      expect(completed, [for (var i = 0; i < 20; i++) i]);
+      expect(await file.readAsString(), '19');
+    });
+
+    test(
+      'the same file through another spelling of its path is serialized',
+      () async {
+        final file = fileIn('data.json');
+        final other = File(
+          Platform.isWindows ? file.path.toUpperCase() : file.path,
+        );
+
+        final results = await Future.wait([
+          for (var i = 0; i < 20; i++)
+            writeFileAtomic(
+              i.isEven ? file : other,
+              utf8.encode('$i'),
+            ).then<Object?>((_) => null, onError: (Object e) => e),
+        ]);
+
+        expect(results.whereType<Object>(), isEmpty);
+        expect(await file.readAsString(), '19');
+        expect(await namesIn(temp), hasLength(1));
+      },
+    );
+
+    test('writes to different files run in parallel and all land', () async {
+      final files = [for (var i = 0; i < 20; i++) fileIn('file-$i.json')];
+
+      await Future.wait([
+        for (var round = 0; round < 3; round++)
+          for (var i = 0; i < files.length; i++)
+            writeFileAtomic(files[i], utf8.encode('$i-$round')),
+      ]);
+
+      for (var i = 0; i < files.length; i++) {
+        expect(await files[i].readAsString(), '$i-2');
+      }
+      expect(
+        await namesIn(temp),
+        [for (final f in files) f.uri.pathSegments.last]..sort(),
+      );
+    });
+
+    test('a failure reaches its caller and the next write works', () async {
+      final blocker = fileIn('blocker');
+      await blocker.writeAsString('i am a file');
+      final file = fileIn('blocker${Platform.pathSeparator}data.json');
+
+      await expectLater(
+        writeFileAtomic(file, utf8.encode('first')),
+        throwsA(isA<FileSystemException>()),
+      );
+      await blocker.delete();
+
+      await writeFileAtomic(file, utf8.encode('second'));
+
+      expect(await file.readAsString(), 'second');
+      expect(await namesIn(file.parent), ['data.json']);
+    });
+
+    test(
+      'each queued caller gets its own failure, then the queue goes on',
+      () async {
+        final blocker = fileIn('blocker');
+        await blocker.writeAsString('i am a file');
+        final file = fileIn('blocker${Platform.pathSeparator}data.json');
+
+        final outcomes = await Future.wait([
+          for (var i = 0; i < 5; i++)
+            writeFileAtomic(
+              file,
+              utf8.encode('$i'),
+            ).then<Object?>((_) => null, onError: (Object e) => e),
+        ]);
+
+        expect(outcomes, everyElement(isA<FileSystemException>()));
+        await blocker.delete();
+        await writeFileAtomic(file, utf8.encode('after'));
+        expect(await file.readAsString(), 'after');
+      },
+    );
+
+    test('a leftover <file>.tmp folder does not block the write', () async {
+      final file = fileIn('data.json');
+      final leftover = Directory('${file.path}.tmp');
+      await leftover.create();
+      await File('${leftover.path}${Platform.pathSeparator}keep')
+          .writeAsString('k');
+
+      await writeFileAtomic(file, utf8.encode('content'));
+
+      expect(await file.readAsString(), 'content');
+      expect(await namesIn(temp), ['data.json', 'data.json.tmp']);
+      expect(await namesIn(leftover), ['keep']);
+    });
+
+    test('the temporary file has a unique name while it is written', () async {
+      final file = fileIn('data.json');
+      final payload = List<int>.filled(64 * 1024 * 1024, 7);
+      final seen = <String>{};
+      var done = false;
+
+      final write = writeFileAtomic(
+        file,
+        payload,
+      ).whenComplete(() => done = true);
+      while (!done) {
+        for (final name in await namesIn(temp)) {
+          if (name.endsWith('.tmp')) seen.add(name);
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+      await write;
+
+      if (seen.isEmpty) {
+        markTestSkipped('the write was too fast to see its temporary file');
+        return;
+      }
+      expect(seen, everyElement(matches(tempName)));
+      expect(seen, isNot(contains('data.json.tmp')));
+      expect(await namesIn(temp), ['data.json']);
+      expect(await file.length(), payload.length);
+    });
+
+    test(
+      'a failed rename removes the temporary file and keeps the error',
+      () async {
+        final file = fileIn('data.json');
+        final target = Directory(file.path);
+        await target.create();
+        await File('${target.path}${Platform.pathSeparator}inside')
+            .writeAsString('i');
+
+        Object? caught;
+        try {
+          await writeFileAtomic(file, utf8.encode('content'));
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught, isA<FileSystemException>());
+        final error = caught! as FileSystemException;
+        expect(error.message.toLowerCase(), contains('rename'));
+        expect(error.path, isNotNull);
+        expect(error.path!, matches(RegExp(r'data\.json\.\d+\.\d+\.tmp$')));
+        expect(await namesIn(temp), ['data.json']);
+        expect(await target.exists(), isTrue);
+        expect(await namesIn(target), ['inside']);
+      },
+    );
+  });
+
   group('JsonFileStore.read', () {
     test('returns null when the file does not exist', () async {
       final store = JsonFileStore(fileIn('missing.json'));
