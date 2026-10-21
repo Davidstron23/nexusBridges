@@ -6,19 +6,14 @@ import 'protocol_version.dart';
 
 export 'protocol_version.dart';
 
-/// Default TCP and UDP port of NexusBridges.
 const int defaultPort = 53530;
 
-/// Multicast group used for discovery announcements.
 final InternetAddress multicastGroup = InternetAddress('224.0.0.169');
 
-/// Path prefix of every API route.
 const String apiPrefix = '/api/nexusbridges/v1';
 
-/// Largest discovery datagram that is accepted or sent, in bytes.
 const int maxDatagramBytes = 1024;
 
-/// Protocol limits shared by the server and discovery.
 abstract final class Limits {
   static const int maxBodyBytes = 65536;
   static const int maxHeaderBytes = 8192;
@@ -34,7 +29,6 @@ abstract final class Limits {
   static const Duration scanConnectTimeout = Duration(milliseconds: 1500);
 }
 
-/// Thrown when the protocol port is already taken by another process.
 final class PortInUseException implements Exception {
   const PortInUseException(this.port);
 
@@ -44,14 +38,12 @@ final class PortInUseException implements Exception {
   String toString() => 'PortInUseException($port)';
 }
 
-/// Kind of device that is announcing itself.
 enum DeviceType { desktop, mobile }
 
 final RegExp _fingerprintPattern = RegExp(r'^[0-9A-F]{64}$');
 final RegExp _protocolPattern = RegExp(r'^\d+\.\d+$');
 final RegExp _controlCharacters = RegExp(r'[\x00-\x1F\x7F]');
 
-/// The exact set of keys a [DeviceInfo] JSON map must have.
 const Set<String> _deviceInfoKeys = {
   'name',
   'fingerprint',
@@ -60,7 +52,6 @@ const Set<String> _deviceInfoKeys = {
   'deviceType',
 };
 
-/// What a device says about itself, in announcements and in `/info`.
 final class DeviceInfo {
   const DeviceInfo({
     required this.name,
@@ -70,15 +61,12 @@ final class DeviceInfo {
     required this.deviceType,
   });
 
-  /// Display name chosen by the device, or `null` when it has none.
   final String? name;
 
-  /// Uppercase SHA-256 of the device certificate (64 hex characters).
   final String fingerprint;
 
   final int port;
 
-  /// Protocol version as `major.minor`.
   final String protocol;
 
   final DeviceType deviceType;
@@ -91,7 +79,6 @@ final class DeviceInfo {
     'deviceType': deviceType.name,
   };
 
-  /// Validates untrusted JSON and never throws: anything invalid gives `null`.
   static DeviceInfo? tryParse(Object? json) {
     if (json is! Map<Object?, Object?> ||
         json.length != _deviceInfoKeys.length) {
@@ -130,8 +117,6 @@ final class DeviceInfo {
   }
 }
 
-/// Strips control characters, trims and truncates to [Limits.maxNameLength]
-/// runes. An empty result is `null`.
 String? _cleanName(String? raw) {
   if (raw == null) return null;
   final cleaned = raw.replaceAll(_controlCharacters, '').trim();
@@ -141,10 +126,8 @@ String? _cleanName(String? raw) {
   return truncated.isEmpty ? null : truncated;
 }
 
-/// Whether a datagram announces a device or says goodbye.
 enum AnnouncementKind { hello, bye }
 
-/// A multicast datagram: a [kind] plus the [DeviceInfo] of the sender.
 final class Announcement {
   const Announcement(this.kind, this.info);
 
@@ -155,8 +138,6 @@ final class Announcement {
     utf8.encode(jsonEncode({'kind': kind.name, ...info.toJson()})),
   );
 
-  /// Decodes an untrusted datagram and never throws: anything invalid gives
-  /// `null`.
   static Announcement? tryDecode(Uint8List bytes) {
     if (bytes.length > maxDatagramBytes) return null;
     final Object? decoded;

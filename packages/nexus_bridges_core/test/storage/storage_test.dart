@@ -15,7 +15,6 @@ void main() {
   File fileIn(String relative) =>
       File('${temp.path}${Platform.pathSeparator}$relative');
 
-  /// Names of the entries directly inside [dir], sorted.
   Future<List<String>> namesIn(Directory dir) async {
     final names = await dir
         .list()
@@ -151,7 +150,6 @@ void main() {
   });
 
   group('JsonFileStore.quarantine', () {
-    // Single-digit month, day, hour, minute and second check the zero padding.
     final now = DateTime(2026, 3, 4, 5, 6, 7);
     const stamp = '20260304-050607';
 
