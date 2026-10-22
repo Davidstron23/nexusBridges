@@ -313,6 +313,7 @@ void main() {
       final firstByte = watch.elapsed;
       final extra = after?.call();
       if (extra != null) {
+        await _wholeReply(client);
         for (var i = 0; i < extra.length; i += 8192) {
           client.write(extra.sublist(i, (i + 8192).clamp(0, extra.length)));
         }
@@ -501,8 +502,8 @@ void main() {
       client.write(
         ascii.encode(_head('POST', registerPath, {'content-length': '70000'})),
       );
-      for (var i = 0; i < 7; i++) {
-        client.write(List.filled(10000, 0x7B));
+      for (var i = 0; i < 4; i++) {
+        client.write(List.filled(17500, 0x7B));
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
       final reply = await client.reply();
@@ -652,4 +653,22 @@ void main() {
       },
     );
   });
+}
+
+Future<void> _wholeReply(TlsClient client) async {
+  final deadline = DateTime.now().add(waitLimit);
+  while (DateTime.now().isBefore(deadline)) {
+    final bytes = client.received;
+    final text = latin1.decode(bytes);
+    final end = text.indexOf('\r\n\r\n');
+    if (end >= 0) {
+      final match = RegExp(
+        r'content-length:\s*(\d+)',
+        caseSensitive: false,
+      ).firstMatch(text.substring(0, end));
+      final length = match == null ? 0 : int.parse(match.group(1)!);
+      if (bytes.length - (end + 4) >= length) return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }

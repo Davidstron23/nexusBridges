@@ -74,10 +74,23 @@ Iterable<String> _pemFragments(String pem, {int size = 16}) sync* {
 }
 
 Future<int> _freePort() async {
-  final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-  final port = probe.port;
-  await probe.close();
-  return port;
+  while (true) {
+    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final port = tcp.port;
+    RawDatagramSocket? udp;
+    try {
+      udp = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        port,
+        reuseAddress: false,
+      );
+    } on SocketException {
+      udp = null;
+    }
+    udp?.close();
+    await tcp.close();
+    if (udp != null) return port;
+  }
 }
 
 Future<bool> _udpPortFree(int port) async {
