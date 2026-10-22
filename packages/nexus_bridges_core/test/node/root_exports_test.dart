@@ -110,10 +110,12 @@ void main() {
       });
     });
 
-    test('from network it only shows NetworkDecision and AdapterInfo', () {
+    test('from network it only shows NetworkDecision, AdapterInfo and '
+        'Ipv4Subnet', () {
       expect(exports['../network/network.dart'], {
         'NetworkDecision',
         'AdapterInfo',
+        'Ipv4Subnet',
       });
     });
 
