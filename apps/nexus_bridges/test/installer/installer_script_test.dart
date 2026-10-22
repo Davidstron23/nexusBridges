@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 const String _scriptPath = '../../installer/nexus_bridges.iss';
+const String _runnerPath = 'windows/runner/main.cpp';
 const String _ruleName = 'NexusBridges';
 const String _netsh = r'{sys}\netsh.exe';
 
@@ -142,6 +143,15 @@ String _define(String text, String name) {
   ).firstMatch(text);
   expect(match, isNotNull, reason: 'missing #define $name');
   return match!.group(1)!;
+}
+
+String _runnerMutexName() {
+  final source = File(_runnerPath).readAsStringSync();
+  final matches = RegExp(
+    r'CreateMutexW\(\s*nullptr\s*,\s*TRUE\s*,\s*L"([^"]*)"\s*\)',
+  ).allMatches(source).toList();
+  expect(matches, hasLength(1), reason: 'missing CreateMutexW in main.cpp');
+  return matches.single.group(1)!.replaceAll(r'\\', r'\');
 }
 
 Map<String, String> _expectedRule(String text, String protocol) => {
@@ -304,6 +314,25 @@ void main() {
     test('it is the last entry of [Run]', () {
       final run = _entries(text, 'Run');
       expect(_flags(run.last), contains('postinstall'));
+    });
+  });
+
+  group('the installer waits for the app to close (plan v2.11 point 14)', () {
+    test('[Setup] carries AppMutex with the runner mutex name', () {
+      final setup = _section(text, 'Setup');
+      final lines = setup
+          .where((l) => !_isComment(l))
+          .where((l) => RegExp(r'^AppMutex\s*=').hasMatch(l))
+          .toList();
+      expect(lines, hasLength(1));
+      final name = _runnerMutexName();
+      expect(name, r'Local\NexusBridges.SingleInstance');
+      expect(_directives(setup)['AppMutex'], name);
+      expect(lines.single, 'AppMutex=$name');
+      expect(
+        text.split(RegExp('AppMutex', caseSensitive: false)).length - 1,
+        1,
+      );
     });
   });
 

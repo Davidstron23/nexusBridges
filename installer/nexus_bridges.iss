@@ -17,6 +17,7 @@
 ; Fixed GUID: it identifies the app across versions so upgrades replace the old install.
 ; The doubled opening brace is Inno Setup's escape for a literal brace.
 AppId={{7BF0D2F1-3A07-442B-AF98-6CDB86B44480}
+AppMutex=Local\NexusBridges.SingleInstance
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=David Ariza

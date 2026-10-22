@@ -8,10 +8,11 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   HANDLE mutex = ::CreateMutexW(nullptr, TRUE, L"Local\\NexusBridges.SingleInstance");
-  if (::GetLastError() == ERROR_ALREADY_EXISTS) {
+  const DWORD mutex_error = ::GetLastError();
+  if (mutex_error == ERROR_ALREADY_EXISTS || mutex_error == ERROR_ACCESS_DENIED) {
     HWND w = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"NexusBridges");
     if (w) {
-      ::ShowWindow(w, SW_RESTORE);
+      if (::IsIconic(w)) ::ShowWindow(w, SW_RESTORE);
       ::SetForegroundWindow(w);
     }
     ::CloseHandle(mutex);
