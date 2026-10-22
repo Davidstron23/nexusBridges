@@ -31,6 +31,8 @@ const Duration _silence = Duration(milliseconds: 300);
 const Duration _fastPoll = Duration(milliseconds: 50);
 const Duration _slowPoll = Duration(minutes: 1);
 const Duration _suggestTick = Duration(milliseconds: 1300);
+const Duration _noEmission = Duration(milliseconds: 500);
+const Duration _awayForAWhile = Duration(seconds: 6);
 const Timeout _childTimeout = Timeout(Duration(minutes: 2));
 
 const String _wifiId = '{WIFI-ADAPTER}';
@@ -97,10 +99,23 @@ Future<String> _systemLoopbackName() async {
 }
 
 Future<int> _freePort() async {
-  final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-  final port = probe.port;
-  await probe.close();
-  return port;
+  while (true) {
+    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final port = tcp.port;
+    RawDatagramSocket? udp;
+    try {
+      udp = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        port,
+        reuseAddress: false,
+      );
+    } on SocketException {
+      udp = null;
+    }
+    udp?.close();
+    await tcp.close();
+    if (udp != null) return port;
+  }
 }
 
 Future<void> _quiet() => Future<void>.delayed(_silence);
@@ -148,6 +163,48 @@ List<int> _foreignHello(String letter) => Announcement(
     deviceType: DeviceType.desktop,
   ),
 ).encode();
+
+List<Object?> _shape(NodeState s) => [
+  s.identityStatus,
+  s.identityError,
+  s.prompts,
+  s.paused,
+  s.pausedNetworks,
+  [
+    for (final d in s.devices)
+      (d.info.fingerprint, d.address.address, d.info.name, d.paired),
+  ],
+  s.displayNames,
+  s.suggestRescan,
+  s.portInUse,
+  s.decisionNotSaved,
+  s.deviceName,
+  s.fingerprint,
+];
+
+const List<String> _queuedFailures = [
+  'decide network failed',
+  'dismiss prompt failed',
+  'ask again failed',
+  'network change failed',
+  'reconcile failed',
+];
+
+List<String> _failuresIn(List<String> logs) => [
+  for (final line in logs)
+    if (_queuedFailures.any(line.startsWith)) line,
+];
+
+Future<void> _crossed(
+  Future<void> Function() calls,
+  List<Object> uncaught,
+) async {
+  final finished = runZonedGuarded(calls, (error, _) => uncaught.add(error));
+  await finished!.timeout(
+    _waitLimit,
+    onTimeout: () => fail('the crossed calls did not finish: $uncaught'),
+  );
+}
 
 const String _holdTcpScript = '''
 import 'dart:io';
@@ -232,6 +289,8 @@ final class _Fixture {
   List<AdapterInfo> adapters = [_wifi(_home, 'Home')];
   DateTime clock = DateTime(2026, 10, 22, 12);
   int reads = 0;
+  int plans = 0;
+  Completer<void>? gate;
   late NexusNode node;
   late String _deviceName;
   late Duration _pollInterval;
@@ -291,13 +350,18 @@ final class _Fixture {
       protector: _XorProtector(),
       readNetworks: () async {
         reads++;
+        final pending = gate;
+        if (pending != null) await pending.future;
         return adapters;
       },
       port: port,
       deviceName: _deviceName,
       now: now,
       log: logs.add,
-      activeOf: _activeOf,
+      activeOf: (states) {
+        plans++;
+        return _activeOf(states);
+      },
       pollInterval: _pollInterval,
       channel: channel,
     );
@@ -342,7 +406,10 @@ final class _Peer {
   final DeviceIdentity identity;
   final DiscoveryService discovery;
 
-  static Future<_Peer> join(_Fixture f) async {
+  static Future<_Peer> join(
+    _Fixture f, {
+    Duration announceInterval = _slowPoll,
+  }) async {
     final identity = DeviceIdentity.generate(
       commonName: 'NexusBridges-node-peer',
     );
@@ -369,7 +436,7 @@ final class _Peer {
       verifier: verifier,
       scanner: SubnetScanner(verifier: verifier, hostsOf: (_) => const []),
       now: f.now,
-      announceInterval: _slowPoll,
+      announceInterval: announceInterval,
     );
     server = ApiServer(
       identity: identity,
@@ -925,6 +992,234 @@ void main() {
       expect(from, otherLoopback);
       expect(via.id, '$_wifiId#127.0.0.2');
       expect(await canBind(otherLoopback, f.port), isFalse);
+    });
+  });
+
+  group('coming back to a device that still lists the node (RF-45, v2.11 '
+      'point 1)', () {
+    test('untrusted and trusted again: the node drops the peer and gets it '
+        'back within 5 s although the peer only announces every 10 s, '
+        'because the peer answers the known hello at once', () async {
+      final f = await _Fixture.create();
+      await f.startTrusted();
+      final peer = await _Peer.join(
+        f,
+        announceInterval: Limits.announceInterval,
+      );
+      await f.until((s) => s.devices.isNotEmpty);
+      await _eventually(
+        () => peer.discovery.current.any(
+          (d) => d.info.fingerprint == f.state.fingerprint,
+        ),
+      );
+
+      await f.node.decideNetwork(_home, NetworkDecision.untrusted);
+
+      expect(f.state.devices, isEmpty);
+      expect(f.state.paused, isTrue);
+      expect(
+        peer.discovery.current.map((d) => d.info.fingerprint),
+        contains(f.state.fingerprint),
+      );
+
+      f.clock = f.clock.add(_awayForAWhile);
+      final watch = Stopwatch()..start();
+      await f.node.decideNetwork(_home, NetworkDecision.trusted);
+      final back = await f.until((s) => s.devices.isNotEmpty);
+      watch.stop();
+
+      expect(watch.elapsed, lessThan(_waitLimit));
+      expect(back.paused, isFalse);
+      expect(back.devices.single.info.fingerprint, peer.identity.fingerprint);
+    });
+
+    test('the adapter disappears and comes back: the node drops the peer and '
+        'gets it back within 5 s although the peer only announces every '
+        '10 s', () async {
+      final f = await _Fixture.create();
+      await f.startTrusted(pollInterval: _fastPoll);
+      final peer = await _Peer.join(
+        f,
+        announceInterval: Limits.announceInterval,
+      );
+      await f.until((s) => s.devices.isNotEmpty);
+      await _eventually(
+        () => peer.discovery.current.any(
+          (d) => d.info.fingerprint == f.state.fingerprint,
+        ),
+      );
+
+      f.adapters = [];
+      final gone = await f.until((s) => s.devices.isEmpty && s.paused);
+
+      expect(gone.prompts, isEmpty);
+      expect(
+        peer.discovery.current.map((d) => d.info.fingerprint),
+        contains(f.state.fingerprint),
+      );
+
+      f.clock = f.clock.add(_awayForAWhile);
+      final readsAfterJump = f.reads;
+      await _eventually(() => f.reads > readsAfterJump + 2);
+      final watch = Stopwatch()..start();
+      f.adapters = [_wifi(_home, 'Home')];
+      final back = await f.until((s) => s.devices.isNotEmpty);
+      watch.stop();
+
+      expect(watch.elapsed, lessThan(_waitLimit));
+      expect(back.paused, isFalse);
+      expect(back.devices.single.info.fingerprint, peer.identity.fingerprint);
+    });
+  });
+
+  group('the node only emits when its state changes (v2.11 point 8)', () {
+    test('dismissPrompt of a network that is not asked about emits nothing '
+        'and keeps the state; a real dismiss emits exactly once', () async {
+      final f = await _Fixture.create();
+      await f.start();
+      await f.until((s) => s.prompts.isNotEmpty);
+      await _quiet();
+      final emitted = f.states.length;
+      final last = f.states.last;
+      final plansBefore = f.plans;
+
+      f.node.dismissPrompt(_cafe);
+      await _eventually(() => f.plans > plansBefore);
+      await Future<void>.delayed(_noEmission);
+
+      expect(f.states, hasLength(emitted));
+      expect(_shape(f.state), _shape(last));
+      expect(f.state.prompts, [_homePrompt]);
+
+      f.node.dismissPrompt(_home);
+      await f.until((s) => s.prompts.isEmpty);
+      await Future<void>.delayed(_noEmission);
+
+      expect(f.states, hasLength(emitted + 1));
+      expect(f.states.last.pausedNetworks, [_homePrompt]);
+      expect(f.states.last.paused, isTrue);
+      expect(_shape(f.state), _shape(f.states.last));
+    });
+
+    test('network reads that change nothing for the node (a resume with the '
+        'same adapters, another address on the same network) emit nothing; '
+        'a real change emits exactly once', () async {
+      final f = await _Fixture.create();
+      await f.startTrusted(pollInterval: _fastPoll);
+      await _quiet();
+      final emitted = f.states.length;
+      final last = f.states.last;
+      final hellosBefore = f.ownHellos.length;
+      final plansBefore = f.plans;
+
+      f.clock = f.clock.add(_fastPoll * 3 + const Duration(seconds: 1));
+      await _eventually(() => f.ownHellos.length > hellosBefore);
+      await _eventually(() => f.plans > plansBefore);
+      await Future<void>.delayed(_noEmission);
+
+      expect(f.states, hasLength(emitted));
+      expect(_shape(f.state), _shape(last));
+
+      final plansAfterResume = f.plans;
+      f.adapters = [
+        _wifi(_home, 'Home', addresses: ['192.168.50.21', '192.168.50.22']),
+      ];
+      await _eventually(() => f.plans > plansAfterResume);
+      await Future<void>.delayed(_noEmission);
+
+      expect(f.states, hasLength(emitted));
+      expect(_shape(f.state), _shape(last));
+      expect(f.state.paused, isFalse);
+
+      f.adapters = [_wifi(_cafe, 'Cafe')];
+      await f.until((s) => s.prompts.isNotEmpty);
+      await Future<void>.delayed(_noEmission);
+
+      expect(f.states, hasLength(emitted + 1));
+      expect(f.states.last.prompts, [_cafePrompt]);
+      expect(f.states.last.paused, isTrue);
+      expect(_shape(f.state), _shape(f.states.last));
+    });
+  });
+
+  group('crossed calls (T8, v2.11 point 9)', () {
+    test('dismissPrompt, askAgain, a network change and decideNetwork(trusted) '
+        'launched together all finish, raise nothing and leave the network '
+        'trusted and active', () async {
+      final f = await _Fixture.create();
+      await f.start(pollInterval: _fastPoll);
+      await f.until((s) => s.prompts.isNotEmpty);
+      final gate = f.gate = Completer<void>();
+      final readsBefore = f.reads;
+      await _eventually(() => f.reads > readsBefore);
+      f.adapters = [
+        _wifi(_home, 'Home', addresses: ['192.168.50.21', '192.168.50.22']),
+      ];
+      final plansBefore = f.plans;
+      final uncaught = <Object>[];
+
+      await _crossed(() async {
+        f.node.dismissPrompt(_home);
+        f.node.askAgain(_home);
+        gate.complete();
+        await Future<void>.delayed(Duration.zero);
+        await f.node.decideNetwork(_home, NetworkDecision.trusted);
+      }, uncaught);
+      await f.node.retry().timeout(_waitLimit);
+      await _quiet();
+
+      expect(uncaught, isEmpty);
+      expect(_failuresIn(f.logs), isEmpty);
+      expect(f.plans, plansBefore + 4);
+      expect(f.state.paused, isFalse);
+      expect(f.state.prompts, isEmpty);
+      expect(f.state.pausedNetworks, isEmpty);
+      expect(f.state.decisionNotSaved, isFalse);
+      await _eventually(() => f.ownHellos.isNotEmpty);
+      expect(await canBind(loopback, f.port), isFalse);
+      final saved = jsonDecode(await f.networksFile.readAsString()) as Map;
+      expect(((saved['networks'] as Map)[_home] as Map)['decision'], 'trusted');
+    });
+
+    test('decideNetwork(untrusted), a network change, dismissPrompt and '
+        'askAgain launched together all finish, raise nothing and leave the '
+        'network asked about and closed', () async {
+      final f = await _Fixture.create();
+      await f.start(pollInterval: _fastPoll);
+      await f.until((s) => s.prompts.isNotEmpty);
+      final gate = f.gate = Completer<void>();
+      final readsBefore = f.reads;
+      await _eventually(() => f.reads > readsBefore);
+      f.adapters = [
+        _wifi(_home, 'Home', addresses: ['192.168.50.21', '192.168.50.22']),
+      ];
+      final plansBefore = f.plans;
+      final uncaught = <Object>[];
+
+      await _crossed(() async {
+        final decided = f.node.decideNetwork(_home, NetworkDecision.untrusted);
+        gate.complete();
+        await Future<void>.delayed(Duration.zero);
+        f.node.dismissPrompt(_home);
+        f.node.askAgain(_home);
+        await decided;
+      }, uncaught);
+      await f.node.retry().timeout(_waitLimit);
+      await _quiet();
+
+      expect(uncaught, isEmpty);
+      expect(_failuresIn(f.logs), isEmpty);
+      expect(f.plans, plansBefore + 4);
+      expect(f.state.prompts, [_homePrompt]);
+      expect(f.state.pausedNetworks, isEmpty);
+      expect(f.state.paused, isTrue);
+      expect(f.ownHellos, isEmpty);
+      expect(await canBind(loopback, f.port), isTrue);
+      final saved = jsonDecode(await f.networksFile.readAsString()) as Map;
+      expect(
+        ((saved['networks'] as Map)[_home] as Map)['decision'],
+        'untrusted',
+      );
     });
   });
 }

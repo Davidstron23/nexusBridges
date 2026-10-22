@@ -104,6 +104,7 @@ final class NexusNode {
       StreamController<NodeState>.broadcast();
 
   late NodeState _state = NodeState(paused: true, deviceName: _deviceName);
+  NodeState? _lastEmitted;
 
   Future<void> _tail = Future<void>.value();
   Future<void>? _rescanning;
@@ -616,6 +617,48 @@ final class NexusNode {
       fingerprint: _fingerprint,
     );
     _state = next;
+    final last = _lastEmitted;
+    if (last != null && _sameState(last, next)) return;
+    _lastEmitted = next;
     if (!_states.isClosed) _states.add(next);
   }
+}
+
+bool _sameState(NodeState a, NodeState b) {
+  return a.identityStatus == b.identityStatus &&
+      a.identityError == b.identityError &&
+      a.paused == b.paused &&
+      a.suggestRescan == b.suggestRescan &&
+      a.portInUse == b.portInUse &&
+      a.decisionNotSaved == b.decisionNotSaved &&
+      a.deviceName == b.deviceName &&
+      a.fingerprint == b.fingerprint &&
+      _sameList(a.prompts, b.prompts, (x, y) => x == y) &&
+      _sameList(a.pausedNetworks, b.pausedNetworks, (x, y) => x == y) &&
+      _sameMap(a.displayNames, b.displayNames) &&
+      _sameList(a.devices, b.devices, _sameDevice);
+}
+
+bool _sameList<T>(List<T> a, List<T> b, bool Function(T, T) same) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (!same(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+bool _sameMap(Map<String, String> a, Map<String, String> b) {
+  if (a.length != b.length) return false;
+  for (final entry in a.entries) {
+    if (!b.containsKey(entry.key) || b[entry.key] != entry.value) return false;
+  }
+  return true;
+}
+
+bool _sameDevice(DiscoveredDevice a, DiscoveredDevice b) {
+  return a.info.fingerprint == b.info.fingerprint &&
+      a.address.address == b.address.address &&
+      a.info.name == b.info.name &&
+      a.paired == b.paired &&
+      a.interfaceId == b.interfaceId;
 }
