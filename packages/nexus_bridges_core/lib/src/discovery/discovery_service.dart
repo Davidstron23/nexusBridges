@@ -13,6 +13,8 @@ import 'verifier.dart';
 
 void _noLog(String message) {}
 
+final Duration _replyInterval = Limits.announceInterval ~/ 2;
+
 typedef _Signature = List<(String, String, String?, bool)>;
 
 final class DiscoveryService {
@@ -50,6 +52,7 @@ final class DiscoveryService {
   final AbortSignal _globalAbort = AbortSignal();
   final Map<String, ActiveInterface> _active = {};
   final Map<String, AbortSignal> _aborts = {};
+  final Map<String, DateTime> _lastReplies = {};
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
 
@@ -94,7 +97,14 @@ final class DiscoveryService {
     }
     _emitIfChanged();
     for (final iface in wanted.values) {
-      if (_active.containsKey(iface.id)) continue;
+      final current = _active[iface.id];
+      if (current != null) {
+        if (current.subnet != iface.subnet ||
+            current.friendlyName != iface.friendlyName) {
+          _active[iface.id] = iface;
+        }
+        continue;
+      }
       _active[iface.id] = iface;
       _aborts[iface.id] = AbortSignal();
       _send(AnnouncementKind.hello, iface);
@@ -161,6 +171,7 @@ final class DiscoveryService {
       signal.abort();
     }
     _gate.clear();
+    _lastReplies.clear();
     _announceTimer?.cancel();
     _expireTimer?.cancel();
     _announceTimer = null;
@@ -199,6 +210,9 @@ final class DiscoveryService {
           return;
         case Refreshed():
           _emitIfChanged();
+          if (!reverse && announcement.kind == AnnouncementKind.hello) {
+            _replyTo(announcement.info.fingerprint, from, via.id);
+          }
         case Verify(:final info, :final address, :final interfaceId):
           _submit(info, address, interfaceId, reverse: reverse);
       }
@@ -263,8 +277,33 @@ final class DiscoveryService {
     }
   }
 
+  void _replyTo(String fingerprint, InternetAddress to, String interfaceId) {
+    final iface = _active[interfaceId];
+    if (_stopped || iface == null) return;
+    final now = _now();
+    final last = _lastReplies[fingerprint];
+    if (last != null && !_replyExpired(now, last)) return;
+    _lastReplies[fingerprint] = now;
+    try {
+      _channel.sendTo(
+        Announcement(AnnouncementKind.hello, _selfInfo()),
+        iface,
+        to,
+      );
+    } catch (e) {
+      _log('reply failed: ${e.runtimeType}');
+    }
+  }
+
+  static bool _replyExpired(DateTime now, DateTime last) {
+    final age = now.difference(last);
+    return age.isNegative || age >= _replyInterval;
+  }
+
   void _expire() {
     if (_stopped) return;
+    final now = _now();
+    _lastReplies.removeWhere((_, last) => _replyExpired(now, last));
     try {
       if (_registry.expire().isNotEmpty) _emitIfChanged();
     } catch (e) {

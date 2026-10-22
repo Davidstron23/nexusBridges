@@ -550,6 +550,107 @@ final class _Farm {
   }
 }
 
+final class _Neighbour {
+  _Neighbour._(this.socket, this.channel);
+
+  final RawDatagramSocket socket;
+  final _Channel channel;
+  final List<(Announcement, InternetAddress)> heard = [];
+
+  static Future<_Neighbour> bind(
+    _Channel channel,
+    InternetAddress address,
+  ) async {
+    final socket = await RawDatagramSocket.bind(
+      address,
+      channel.port,
+      reuseAddress: false,
+    );
+    addTearDown(socket.close);
+    final neighbour = _Neighbour._(socket, channel);
+    socket.listen((event) {
+      if (event != RawSocketEvent.read) return;
+      Datagram? datagram;
+      while ((datagram = socket.receive()) != null) {
+        final announcement = Announcement.tryDecode(datagram!.data);
+        if (announcement != null) {
+          neighbour.heard.add((announcement, datagram.address));
+        }
+      }
+    });
+    return neighbour;
+  }
+
+  List<Announcement> answersFrom(String fingerprint) => [
+    for (final (announcement, _) in heard)
+      if (announcement.info.fingerprint == fingerprint) announcement,
+  ];
+
+  Future<void> say(Announcement announcement) async {
+    final before = channel.received.length;
+    final bytes = announcement.encode();
+    final deadline = DateTime.now().add(_limit);
+    while (socket.send(bytes, InternetAddress.loopbackIPv4, channel.port) !=
+        bytes.length) {
+      if (DateTime.now().isAfter(deadline)) fail('datagram not sent');
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+    await _until(
+      () => channel.received
+          .skip(before)
+          .any(
+            (e) =>
+                e.$2.address == socket.address.address &&
+                e.$1.kind == announcement.kind &&
+                e.$1.info.fingerprint == announcement.info.fingerprint,
+          ),
+    );
+  }
+}
+
+final class _Knocks {
+  _Knocks._(this.port);
+
+  final int port;
+  final Map<String, int> hits = {};
+  final List<ServerSocket> _servers = [];
+
+  static Future<_Knocks> start(List<InternetAddress> addresses) async {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      final knocks = _Knocks._(await _freeTcpPort());
+      if (await knocks._bindAll(addresses)) {
+        addTearDown(knocks.close);
+        return knocks;
+      }
+      await knocks.close();
+    }
+    throw StateError('no common free port for the knocks');
+  }
+
+  Future<bool> _bindAll(List<InternetAddress> addresses) async {
+    try {
+      for (final address in addresses) {
+        final server = await ServerSocket.bind(address, port);
+        _servers.add(server);
+        server.listen(_accept, onError: (Object _) {});
+      }
+      return true;
+    } on SocketException {
+      return false;
+    }
+  }
+
+  void _accept(Socket socket) {
+    final key = socket.address.address;
+    hits[key] = (hits[key] ?? 0) + 1;
+    socket.destroy();
+  }
+
+  Future<void> close() async {
+    await Future.wait([for (final server in _servers) server.close()]);
+  }
+}
+
 void main() {
   late DeviceIdentity self;
   late DeviceIdentity alice;
@@ -1639,6 +1740,257 @@ void main() {
       expect(s.emitted.last.single.paired, isFalse);
       await _quiet();
       expect(s.emitted, hasLength(emissions + 2));
+    });
+  });
+
+  group('answering the hello of a listed device (v2.11 point 1, RF-45)', () {
+    Future<(_Subject, _Peer, _Neighbour)> listedAt2({_Clock? clock}) async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.service.syncInterfaces([first]);
+      await _until(() => channel.of(self.fingerprint).length == 1);
+      final neighbour = await _Neighbour.bind(channel, _host(2));
+      await neighbour.say(_hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      await _quiet();
+      return (s, peer, neighbour);
+    }
+
+    test('the answer interval is half the announce interval, 5 s', () {
+      expect(Limits.announceInterval ~/ 2, const Duration(seconds: 5));
+    });
+
+    test('with the real 10 s interval, a service that pauses its interface '
+        'and brings it back sees the other again within 1 s, because the '
+        'other answers its hello at once', () async {
+      final clock = _Clock();
+      final channel = await _Channel.open([first]);
+      final a = await _Subject.create(
+        channel,
+        identity: alice,
+        clock: clock,
+        announceInterval: Limits.announceInterval,
+        serverOn: first,
+      );
+      final b = await _Subject.create(
+        channel,
+        identity: bob,
+        clock: clock,
+        announceInterval: Limits.announceInterval,
+        serverOn: first,
+      );
+      await a.service.syncInterfaces([first]);
+      await b.service.syncInterfaces([first]);
+      await _until(
+        () => a.lists(bob.fingerprint) && b.lists(alice.fingerprint),
+      );
+      await _settle(() => a.registered + b.registered, quiet: _silence);
+
+      await a.service.syncInterfaces([]);
+      expect(a.service.current, isEmpty);
+      expect(b.lists(alice.fingerprint), isTrue);
+      final before = channel.received.length;
+      final watch = Stopwatch()..start();
+
+      await a.service.syncInterfaces([first]);
+      await _until(() => a.lists(bob.fingerprint), limit: _oneSecond);
+
+      expect(watch.elapsed, lessThan(_oneSecond));
+      await _quiet();
+      expect(
+        channel.of(bob.fingerprint, kind: AnnouncementKind.hello, skip: before),
+        hasLength(1),
+      );
+      expect(a.find(bob.fingerprint)!.address, loopback);
+      expect(a.find(bob.fingerprint)!.info.toJson(), b.selfInfo().toJson());
+      expect(b.lists(alice.fingerprint), isTrue);
+    });
+
+    test('the answer is one hello with selfInfo sent only to the IP that '
+        'announced, not to the group, and the first hello of a device that '
+        'was not listed gets a check instead of an answer', () async {
+      final (s, peer, neighbour) = await listedAt2();
+      expect(neighbour.answersFrom(self.fingerprint), isEmpty);
+      expect(peer.registrations, hasLength(1));
+      final own = neighbour.channel.of(self.fingerprint).length;
+
+      await neighbour.say(_hello(peer.info));
+      await _until(
+        () => neighbour.answersFrom(self.fingerprint).isNotEmpty,
+        limit: _oneSecond,
+      );
+      await _quiet();
+
+      final answers = neighbour.answersFrom(self.fingerprint);
+      expect(answers, hasLength(1));
+      expect(answers.single.kind, AnnouncementKind.hello);
+      expect(answers.single.encode(), _hello(s.selfInfo()).encode());
+      expect(neighbour.channel.of(self.fingerprint), hasLength(own));
+      expect(peer.registrations, hasLength(1));
+      expect(s.find(bob.fingerprint)!.address, _host(2));
+    });
+
+    test('with the injected clock, two hellos 1 s apart get one answer, a '
+        'third at 4.999 s gets none, and one at 5 s gets another', () async {
+      final clock = _Clock();
+      final (s, peer, neighbour) = await listedAt2(clock: clock);
+
+      await neighbour.say(_hello(peer.info));
+      await _until(
+        () => neighbour.answersFrom(self.fingerprint).length == 1,
+        limit: _oneSecond,
+      );
+
+      clock.advance(_oneSecond);
+      await neighbour.say(_hello(peer.info));
+      await _quiet();
+      expect(neighbour.answersFrom(self.fingerprint), hasLength(1));
+
+      clock.advance(const Duration(seconds: 3, milliseconds: 999));
+      await neighbour.say(_hello(peer.info));
+      await _quiet();
+      expect(neighbour.answersFrom(self.fingerprint), hasLength(1));
+
+      clock.advance(const Duration(milliseconds: 1));
+      await neighbour.say(_hello(peer.info));
+      await _until(
+        () => neighbour.answersFrom(self.fingerprint).length == 2,
+        limit: _oneSecond,
+      );
+      await _quiet();
+      expect(neighbour.answersFrom(self.fingerprint), hasLength(2));
+      expect(s.lists(bob.fingerprint), isTrue);
+      expect(peer.registrations, hasLength(1));
+    });
+
+    test('the limit counts per fingerprint: another listed device at another '
+        'IP gets its own answer right after', () async {
+      final clock = _Clock();
+      final (s, peer, neighbour) = await listedAt2(clock: clock);
+      final other = await _Peer.start(carol, address: '127.0.0.3');
+      final third = await _Neighbour.bind(neighbour.channel, _host(3));
+      await third.say(_hello(other.info));
+      await _until(() => s.lists(carol.fingerprint));
+      await _quiet();
+      expect(third.answersFrom(self.fingerprint), isEmpty);
+
+      await neighbour.say(_hello(peer.info));
+      await _until(
+        () => neighbour.answersFrom(self.fingerprint).length == 1,
+        limit: _oneSecond,
+      );
+      await third.say(_hello(other.info));
+      await _until(
+        () => third.answersFrom(self.fingerprint).length == 1,
+        limit: _oneSecond,
+      );
+      await _quiet();
+
+      expect(neighbour.answersFrom(self.fingerprint), hasLength(1));
+      expect(third.answersFrom(self.fingerprint), hasLength(1));
+    });
+
+    test('a bye from the listed device gets no answer', () async {
+      final (s, peer, neighbour) = await listedAt2();
+
+      await neighbour.say(_bye(peer.info));
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+      await _quiet();
+
+      expect(neighbour.answersFrom(self.fingerprint), isEmpty);
+    });
+
+    test('a presentation of the listed device through handleRegistration '
+        'gets no answer and no new check', () async {
+      final (s, peer, neighbour) = await listedAt2();
+
+      s.service.handleRegistration(peer.info, _host(2), first);
+      await _quiet();
+
+      expect(neighbour.answersFrom(self.fingerprint), isEmpty);
+      expect(peer.registrations, hasLength(1));
+      expect(s.lists(bob.fingerprint), isTrue);
+    });
+
+    test('after stop a hello of the listed device gets no answer', () async {
+      final (s, peer, neighbour) = await listedAt2();
+
+      await s.service.stop(sayGoodbye: false);
+      await neighbour.say(_hello(peer.info));
+      await _quiet();
+
+      expect(neighbour.answersFrom(self.fingerprint), isEmpty);
+      expect(peer.registrations, hasLength(1));
+    });
+
+    test('a hello through an interface that is no longer active gets no '
+        'answer and no check', () async {
+      final (s, peer, neighbour) = await listedAt2();
+
+      await s.service.syncInterfaces([]);
+      await neighbour.say(_hello(peer.info));
+      await _quiet();
+
+      expect(neighbour.answersFrom(self.fingerprint), isEmpty);
+      expect(peer.registrations, hasLength(1));
+      expect(s.service.current, isEmpty);
+    });
+  });
+
+  group('an interface that changes its mask (v2.11 point 7)', () {
+    ActiveInterface masked(int prefixLength) => ActiveInterface(
+      id: 'loopback#mask',
+      adapterId: 'loopback',
+      friendlyName: _loopbackName,
+      subnet: Ipv4Subnet(_host(21), prefixLength),
+    );
+
+    test('the same interface id with another mask sends no new hello, keeps '
+        'its devices, and the next rescan tries the hosts of the new '
+        'subnet', () async {
+      final wide = masked(24);
+      final narrow = masked(29);
+      final knocks = await _Knocks.start([
+        for (var n = 1; n <= 254; n++) _host(n),
+      ]);
+      final peer = await _Peer.start(bob, address: '127.0.0.18');
+      final channel = await _Channel.open([wide]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) =>
+            SubnetScanner(verifier: verifier, port: knocks.port),
+      );
+      await s.service.syncInterfaces([wide]);
+      await _until(() => channel.of(self.fingerprint).length == 1);
+      await channel.deliver(_host(18), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      await s.service.rescan().timeout(const Duration(seconds: 20));
+      expect(knocks.hits, hasLength(253));
+      expect(knocks.hits.keys, isNot(contains('127.0.0.21')));
+      knocks.hits.clear();
+      final emissions = s.emitted.length;
+
+      await s.service.syncInterfaces([narrow]);
+      await _quiet();
+
+      expect(channel.of(self.fingerprint), hasLength(1));
+      expect(s.find(bob.fingerprint)?.interfaceId, wide.id);
+      expect(s.emitted, hasLength(emissions));
+
+      await s.service.rescan().timeout(_limit);
+
+      expect(
+        knocks.hits.keys,
+        unorderedEquals([
+          for (var n = 16; n <= 23; n++)
+            if (n != 21) '127.0.0.$n',
+        ]),
+      );
+      expect(knocks.hits.values, everyElement(1));
+      expect(s.lists(bob.fingerprint), isTrue);
     });
   });
 }
