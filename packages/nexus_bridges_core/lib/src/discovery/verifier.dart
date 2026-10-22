@@ -46,6 +46,7 @@ final class AbortSignal {
 }
 
 final class _Link {
+  ConnectionTask<RawSocket>? task;
   RawSocket? raw;
   RawSecureSocket? secure;
   bool closed = false;
@@ -56,8 +57,17 @@ final class _Link {
   void close() {
     closed = true;
     if (!_cancelled.isCompleted) _cancelled.complete();
+    _stop(task);
     _shut(secure);
     _shut(raw);
+  }
+
+  static void _stop(ConnectionTask<RawSocket>? task) {
+    try {
+      task?.cancel();
+    } catch (_) {
+      return;
+    }
   }
 
   static void _shut(RawSocket? socket) {
@@ -93,7 +103,6 @@ final class DeviceVerifier {
           port: port,
           expectedFingerprint: expectedFingerprint,
           self: self,
-          timeout: timeout,
         ),
         link.cancelled.then<DeviceInfo?>((_) => null),
       ]).timeout(timeout);
@@ -111,11 +120,18 @@ final class DeviceVerifier {
     required int port,
     required String? expectedFingerprint,
     required DeviceInfo self,
-    required Duration timeout,
   }) async {
     String? seen;
 
-    final raw = await RawSocket.connect(address, port, timeout: timeout);
+    final task = await RawSocket.startConnect(address, port);
+    link.task = task;
+    if (link.closed) {
+      link.close();
+      return null;
+    }
+    final connecting = task.socket;
+    connecting.ignore();
+    final raw = await connecting;
     link.raw = raw;
     if (link.closed) {
       link.close();
@@ -173,40 +189,55 @@ final class DeviceVerifier {
 
   Future<Uint8List?> _converse(RawSecureSocket socket, Uint8List request) {
     final result = Completer<Uint8List?>();
-    final received = BytesBuilder();
+    var head = Uint8List(1024);
+    var headFilled = 0;
+    var headScanned = 0;
+    Uint8List? body;
+    var bodyFilled = 0;
     var written = 0;
-    int? bodyStart;
-    var bodyLength = 0;
 
-    void finish(Uint8List? body) {
-      if (!result.isCompleted) result.complete(body);
+    void finish(Uint8List? value) {
+      if (!result.isCompleted) result.complete(value);
     }
 
-    void inspect() {
-      final bytes = received.toBytes();
-      var start = bodyStart;
-      if (start == null) {
-        final end = _headerEnd(bytes);
-        if (end < 0) {
-          if (bytes.length > Limits.maxHeaderBytes) finish(null);
-          return;
-        }
-        if (end > Limits.maxHeaderBytes) {
-          finish(null);
-          return;
-        }
-        final length = _bodyLengthOf(latin1.decode(bytes.sublist(0, end)));
-        if (length == null) {
-          finish(null);
-          return;
-        }
-        start = end + 4;
-        bodyStart = start;
-        bodyLength = length;
+    void takeBody(Uint8List source, int from, int to) {
+      final target = body!;
+      final room = target.length - bodyFilled;
+      final take = to - from < room ? to - from : room;
+      if (take > 0) {
+        target.setRange(bodyFilled, bodyFilled + take, source, from);
+        bodyFilled += take;
       }
-      if (bytes.length - start >= bodyLength) {
-        finish(bytes.sublist(start, start + bodyLength));
+      if (bodyFilled == target.length) finish(target);
+    }
+
+    void takeHead(Uint8List chunk) {
+      final needed = headFilled + chunk.length;
+      if (needed > head.length) {
+        final size = head.length * 2 > needed ? head.length * 2 : needed;
+        head = Uint8List(size)..setRange(0, headFilled, head);
       }
+      head.setRange(headFilled, needed, chunk);
+      headFilled = needed;
+      final end = _headerEnd(head, headScanned, headFilled);
+      if (end < 0) {
+        headScanned = headFilled > 3 ? headFilled - 3 : 0;
+        if (headFilled > Limits.maxHeaderBytes) finish(null);
+        return;
+      }
+      if (end > Limits.maxHeaderBytes) {
+        finish(null);
+        return;
+      }
+      final length = _bodyLengthOf(
+        latin1.decode(Uint8List.sublistView(head, 0, end)),
+      );
+      if (length == null) {
+        finish(null);
+        return;
+      }
+      body = Uint8List(length);
+      takeBody(head, end + 4, headFilled);
     }
 
     void pump() {
@@ -215,8 +246,11 @@ final class DeviceVerifier {
         chunk != null && !result.isCompleted;
         chunk = socket.read()
       ) {
-        received.add(chunk);
-        inspect();
+        if (body == null) {
+          takeHead(chunk);
+        } else {
+          takeBody(chunk, 0, chunk.length);
+        }
       }
     }
 
@@ -258,8 +292,8 @@ final class DeviceVerifier {
   }
 }
 
-int _headerEnd(Uint8List bytes) {
-  for (var i = 0; i + 3 < bytes.length; i++) {
+int _headerEnd(Uint8List bytes, int from, int to) {
+  for (var i = from; i + 3 < to; i++) {
     if (bytes[i] == 13 &&
         bytes[i + 1] == 10 &&
         bytes[i + 2] == 13 &&

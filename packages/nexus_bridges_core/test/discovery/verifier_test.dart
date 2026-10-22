@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:nexus_bridges_core/src/discovery/discovery.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
@@ -94,20 +95,155 @@ final class _Connection {
   }
 }
 
+List<List<int>> _slices(List<int> bytes, int size) => [
+  for (var start = 0; start < bytes.length; start += size)
+    bytes.sublist(
+      start,
+      start + size > bytes.length ? bytes.length : start + size,
+    ),
+];
+
+List<List<int>> _cutAt(List<int> bytes, List<int> offsets) {
+  final bounds = [0, ...offsets, bytes.length];
+  return [
+    for (var i = 0; i + 1 < bounds.length; i++)
+      bytes.sublist(bounds[i], bounds[i + 1]),
+  ];
+}
+
+int _headerEndOf(List<int> reply) => latin1.decode(reply).indexOf('\r\n\r\n');
+
+List<int> _replyWithHeaderOf(int headerBytes, List<int> body) {
+  final base = _httpReply(200, body, headers: {'x-filler': ''});
+  final reply = _httpReply(
+    200,
+    body,
+    headers: {'x-filler': 'a' * (headerBytes - _headerEndOf(base))},
+  );
+  expect(_headerEndOf(reply), headerBytes);
+  return reply;
+}
+
+const String _connectAccountingScript = r'''
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:nexus_bridges_core/src/discovery/discovery.dart';
+import 'package:nexus_bridges_core/src/identity/identity.dart';
+import 'package:nexus_bridges_core/src/protocol/protocol.dart';
+
+Future<void> main(List<String> args) async {
+  final commands = StreamIterator(
+    stdin.transform(utf8.decoder).transform(const LineSplitter()),
+  );
+  const long = Duration(seconds: 10);
+  const settle = Duration(milliseconds: 300);
+  final identity = DeviceIdentity.generate(
+    commonName: 'NexusBridges-verifier-child',
+  );
+  final verifier = DeviceVerifier(identity: identity);
+  final self = DeviceInfo(
+    name: 'Child',
+    fingerprint: identity.fingerprint,
+    port: 40000,
+    protocol: protocolVersion,
+    deviceType: DeviceType.desktop,
+  );
+  Future<DeviceInfo?> register(
+    int port,
+    Duration timeout, [
+    AbortSignal? abort,
+  ]) => verifier.register(
+    address: InternetAddress.loopbackIPv4,
+    port: port,
+    expectedFingerprint: null,
+    self: self,
+    timeout: timeout,
+    abort: abort,
+  );
+
+  final controls = <Future<DeviceInfo?>>[];
+  stdout.writeln(pid);
+  while (await commands.moveNext()) {
+    final words = commands.current.split(' ');
+    if (words.first == 'end') break;
+    final target = int.parse(words[1]);
+    controls.add(register(int.parse(words[2]), long));
+    if (words.first == 'abort') {
+      final signal = AbortSignal();
+      final pending = register(target, long, signal);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      signal.abort();
+      final result = await pending;
+      await Future<void>.delayed(settle);
+      stdout.writeln('settled $result ${signal.listenerCount}');
+    } else {
+      final result = await register(target, settle);
+      await Future<void>.delayed(settle);
+      stdout.writeln('settled $result');
+    }
+  }
+  await commands.cancel();
+  final results = await Future.wait(controls);
+  stdout.writeln('controls ${results.every((r) => r == null)}');
+}
+''';
+
+Future<int> _synSent(int owner, int remotePort) async {
+  final result = await Process.run('netstat', ['-ano', '-p', 'TCP']);
+  return '${result.stdout}'
+      .split('\n')
+      .map((line) => line.trim().split(RegExp(r'\s+')))
+      .where(
+        (cells) =>
+            cells.length == 5 &&
+            cells[0] == 'TCP' &&
+            cells[2].endsWith(':$remotePort') &&
+            cells[3] == 'SYN_SENT' &&
+            cells[4] == '$owner',
+      )
+      .length;
+}
+
+Future<List<int>> _closedPorts(int count) async {
+  final ports = <int>{};
+  while (ports.length < count) {
+    ports.add(await freePort());
+  }
+  return ports.toList();
+}
+
 final class _Peer {
-  _Peer._(this.port, this._stop, this._reply, this._closeAfterReply);
+  _Peer._(
+    this.port,
+    this._stop,
+    this._reply,
+    this._closeAfterReply, [
+    this._pieces,
+    this._pause = Duration.zero,
+  ]);
 
   static Future<_Peer> tls(
     DeviceIdentity identity, {
     List<int>? reply,
     bool closeAfterReply = true,
+    List<List<int>>? pieces,
+    Duration pause = Duration.zero,
   }) async {
     final server = await SecureServerSocket.bind(
       loopback,
       0,
       presenting(identity),
     );
-    final peer = _Peer._(server.port, server.close, reply, closeAfterReply);
+    final peer = _Peer._(
+      server.port,
+      server.close,
+      reply,
+      closeAfterReply,
+      pieces,
+      pause,
+    );
     server.listen(peer._accept, onError: (Object _) {});
     addTearDown(peer.close);
     return peer;
@@ -136,6 +272,8 @@ final class _Peer {
   final Future<void> Function() _stop;
   final List<int>? _reply;
   final bool _closeAfterReply;
+  final List<List<int>>? _pieces;
+  final Duration _pause;
   final List<_Connection> connections = [];
   final Completer<_Connection> _first = Completer();
   int accepted = 0;
@@ -159,6 +297,11 @@ final class _Peer {
           return;
         }
         connection._request.complete();
+        final pieces = _pieces;
+        if (pieces != null) {
+          _writePieces(socket, pieces).ignore();
+          return;
+        }
         final reply = _reply;
         if (reply == null) return;
         try {
@@ -172,6 +315,19 @@ final class _Peer {
       onDone: connection._finish,
       cancelOnError: true,
     );
+  }
+
+  Future<void> _writePieces(Socket socket, List<List<int>> pieces) async {
+    try {
+      for (final piece in pieces) {
+        socket.add(piece);
+        await socket.flush();
+        if (_pause > Duration.zero) await Future<void>.delayed(_pause);
+      }
+      if (_closeAfterReply) await socket.close();
+    } on Object {
+      return;
+    }
   }
 
   Future<void> close() async {
@@ -724,6 +880,255 @@ void main() {
     });
   });
 
+  group('incremental header reading (plan v2.11 point 5)', () {
+    const generous = Duration(seconds: 10);
+    const gap = Duration(milliseconds: 30);
+
+    List<int> aliceBody() => jsonBody(selfInfoOf(alice).toJson());
+
+    List<int> aliceReply({Map<String, String> headers = const {}}) =>
+        _httpReply(200, aliceBody(), headers: headers);
+
+    Future<DeviceInfo?> registerAgainstPieces(
+      List<List<int>> pieces, {
+      Duration pause = Duration.zero,
+    }) async {
+      final peer = await _Peer.tls(
+        alice,
+        pieces: pieces,
+        pause: pause,
+        closeAfterReply: false,
+      );
+      return register(
+        peer.port,
+        expectedFingerprint: alice.fingerprint,
+        timeout: generous,
+      );
+    }
+
+    for (final size in [1, 2, 3, 5]) {
+      test('a reply written in pieces of $size bytes with a flush between '
+          'them is read without waiting for the connection to close', () async {
+        final info = await registerAgainstPieces(_slices(aliceReply(), size));
+
+        expect(info?.toJson(), selfInfoOf(alice).toJson());
+      });
+    }
+
+    for (var offset = -3; offset <= 5; offset++) {
+      test('a reply cut in two pieces at offset $offset from the start of '
+          'the blank line is read', () async {
+        final reply = aliceReply();
+
+        final info = await registerAgainstPieces(
+          _cutAt(reply, [_headerEndOf(reply) + offset]),
+          pause: gap,
+        );
+
+        expect(info?.toJson(), selfInfoOf(alice).toJson());
+      });
+    }
+
+    test(
+      'a reply whose blank line arrives one byte per piece is read',
+      () async {
+        final reply = aliceReply();
+        final end = _headerEndOf(reply);
+
+        final info = await registerAgainstPieces(
+          _cutAt(reply, [end, end + 1, end + 2, end + 3, end + 4]),
+          pause: gap,
+        );
+
+        expect(info?.toJson(), selfInfoOf(alice).toJson());
+      },
+    );
+
+    test('a header longer than the first read buffer arriving in pieces of '
+        '7 bytes is read', () async {
+      final reply = aliceReply(headers: {'x-filler': 'a' * 3000});
+
+      final info = await registerAgainstPieces(_slices(reply, 7));
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+
+    test('a header of almost 8 KiB arriving in pieces of 64 bytes is '
+        'read', () async {
+      final reply = aliceReply(
+        headers: {'x-filler': 'a' * (Limits.maxHeaderBytes - 500)},
+      );
+
+      final info = await registerAgainstPieces(_slices(reply, 64));
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+
+    test('a header of exactly Limits.maxHeaderBytes bytes in one write is '
+        'still read', () async {
+      final peer = await _Peer.tls(
+        alice,
+        reply: _replyWithHeaderOf(Limits.maxHeaderBytes, aliceBody()),
+        closeAfterReply: false,
+      );
+
+      final info = await register(
+        peer.port,
+        expectedFingerprint: alice.fingerprint,
+        timeout: generous,
+      );
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+
+    test('a header of exactly Limits.maxHeaderBytes bytes cut right before '
+        'the blank line is still read', () async {
+      final reply = _replyWithHeaderOf(Limits.maxHeaderBytes, aliceBody());
+
+      final info = await registerAgainstPieces(
+        _cutAt(reply, [Limits.maxHeaderBytes]),
+        pause: gap,
+      );
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+
+    test('a header of Limits.maxHeaderBytes plus one byte in one write gives '
+        'null long before the deadline', () async {
+      final peer = await _Peer.tls(
+        alice,
+        reply: _replyWithHeaderOf(Limits.maxHeaderBytes + 1, aliceBody()),
+        closeAfterReply: false,
+      );
+      final watch = Stopwatch()..start();
+
+      final info = await register(
+        peer.port,
+        expectedFingerprint: alice.fingerprint,
+        timeout: generous,
+      );
+
+      expect(info, isNull);
+      expect(watch.elapsed, lessThan(waitLimit));
+      await (await peer.firstConnection).closed.timeout(_oneSecond);
+    });
+
+    test('a header of Limits.maxHeaderBytes plus one byte in pieces of 64 '
+        'bytes gives null long before the deadline', () async {
+      final peer = await _Peer.tls(
+        alice,
+        pieces: _slices(
+          _replyWithHeaderOf(Limits.maxHeaderBytes + 1, aliceBody()),
+          64,
+        ),
+        closeAfterReply: false,
+      );
+      final watch = Stopwatch()..start();
+
+      final info = await register(
+        peer.port,
+        expectedFingerprint: alice.fingerprint,
+        timeout: generous,
+      );
+
+      expect(info, isNull);
+      expect(watch.elapsed, lessThan(waitLimit));
+      await (await peer.firstConnection).closed.timeout(_oneSecond);
+    });
+
+    test('200 with Content-Length 0 ends the read at once with an empty '
+        'body, which is no DeviceInfo, so it gives null long before the '
+        'deadline', () async {
+      final peer = await _Peer.tls(
+        alice,
+        reply: _httpReply(200, const []),
+        closeAfterReply: false,
+      );
+      final watch = Stopwatch()..start();
+
+      final info = await register(
+        peer.port,
+        expectedFingerprint: alice.fingerprint,
+        timeout: generous,
+      );
+
+      expect(info, isNull);
+      expect(watch.elapsed, lessThan(waitLimit));
+      final connection = await peer.firstConnection;
+      expect(connection._request.isCompleted, isTrue);
+      await connection.closed.timeout(_oneSecond);
+    });
+
+    test('200 with Content-Length 0 whose headers end exactly at the end '
+        'of a piece also gives null long before the deadline', () async {
+      final reply = _httpReply(200, const []);
+      final watch = Stopwatch()..start();
+
+      final info = await registerAgainstPieces(
+        _cutAt(reply, [_headerEndOf(reply) + 2]),
+        pause: gap,
+      );
+
+      expect(info, isNull);
+      expect(watch.elapsed, lessThan(waitLimit));
+    });
+
+    final excess = utf8.encode(
+      '{"extra": true} trailing\r\n\r\nHTTP/1.1 200 OK\r\n\r\n',
+    );
+
+    test('bytes beyond the Content-Length in the same write as the headers '
+        'are ignored without waiting for the connection to close', () async {
+      final body = aliceBody();
+      final peer = await _Peer.tls(
+        alice,
+        reply: _httpReply(200, [
+          ...body,
+          ...excess,
+        ], contentLength: body.length),
+        closeAfterReply: false,
+      );
+
+      final info = await register(
+        peer.port,
+        expectedFingerprint: alice.fingerprint,
+        timeout: generous,
+      );
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+
+    test('bytes beyond the Content-Length arriving in pieces of 3 bytes are '
+        'ignored', () async {
+      final body = aliceBody();
+
+      final info = await registerAgainstPieces(
+        _slices(
+          _httpReply(200, [...body, ...excess], contentLength: body.length),
+          3,
+        ),
+      );
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+
+    test('a body that ends in the same piece as its excess, after headers '
+        'cut inside the blank line, is read', () async {
+      final body = aliceBody();
+      final reply = _httpReply(200, [
+        ...body,
+        ...excess,
+      ], contentLength: body.length);
+
+      final info = await registerAgainstPieces(
+        _cutAt(reply, [_headerEndOf(reply) + 2]),
+        pause: gap,
+      );
+
+      expect(info?.toJson(), selfInfoOf(alice).toJson());
+    });
+  });
+
   group('deadlines and sockets (RF-44)', () {
     test('a port without a server with a 1 s timeout gives null within '
         '2 s', () async {
@@ -875,6 +1280,77 @@ void main() {
       expect(peer.connections.every((c) => !c._request.isCompleted), isTrue);
       expect(signal.listenerCount, 0);
     });
+  });
+
+  group('the TCP connect is cut too (plan v2.11 point 4, SEC-06)', () {
+    Future<void> expectNoSynSentLeft(String mode, String settled) async {
+      final packageConfig = await Isolate.packageConfig;
+      expect(packageConfig, isNotNull);
+      final dir = await Directory.systemTemp.createTemp('nexus_verifier_');
+      addTearDown(() => dir.delete(recursive: true));
+      final script = File(
+        '${dir.path}${Platform.pathSeparator}connect_accounting.dart',
+      );
+      await script.writeAsString(_connectAccountingScript);
+      final process = await Process.start(Platform.resolvedExecutable, [
+        '--packages=${packageConfig!.toFilePath()}',
+        script.path,
+      ]);
+      addTearDown(process.kill);
+      final stderr = process.stderr.transform(utf8.decoder).join();
+      final lines = StreamIterator(
+        process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+      );
+      Future<String> next() async {
+        final more = await lines.moveNext().timeout(
+          const Duration(seconds: 60),
+        );
+        if (!more) fail('the child ended early: ${await stderr}');
+        return lines.current;
+      }
+
+      final childPid = int.parse(await next());
+      var conclusive = false;
+      for (var attempt = 0; attempt < 3 && !conclusive; attempt++) {
+        final [target, reference] = await _closedPorts(2);
+        process.stdin.writeln('$mode $target $reference');
+
+        expect(await next(), settled);
+        expect(await _synSent(childPid, target), 0, reason: 'attempt $attempt');
+        conclusive = await _synSent(childPid, reference) == 1;
+      }
+      process.stdin.writeln('end');
+
+      expect(
+        conclusive,
+        isTrue,
+        reason: 'the check ran while Windows still retried a closed port',
+      );
+      expect(await next(), 'controls true');
+      expect(
+        await process.exitCode.timeout(const Duration(seconds: 30)),
+        0,
+        reason: await stderr,
+      );
+    }
+
+    test(
+      'aborting a register while Windows still retries the connect to a '
+      'closed port leaves no SYN_SENT of the process 300 ms later, and the '
+      'process ends on its own',
+      () => expectNoSynSentLeft('abort', 'settled null 0'),
+      timeout: const Timeout(Duration(minutes: 2)),
+      testOn: 'windows',
+    );
+
+    test(
+      'a register whose 300 ms deadline expires during the connect to a '
+      'closed port leaves no SYN_SENT of the process 300 ms later, and the '
+      'process ends on its own',
+      () => expectNoSynSentLeft('deadline', 'settled null'),
+      timeout: const Timeout(Duration(minutes: 2)),
+      testOn: 'windows',
+    );
   });
 
   group('a long-lived signal keeps no listeners (v2.9 point 6)', () {
