@@ -1,0 +1,1644 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+
+import 'package:nexus_bridges_core/src/discovery/discovery.dart';
+import 'package:nexus_bridges_core/src/identity/identity.dart';
+import 'package:nexus_bridges_core/src/network/network.dart';
+import 'package:nexus_bridges_core/src/pairing/pairing.dart';
+import 'package:nexus_bridges_core/src/protocol/protocol.dart';
+import 'package:nexus_bridges_core/src/server/server.dart';
+import 'package:nexus_bridges_core/src/storage/storage.dart';
+import 'package:test/test.dart';
+
+import '../server/api_server_harness.dart'
+    show jsonContentType, loopback, pairedDeviceOf, presenting;
+
+typedef _Event = (Announcement, InternetAddress, ActiveInterface);
+
+const Duration _limit = Duration(seconds: 5);
+const Duration _oneSecond = Duration(seconds: 1);
+const Duration _silence = Duration(milliseconds: 300);
+const Duration _never = Duration(hours: 1);
+const Duration _fast = Duration(milliseconds: 50);
+const Duration _cooldown = Duration(seconds: 9);
+
+late String _loopbackName;
+
+InternetAddress _host(int last) => InternetAddress('127.0.0.$last');
+
+ActiveInterface _iface(String address, {int prefixLength = 8}) =>
+    ActiveInterface(
+      id: 'loopback#$address/$prefixLength',
+      adapterId: 'loopback',
+      friendlyName: _loopbackName,
+      subnet: Ipv4Subnet(InternetAddress(address), prefixLength),
+    );
+
+String _fingerprint(int seed) =>
+    seed.toRadixString(16).toUpperCase().padLeft(64, 'E');
+
+DeviceInfo _claim(String fingerprint, int port, {String name = 'Claimed'}) =>
+    DeviceInfo(
+      name: name,
+      fingerprint: fingerprint,
+      port: port,
+      protocol: protocolVersion,
+      deviceType: DeviceType.desktop,
+    );
+
+DeviceInfo _invented(int seed, int port) =>
+    _claim(_fingerprint(seed), port, name: 'Invented $seed');
+
+Announcement _hello(DeviceInfo info) =>
+    Announcement(AnnouncementKind.hello, info);
+
+Announcement _bye(DeviceInfo info) => Announcement(AnnouncementKind.bye, info);
+
+final RegExp _contentLength = RegExp(
+  r'content-length:\s*(\d+)',
+  caseSensitive: false,
+);
+
+bool _isCompleteRequest(List<int> bytes) {
+  final text = latin1.decode(bytes);
+  final end = text.indexOf('\r\n\r\n');
+  if (end < 0) return false;
+  final match = _contentLength.firstMatch(text.substring(0, end));
+  final length = match == null ? 0 : int.parse(match.group(1)!);
+  return bytes.length >= end + 4 + length;
+}
+
+List<int> _replyOf(DeviceInfo info) {
+  final body = utf8.encode(jsonEncode(info.toJson()));
+  return [
+    ...utf8.encode(
+      'HTTP/1.1 200 OK\r\n'
+      'content-type: $jsonContentType\r\n'
+      'content-length: ${body.length}\r\n'
+      'connection: close\r\n\r\n',
+    ),
+    ...body,
+  ];
+}
+
+Future<void> _until(
+  bool Function() condition, {
+  Duration limit = _limit,
+}) async {
+  final deadline = DateTime.now().add(limit);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('condition not met within $limit');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
+Future<void> _settle(
+  int Function() value, {
+  Duration quiet = const Duration(milliseconds: 200),
+}) async {
+  final deadline = DateTime.now().add(_limit);
+  var last = value();
+  var since = DateTime.now();
+  while (DateTime.now().difference(since) < quiet) {
+    if (DateTime.now().isAfter(deadline)) fail('value did not settle');
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    final current = value();
+    if (current != last) {
+      last = current;
+      since = DateTime.now();
+    }
+  }
+}
+
+Future<void> _quiet([Duration wait = _silence]) => Future<void>.delayed(wait);
+
+Future<int> _freeTcpPort() async {
+  final probe = await ServerSocket.bind(loopback, 0);
+  final port = probe.port;
+  await probe.close();
+  return port;
+}
+
+Future<PairedDevicesStore> _pairedStore() async {
+  final dir = await Directory.systemTemp.createTemp('nexus_discovery_');
+  addTearDown(() => dir.delete(recursive: true));
+  final store = PairedDevicesStore(
+    JsonFileStore(File('${dir.path}${Platform.pathSeparator}paired.json')),
+  );
+  await store.load();
+  return store;
+}
+
+Future<List<Object>> _uncaughtErrorsOf(Future<void> Function() body) async {
+  final errors = <Object>[];
+  final outcome = Completer<(Object, StackTrace)?>();
+  runZonedGuarded(
+    () => body().then(
+      (_) => outcome.complete(null),
+      onError: (Object e, StackTrace s) => outcome.complete((e, s)),
+    ),
+    (error, _) => errors.add(error),
+  );
+  final failure = await outcome.future;
+  if (failure != null) Error.throwWithStackTrace(failure.$1, failure.$2);
+  return errors;
+}
+
+final class _Clock {
+  DateTime value = DateTime.utc(2026, 10, 22, 12);
+
+  DateTime now() => value;
+
+  void advance(Duration by) => value = value.add(by);
+}
+
+final class _Channel {
+  _Channel._(this.channel, this.port);
+
+  final MulticastChannel channel;
+  final int port;
+  final List<_Event> received = [];
+  final Map<String, RawDatagramSocket> _senders = {};
+
+  static Future<_Channel> open(List<ActiveInterface> active) async {
+    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final port = probe.port;
+    await probe.close();
+    final channel = MulticastChannel(port: port);
+    addTearDown(channel.close);
+    final fixture = _Channel._(channel, port);
+    final subscription = channel.incoming.listen(fixture.received.add);
+    addTearDown(subscription.cancel);
+    await channel.open();
+    await channel.syncInterfaces(active);
+    return fixture;
+  }
+
+  List<_Event> of(String fingerprint, {AnnouncementKind? kind, int skip = 0}) =>
+      [
+        for (final event in received.skip(skip))
+          if (event.$1.info.fingerprint == fingerprint &&
+              (kind == null || event.$1.kind == kind))
+            event,
+      ];
+
+  int countFrom(Set<String> sources) =>
+      received.where((e) => sources.contains(e.$2.address)).length;
+
+  Future<void> inject(InternetAddress source, Announcement announcement) async {
+    var socket = _senders[source.address];
+    if (socket == null) {
+      socket = await RawDatagramSocket.bind(source, 0, reuseAddress: false);
+      addTearDown(socket.close);
+      _senders[source.address] = socket;
+    }
+    final bytes = announcement.encode();
+    final deadline = DateTime.now().add(_limit);
+    while (socket.send(bytes, InternetAddress.loopbackIPv4, port) !=
+        bytes.length) {
+      if (DateTime.now().isAfter(deadline)) fail('datagram not sent');
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+  }
+
+  Future<void> deliver(
+    InternetAddress source,
+    Announcement announcement,
+  ) async {
+    final before = received.length;
+    await inject(source, announcement);
+    await _until(
+      () => received
+          .skip(before)
+          .any(
+            (e) =>
+                e.$2.address == source.address &&
+                e.$1.kind == announcement.kind &&
+                e.$1.info.fingerprint == announcement.info.fingerprint,
+          ),
+    );
+  }
+}
+
+final class _Peer {
+  _Peer._(this.identity, this.name);
+
+  final DeviceIdentity identity;
+  final String name;
+  late final ApiServer server;
+  final List<(DeviceInfo, InternetAddress)> registrations = [];
+
+  int get port => server.boundPort!;
+
+  DeviceInfo get info => DeviceInfo(
+    name: name,
+    fingerprint: identity.fingerprint,
+    port: port,
+    protocol: protocolVersion,
+    deviceType: DeviceType.desktop,
+  );
+
+  static Future<_Peer> start(
+    DeviceIdentity identity, {
+    String address = '127.0.0.1',
+    String name = 'Peer',
+    int port = 0,
+  }) async {
+    final paired = await _pairedStore();
+    final peer = _Peer._(identity, name);
+    peer.server = ApiServer(
+      identity: identity,
+      paired: paired,
+      selfInfo: () => peer.info,
+      onRegistered: (caller, from, _) => peer.registrations.add((caller, from)),
+      port: port,
+    );
+    addTearDown(peer.server.close);
+    await peer.server.syncInterfaces([_iface(address)]);
+    expect(peer.server.boundPort, isNotNull);
+    return peer;
+  }
+}
+
+final class _Subject {
+  _Subject._(this.identity, this.paired, this.clock);
+
+  final DeviceIdentity identity;
+  final PairedDevicesStore paired;
+  final _Clock clock;
+  final List<String> logs = [];
+  final List<List<DiscoveredDevice>> emitted = [];
+  late final DiscoveryService service;
+  ApiServer? server;
+  int registered = 0;
+  bool done = false;
+
+  static Future<_Subject> create(
+    _Channel channel, {
+    required DeviceIdentity identity,
+    _Clock? clock,
+    Duration announceInterval = _never,
+    Duration expireInterval = _oneSecond,
+    SubnetScanner Function(DeviceVerifier verifier)? scanner,
+    ActiveInterface? serverOn,
+  }) async {
+    final subject = _Subject._(
+      identity,
+      await _pairedStore(),
+      clock ?? _Clock(),
+    );
+    final verifier = DeviceVerifier(identity: identity);
+    if (serverOn != null) {
+      final server = ApiServer(
+        identity: identity,
+        paired: subject.paired,
+        selfInfo: subject.selfInfo,
+        onRegistered: (caller, from, via) {
+          subject.registered++;
+          subject.service.handleRegistration(caller, from, via);
+        },
+        port: 0,
+      );
+      addTearDown(server.close);
+      await server.syncInterfaces([serverOn]);
+      subject.server = server;
+    }
+    subject.service = DiscoveryService(
+      identity: identity,
+      selfInfo: subject.selfInfo,
+      paired: subject.paired,
+      channel: channel.channel,
+      verifier: verifier,
+      scanner:
+          scanner?.call(verifier) ??
+          SubnetScanner(verifier: verifier, hostsOf: (_) => const []),
+      now: subject.clock.now,
+      announceInterval: announceInterval,
+      expireInterval: expireInterval,
+      log: subject.logs.add,
+    );
+    addTearDown(() => subject.service.stop(sayGoodbye: false));
+    final subscription = subject.service.devices.listen(
+      subject.emitted.add,
+      onDone: () => subject.done = true,
+    );
+    addTearDown(subscription.cancel);
+    await subject.service.start();
+    return subject;
+  }
+
+  DeviceInfo selfInfo() => DeviceInfo(
+    name: 'Subject',
+    fingerprint: identity.fingerprint,
+    port: server?.boundPort ?? 40000,
+    protocol: protocolVersion,
+    deviceType: DeviceType.desktop,
+  );
+
+  DiscoveredDevice? find(String fingerprint) {
+    for (final device in service.current) {
+      if (device.info.fingerprint == fingerprint) return device;
+    }
+    return null;
+  }
+
+  bool lists(String fingerprint) => find(fingerprint) != null;
+
+  int get unpaired => service.current.where((d) => !d.paired).length;
+}
+
+enum _Mode { silent, honest, held }
+
+final class _Endpoint {
+  _Endpoint.silent(int last)
+    : address = _host(last),
+      mode = _Mode.silent,
+      identity = null;
+
+  _Endpoint.honest(int last, DeviceIdentity this.identity)
+    : address = _host(last),
+      mode = _Mode.honest;
+
+  _Endpoint.held(int last, DeviceIdentity this.identity)
+    : address = _host(last),
+      mode = _Mode.held;
+
+  final InternetAddress address;
+  final _Mode mode;
+  final DeviceIdentity? identity;
+  final Completer<void> _released = Completer();
+
+  void release() {
+    if (!_released.isCompleted) _released.complete();
+  }
+}
+
+final class _Link {
+  _Link(this.socket, this.address);
+
+  final Socket socket;
+  final String address;
+  final List<int> received = [];
+  final Completer<void> requested = Completer();
+  final Completer<void> closed = Completer();
+
+  bool get isClosed => closed.isCompleted;
+
+  void finish() {
+    if (!closed.isCompleted) closed.complete();
+  }
+}
+
+final class _Farm {
+  _Farm._(this.port, this.endpoints);
+
+  final int port;
+  final List<_Endpoint> endpoints;
+  final List<Future<void> Function()> _closers = [];
+  final List<_Link> links = [];
+  final Map<String, int> maxOpenAt = {};
+  int maxOpen = 0;
+
+  int get open => links.where((l) => !l.isClosed).length;
+
+  int get total => links.length;
+
+  int openAt(int last) =>
+      links.where((l) => !l.isClosed && l.address == '127.0.0.$last').length;
+
+  int totalAt(int last) =>
+      links.where((l) => l.address == '127.0.0.$last').length;
+
+  int openIn(Iterable<int> lasts) =>
+      lasts.fold(0, (sum, last) => sum + openAt(last));
+
+  Future<void> get allClosed =>
+      Future.wait([for (final link in links) link.closed.future]);
+
+  _Endpoint endpointAt(int last) =>
+      endpoints.firstWhere((e) => e.address.address == '127.0.0.$last');
+
+  DeviceInfo infoAt(int last) => DeviceInfo(
+    name: 'Endpoint $last',
+    fingerprint: endpointAt(last).identity!.fingerprint,
+    port: port,
+    protocol: protocolVersion,
+    deviceType: DeviceType.desktop,
+  );
+
+  Future<_Link> linkTo(int last) async {
+    bool matches(_Link l) => l.address == '127.0.0.$last';
+    await _until(() => links.any(matches));
+    return links.firstWhere(matches);
+  }
+
+  Future<void> requestAt(int last) async {
+    final link = await linkTo(last);
+    await link.requested.future.timeout(_limit);
+  }
+
+  static Future<_Farm> start(List<_Endpoint> endpoints) async {
+    for (var attempt = 0; attempt < 10; attempt++) {
+      final farm = _Farm._(await _freeTcpPort(), endpoints);
+      if (await farm._bindAll()) {
+        addTearDown(farm.close);
+        return farm;
+      }
+      await farm.close();
+    }
+    throw StateError('no common free port for the farm');
+  }
+
+  Future<bool> _bindAll() async {
+    try {
+      for (final endpoint in endpoints) {
+        if (endpoint.mode == _Mode.silent) {
+          final server = await ServerSocket.bind(endpoint.address, port);
+          _closers.add(server.close);
+          server.listen((s) => _accept(s, endpoint), onError: (Object _) {});
+        } else {
+          final server = await SecureServerSocket.bind(
+            endpoint.address,
+            port,
+            presenting(endpoint.identity!),
+          );
+          _closers.add(server.close);
+          server.listen((s) => _accept(s, endpoint), onError: (Object _) {});
+        }
+      }
+      return true;
+    } on SocketException {
+      return false;
+    }
+  }
+
+  void _accept(Socket socket, _Endpoint endpoint) {
+    final link = _Link(socket, endpoint.address.address);
+    links.add(link);
+    maxOpen = max(maxOpen, open);
+    final openHere = links
+        .where((l) => !l.isClosed && l.address == link.address)
+        .length;
+    maxOpenAt[link.address] = max(maxOpenAt[link.address] ?? 0, openHere);
+    socket.done.ignore();
+    socket.listen(
+      (chunk) {
+        link.received.addAll(chunk);
+        if (link.requested.isCompleted || !_isCompleteRequest(link.received)) {
+          return;
+        }
+        link.requested.complete();
+        if (endpoint.mode == _Mode.silent) return;
+        final reply = _replyOf(infoAt(int.parse(link.address.split('.').last)));
+        if (endpoint.mode == _Mode.honest) {
+          _write(link, reply);
+        } else {
+          endpoint._released.future.then((_) => _write(link, reply));
+        }
+      },
+      onError: (Object _) => link.finish(),
+      onDone: link.finish,
+      cancelOnError: true,
+    );
+  }
+
+  static void _write(_Link link, List<int> reply) {
+    if (link.isClosed) return;
+    try {
+      link.socket.add(reply);
+      link.socket.close().ignore();
+    } on Object {
+      return;
+    }
+  }
+
+  void dropAll() {
+    for (final link in links) {
+      if (link.isClosed) continue;
+      link.socket.destroy();
+      link.finish();
+    }
+  }
+
+  Future<void> drain() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    var last = -1;
+    var since = DateTime.now();
+    while (true) {
+      dropAll();
+      if (total != last) {
+        last = total;
+        since = DateTime.now();
+      } else if (DateTime.now().difference(since) >= _silence) {
+        return;
+      }
+      if (DateTime.now().isAfter(deadline)) fail('the farm never went quiet');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
+
+  Future<void> close() async {
+    for (final link in links) {
+      link.socket.destroy();
+      link.finish();
+    }
+    await Future.wait([for (final close in _closers) close()]);
+  }
+}
+
+void main() {
+  late DeviceIdentity self;
+  late DeviceIdentity alice;
+  late DeviceIdentity bob;
+  late DeviceIdentity carol;
+  late DeviceIdentity dave;
+  late DeviceIdentity erin;
+  late ActiveInterface first;
+  late ActiveInterface second;
+
+  setUpAll(() async {
+    final all = await NetworkInterface.list(includeLoopback: true);
+    _loopbackName = all
+        .firstWhere((i) => i.addresses.any((a) => a.address == '127.0.0.1'))
+        .name;
+    self = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-self');
+    alice = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-alice');
+    bob = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-bob');
+    carol = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-carol');
+    dave = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-dave');
+    erin = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-erin');
+    first = _iface('127.0.0.1');
+    second = _iface('127.0.0.2');
+  });
+
+  group('own announcements (RF-39, RF-20, RF-16, RF-22)', () {
+    test('with an interval of 50 ms the own hello goes out again and again '
+        'through the active interface, carries selfInfo, and the service '
+        'never lists itself (RF-46)', () async {
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        announceInterval: _fast,
+      );
+
+      await s.service.syncInterfaces([first]);
+      await _until(() => channel.of(self.fingerprint).length >= 5);
+      await _quiet();
+
+      final own = channel.of(self.fingerprint);
+      expect(own.length, greaterThanOrEqualTo(5));
+      for (final (announcement, from, via) in own) {
+        expect(announcement.kind, AnnouncementKind.hello);
+        expect(announcement.encode(), _hello(s.selfInfo()).encode());
+        expect(from, loopback);
+        expect(via, same(first));
+      }
+      expect(s.service.current, isEmpty);
+      expect(s.emitted, isEmpty);
+    });
+
+    test('activating an interface sends one hello at once, without waiting '
+        'for the interval, and activating it again sends nothing '
+        '(RF-20)', () async {
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+
+      await s.service.syncInterfaces([first]);
+      await _until(
+        () => channel.of(self.fingerprint).isNotEmpty,
+        limit: _oneSecond,
+      );
+      await s.service.syncInterfaces([first]);
+      await _quiet();
+
+      expect(channel.of(self.fingerprint), hasLength(1));
+    });
+
+    test('without active interfaces neither the timer nor announceNow send '
+        'anything, and the timer starts once one is active', () async {
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        announceInterval: _fast,
+      );
+
+      s.service.announceNow();
+      await _quiet();
+      expect(channel.of(self.fingerprint), isEmpty);
+
+      await s.service.syncInterfaces([first]);
+      await _until(() => channel.of(self.fingerprint).length >= 3);
+    });
+
+    test('an interface that leaves is no longer announced (RF-16)', () async {
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        announceInterval: _fast,
+      );
+      await s.service.syncInterfaces([first]);
+      await _until(() => channel.of(self.fingerprint).length >= 2);
+
+      await s.service.syncInterfaces([]);
+      await _quiet(const Duration(milliseconds: 150));
+      final sent = channel.of(self.fingerprint).length;
+      await _quiet();
+
+      expect(channel.of(self.fingerprint), hasLength(sent));
+    });
+
+    test('announceNow sends one hello per active interface right away, all '
+        'with origin 127.0.0.1 (RF-22)', () async {
+      final channel = await _Channel.open([first, second]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first, second]);
+      await _until(() => channel.of(self.fingerprint).length == 2);
+      await _quiet();
+      expect(channel.of(self.fingerprint), hasLength(2));
+
+      s.service.announceNow();
+      await _until(() => channel.of(self.fingerprint).length >= 4);
+      await _quiet();
+
+      final own = channel.of(self.fingerprint);
+      expect(own, hasLength(4));
+      expect(own.map((e) => e.$1.kind), everyElement(AnnouncementKind.hello));
+      expect(own.map((e) => e.$2), everyElement(loopback));
+    });
+  });
+
+  group('two services on one real channel (RF-45)', () {
+    test('each one sees the other within 5 s and never itself', () async {
+      final channel = await _Channel.open([first]);
+      final a = await _Subject.create(
+        channel,
+        identity: alice,
+        announceInterval: Limits.announceInterval,
+        serverOn: first,
+      );
+      final b = await _Subject.create(
+        channel,
+        identity: bob,
+        announceInterval: Limits.announceInterval,
+        serverOn: first,
+      );
+      final watch = Stopwatch()..start();
+
+      await a.service.syncInterfaces([first]);
+      await b.service.syncInterfaces([first]);
+      await _until(
+        () => a.lists(bob.fingerprint) && b.lists(alice.fingerprint),
+      );
+
+      expect(watch.elapsed, lessThan(_limit));
+      expect(a.service.current.map((d) => d.info.fingerprint), [
+        bob.fingerprint,
+      ]);
+      expect(b.service.current.map((d) => d.info.fingerprint), [
+        alice.fingerprint,
+      ]);
+      expect(a.find(bob.fingerprint)!.info.toJson(), b.selfInfo().toJson());
+      expect(b.find(alice.fingerprint)!.info.toJson(), a.selfInfo().toJson());
+      expect(a.find(bob.fingerprint)!.address, loopback);
+      expect(a.find(bob.fingerprint)!.interfaceId, first.id);
+      expect(a.emitted.last.single.info.fingerprint, bob.fingerprint);
+      expect(b.emitted.last.single.info.fingerprint, alice.fingerprint);
+    });
+  });
+
+  group('presenting to an announced device (RF-41, RF-42, RF-43)', () {
+    test('a hello from another device makes the service present itself to '
+        'it and list it once its fingerprint is confirmed', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      final device = s.find(bob.fingerprint)!;
+      expect(device.info.toJson(), peer.info.toJson());
+      expect(device.address, loopback);
+      expect(device.interfaceId, first.id);
+      expect(device.paired, isFalse);
+      expect(peer.registrations, hasLength(1));
+      expect(peer.registrations.single.$1.toJson(), s.selfInfo().toJson());
+      expect(s.emitted.last.single.info.fingerprint, bob.fingerprint);
+    });
+
+    test('a hello with the fingerprint of one device that points to a '
+        'server with another identity never enters, and that server never '
+        'receives the presentation (SEC-05)', () async {
+      final peer = await _Peer.start(alice);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      await channel.deliver(
+        loopback,
+        _hello(_claim(bob.fingerprint, peer.port)),
+      );
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(alice.fingerprint));
+      await _quiet();
+
+      expect(s.lists(bob.fingerprint), isFalse);
+      expect(s.service.current.map((d) => d.info.fingerprint), [
+        alice.fingerprint,
+      ]);
+      expect(peer.registrations, hasLength(1));
+    });
+
+    test('a hello that arrives through an interface that is not active in '
+        'the service is ignored (RF-18)', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+
+      await channel.deliver(loopback, _hello(peer.info));
+      await _quiet();
+      expect(peer.registrations, isEmpty);
+      expect(s.lists(bob.fingerprint), isFalse);
+
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+    });
+  });
+
+  group('failed presentations (RF-44)', () {
+    test('a hello for a port without a server does not enter; once the '
+        'server is up, a hello within the 9 s wait is not even tried and one '
+        'after it enters', () async {
+      final clock = _Clock();
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.service.syncInterfaces([first]);
+      final port = await _freeTcpPort();
+
+      await channel.deliver(loopback, _hello(_claim(bob.fingerprint, port)));
+      await _quiet(const Duration(seconds: 4));
+      expect(s.lists(bob.fingerprint), isFalse);
+      expect(s.emitted, isEmpty);
+
+      final peer = await _Peer.start(bob, port: port);
+      clock.advance(const Duration(seconds: 8));
+      await channel.deliver(loopback, _hello(peer.info));
+      await _quiet(_oneSecond);
+      expect(peer.registrations, isEmpty);
+      expect(s.lists(bob.fingerprint), isFalse);
+
+      clock.advance(const Duration(seconds: 1, milliseconds: 1));
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      expect(s.find(bob.fingerprint)!.info.port, port);
+      expect(peer.registrations, hasLength(1));
+    });
+  });
+
+  group('a known device at another address (RF-48)', () {
+    test('a hello from 127.0.0.2 moves the device only when a server there '
+        'proves its fingerprint', () async {
+      final clock = _Clock();
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.service.syncInterfaces([first]);
+      final original = await _Peer.start(bob);
+      await channel.deliver(loopback, _hello(original.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      final impostor = await _Peer.start(carol, address: '127.0.0.2');
+      final emissions = s.emitted.length;
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(bob.fingerprint, impostor.port, name: 'Moved')),
+      );
+      await _quiet(_oneSecond);
+
+      expect(s.find(bob.fingerprint)!.address, loopback);
+      expect(s.find(bob.fingerprint)!.info.toJson(), original.info.toJson());
+      expect(s.emitted, hasLength(emissions));
+      expect(impostor.registrations, isEmpty);
+
+      final moved = await _Peer.start(
+        bob,
+        address: '127.0.0.2',
+        name: 'Bob moved',
+      );
+      clock.advance(_cooldown + _oneSecond);
+      await channel.deliver(_host(2), _hello(moved.info));
+      await _until(
+        () => s.find(bob.fingerprint)?.address.address == '127.0.0.2',
+      );
+
+      final device = s.find(bob.fingerprint)!;
+      expect(device.info.toJson(), moved.info.toJson());
+      expect(device.interfaceId, first.id);
+      expect(s.service.current, hasLength(1));
+      expect(moved.registrations.single.$1.toJson(), s.selfInfo().toJson());
+      expect(s.emitted.last.single.address, _host(2));
+    });
+  });
+
+  group('goodbyes (RF-51, RF-52)', () {
+    test('stop(sayGoodbye: true) with two active interfaces of the loopback '
+        'adapter sends 2 byes from 127.0.0.1, the other service drops the '
+        'device within 1 s, and the channel keeps working', () async {
+      final channel = await _Channel.open([first, second]);
+      final a = await _Subject.create(
+        channel,
+        identity: alice,
+        serverOn: first,
+      );
+      final b = await _Subject.create(channel, identity: bob, serverOn: first);
+      await a.service.syncInterfaces([first, second]);
+      await b.service.syncInterfaces([first, second]);
+      await _until(
+        () => b.lists(alice.fingerprint) && a.lists(bob.fingerprint),
+      );
+      await _settle(() => a.registered + b.registered, quiet: _silence);
+      final before = channel.received.length;
+
+      await a.service.stop(sayGoodbye: true);
+      await a.server!.close();
+      await _until(() => !b.lists(alice.fingerprint), limit: _oneSecond);
+      await _until(
+        () =>
+            channel
+                .of(alice.fingerprint, kind: AnnouncementKind.bye, skip: before)
+                .length >=
+            2,
+      );
+      await _quiet();
+
+      final byes = channel.of(
+        alice.fingerprint,
+        kind: AnnouncementKind.bye,
+        skip: before,
+      );
+      expect(byes, hasLength(2));
+      expect(byes.map((e) => e.$2), everyElement(loopback));
+      expect(b.emitted.last, isEmpty);
+      expect(b.service.current, isEmpty);
+
+      b.service.announceNow();
+      await _until(
+        () => channel
+            .of(bob.fingerprint, kind: AnnouncementKind.hello, skip: before)
+            .isNotEmpty,
+      );
+    });
+
+    test('a false bye from 127.0.0.2 for a device that is at 127.0.0.1 '
+        'leaves it listed, and a real bye from 127.0.0.1 removes it within '
+        '1 s (R17)', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      final emissions = s.emitted.length;
+
+      await channel.deliver(_host(2), _bye(peer.info));
+      await _quiet();
+      expect(s.lists(bob.fingerprint), isTrue);
+      expect(s.emitted, hasLength(emissions));
+
+      await channel.deliver(loopback, _bye(peer.info));
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+      expect(s.emitted.last, isEmpty);
+    });
+  });
+
+  group('expiry (RF-53)', () {
+    test('a device without news for 29 s stays, and past 30 s it is gone '
+        'at the next tick', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        clock: clock,
+        expireInterval: _fast,
+      );
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      clock.advance(const Duration(seconds: 29));
+      await _quiet();
+      expect(s.lists(bob.fingerprint), isTrue);
+
+      clock.advance(const Duration(seconds: 2));
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+      expect(s.emitted.last, isEmpty);
+    });
+
+    test('a hello from the current address refreshes the device without '
+        'verifying it again and without emitting', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        clock: clock,
+        expireInterval: _fast,
+      );
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      final emissions = s.emitted.length;
+
+      clock.advance(const Duration(seconds: 20));
+      await channel.deliver(loopback, _hello(peer.info));
+      await _quiet();
+      expect(s.emitted, hasLength(emissions));
+      expect(peer.registrations, hasLength(1));
+
+      clock.advance(const Duration(seconds: 20));
+      await _quiet();
+      expect(s.lists(bob.fingerprint), isTrue);
+
+      clock.advance(const Duration(seconds: 11));
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+    });
+  });
+
+  group('manual search (RF-54)', () {
+    test('rescan with hosts at 127.0.0.1 adds the device it finds and only '
+        'asks for the active interfaces', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first, second]);
+      final asked = <String>[];
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: peer.port,
+          hostsOf: (iface) {
+            asked.add(iface.id);
+            return [loopback];
+          },
+        ),
+      );
+      await s.service.syncInterfaces([first]);
+
+      await s.service.rescan().timeout(_limit);
+
+      expect(asked, [first.id]);
+      final device = s.find(bob.fingerprint)!;
+      expect(device.info.toJson(), peer.info.toJson());
+      expect(device.address, loopback);
+      expect(device.interfaceId, first.id);
+      expect(peer.registrations.single.$1.toJson(), s.selfInfo().toJson());
+      expect(s.emitted.last.single.info.fingerprint, bob.fingerprint);
+    });
+
+    test('a host with the own fingerprint is not listed', () async {
+      final farm = await _Farm.start([
+        _Endpoint.honest(30, self),
+        _Endpoint.honest(31, bob),
+      ]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: farm.port,
+          hostsOf: (_) => [_host(30), _host(31)],
+        ),
+      );
+      await s.service.syncInterfaces([first]);
+
+      await s.service.rescan().timeout(_limit);
+
+      expect(farm.totalAt(30), 1);
+      expect(s.service.current.map((d) => d.info.fingerprint), [
+        bob.fingerprint,
+      ]);
+    });
+
+    test('rescan without active interfaces tries nothing and ends', () async {
+      final farm = await _Farm.start([_Endpoint.honest(31, bob)]);
+      final channel = await _Channel.open([first]);
+      final asked = <String>[];
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: farm.port,
+          hostsOf: (iface) {
+            asked.add(iface.id);
+            return [_host(31)];
+          },
+        ),
+      );
+
+      await s.service.rescan().timeout(_oneSecond);
+      await _quiet();
+
+      expect(asked, isEmpty);
+      expect(farm.total, 0);
+      expect(s.service.current, isEmpty);
+    });
+  });
+
+  group('presentations received (v2.7 point 3)', () {
+    test('a correct presentation enters once the service has checked the '
+        'fingerprint at the caller', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      s.service.handleRegistration(peer.info, loopback, first);
+      await _until(() => s.lists(bob.fingerprint));
+
+      final device = s.find(bob.fingerprint)!;
+      expect(device.address, loopback);
+      expect(device.interfaceId, first.id);
+      expect(device.info.toJson(), peer.info.toJson());
+      expect(peer.registrations.single.$1.toJson(), s.selfInfo().toJson());
+    });
+
+    test('a caller that declares the fingerprint of another device never '
+        'enters', () async {
+      final peer = await _Peer.start(alice);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      s.service.handleRegistration(
+        _claim(bob.fingerprint, peer.port),
+        loopback,
+        first,
+      );
+      s.service.handleRegistration(peer.info, loopback, first);
+      await _until(() => s.lists(alice.fingerprint));
+      await _quiet();
+
+      expect(s.lists(bob.fingerprint), isFalse);
+      expect(peer.registrations, hasLength(1));
+    });
+
+    test('a caller with the own fingerprint is ignored without connecting '
+        'to it', () async {
+      final farm = await _Farm.start([_Endpoint.silent(3)]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      s.service.handleRegistration(
+        _claim(self.fingerprint, farm.port),
+        _host(3),
+        first,
+      );
+      await _quiet();
+      expect(farm.total, 0);
+
+      s.service.handleRegistration(_invented(1, farm.port), _host(3), first);
+      await _until(() => farm.total == 1);
+      expect(s.service.current, isEmpty);
+    });
+
+    test('a presentation through an interface that is not active is '
+        'ignored', () async {
+      final farm = await _Farm.start([_Endpoint.silent(3)]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      s.service.handleRegistration(_invented(1, farm.port), _host(3), second);
+      await _quiet();
+      expect(farm.total, 0);
+
+      s.service.handleRegistration(_invented(1, farm.port), _host(3), first);
+      await _until(() => farm.total == 1);
+    });
+
+    test('end to end: a device that presents itself to the real server of '
+        'the service is listed after the service checks it back', () async {
+      final peer = await _Peer.start(carol);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, serverOn: first);
+      await s.service.syncInterfaces([first]);
+
+      final answer = await DeviceVerifier(identity: carol).register(
+        address: loopback,
+        port: s.server!.boundPort!,
+        expectedFingerprint: self.fingerprint,
+        self: peer.info,
+      );
+      await _until(() => s.lists(carol.fingerprint));
+
+      expect(answer?.toJson(), s.selfInfo().toJson());
+      expect(s.find(carol.fingerprint)!.info.toJson(), peer.info.toJson());
+      expect(peer.registrations.single.$1.toJson(), s.selfInfo().toJson());
+    });
+  });
+
+  group('flood of invented announcements (RF-57, RF-58, R14, R17)', () {
+    test('100 invented hellos from 10 IP never run more than 8 checks at '
+        'once nor 2 per IP, nor queue more than 64, and a paired device '
+        'already listed stays visible', () async {
+      final sources = [for (var n = 2; n <= 11; n++) n];
+      final farm = await _Farm.start([
+        for (final n in sources) _Endpoint.silent(n),
+      ]);
+      final peer = await _Peer.start(carol);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.paired.replaceAll([pairedDeviceOf(carol)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(carol.fingerprint));
+
+      for (var i = 0; i < 100; i++) {
+        await channel.inject(
+          _host(sources[i % sources.length]),
+          _hello(_invented(1000 + i, farm.port)),
+        );
+      }
+      await _until(
+        () => channel.countFrom({for (final n in sources) '127.0.0.$n'}) >= 100,
+      );
+      await _settle(() => farm.total);
+
+      expect(farm.open, greaterThan(0));
+      expect(farm.maxOpen, lessThanOrEqualTo(8));
+      expect(farm.maxOpenAt.values, everyElement(lessThanOrEqualTo(2)));
+
+      await farm.drain();
+
+      expect(farm.total, lessThanOrEqualTo(8 + 64));
+      expect(farm.maxOpen, lessThanOrEqualTo(8));
+      expect(farm.maxOpenAt.values, everyElement(lessThanOrEqualTo(2)));
+      expect(s.find(carol.fingerprint)?.paired, isTrue);
+      expect(s.unpaired, 0);
+      expect(s.logs.join('\n'), isNot(contains('PRIVATE KEY')));
+    });
+
+    test('with the normal lane full, including a false hello with the '
+        'fingerprint and the IP of the real device, the presentation of that '
+        'device is still checked and listed', () async {
+      final sources = [for (var n = 2; n <= 11; n++) n];
+      final farm = await _Farm.start([
+        _Endpoint.silent(1),
+        for (final n in sources) _Endpoint.silent(n),
+      ]);
+      final peer = await _Peer.start(carol);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, serverOn: first);
+      await s.service.syncInterfaces([first]);
+
+      await channel.deliver(
+        loopback,
+        _hello(_claim(carol.fingerprint, farm.port)),
+      );
+      await _until(() => farm.openAt(1) == 1);
+      for (var i = 0; i < 100; i++) {
+        await channel.inject(
+          _host(sources[i % sources.length]),
+          _hello(_invented(1000 + i, farm.port)),
+        );
+      }
+      await _until(
+        () => channel.countFrom({for (final n in sources) '127.0.0.$n'}) >= 100,
+      );
+      await _settle(() => farm.total);
+      final busy = farm.open;
+      expect(busy, greaterThan(1));
+
+      final answer = await DeviceVerifier(identity: carol).register(
+        address: loopback,
+        port: s.server!.boundPort!,
+        expectedFingerprint: self.fingerprint,
+        self: peer.info,
+      );
+      expect(answer?.fingerprint, self.fingerprint);
+      await _until(() => s.lists(carol.fingerprint));
+
+      final device = s.find(carol.fingerprint)!;
+      expect(device.address, loopback);
+      expect(device.info.port, peer.port);
+      expect(farm.openAt(1), 1);
+      expect(farm.open, busy);
+      expect(farm.maxOpen, lessThanOrEqualTo(8));
+    });
+
+    test('one device that sends many presentations with invented '
+        'fingerprints holds at most 1 check in flight and 2 queued, and '
+        'another device can still present itself', () async {
+      final farm = await _Farm.start([_Endpoint.silent(3)]);
+      final peer = await _Peer.start(carol);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      for (var i = 0; i < 20; i++) {
+        s.service.handleRegistration(
+          _invented(2000 + i, farm.port),
+          _host(3),
+          first,
+        );
+      }
+      await _settle(() => farm.total);
+      expect(farm.openAt(3), 1);
+
+      s.service.handleRegistration(peer.info, loopback, first);
+      await _until(() => s.lists(carol.fingerprint));
+
+      await farm.drain();
+      expect(farm.totalAt(3), lessThanOrEqualTo(3));
+      expect(farm.maxOpenAt['127.0.0.3'], 1);
+    });
+
+    group('list limit', () {
+      late List<DeviceIdentity> crowd;
+      late DeviceIdentity newcomer;
+
+      setUpAll(() {
+        crowd = [
+          for (var i = 0; i < 65; i++)
+            DeviceIdentity.generate(commonName: 'NexusBridges-crowd-$i'),
+        ];
+        newcomer = DeviceIdentity.generate(commonName: 'NexusBridges-newcomer');
+      });
+
+      test('the list stops at 64 unpaired devices, ignores new ones without '
+          'trying them, still admits a paired one, and admits a new one again '
+          'once another leaves', () async {
+        final farm = await _Farm.start([
+          for (var i = 0; i < crowd.length; i++)
+            _Endpoint.honest(100 + i, crowd[i]),
+          _Endpoint.honest(200, newcomer),
+        ]);
+        final channel = await _Channel.open([first]);
+        final s = await _Subject.create(
+          channel,
+          identity: self,
+          scanner: (verifier) => SubnetScanner(
+            verifier: verifier,
+            port: farm.port,
+            hostsOf: (_) => [
+              for (var i = 0; i < crowd.length; i++) _host(100 + i),
+            ],
+          ),
+        );
+        await s.paired.replaceAll([pairedDeviceOf(newcomer)]);
+        await s.service.syncInterfaces([first]);
+
+        await s.service.rescan().timeout(const Duration(seconds: 20));
+
+        expect(farm.total, crowd.length);
+        expect(s.service.current, hasLength(Limits.maxListedUnpaired));
+        expect(s.unpaired, Limits.maxListedUnpaired);
+
+        final leftOut = [
+          for (var i = 0; i < crowd.length; i++)
+            if (!s.lists(crowd[i].fingerprint)) 100 + i,
+        ].single;
+        final tried = farm.total;
+        await channel.deliver(_host(leftOut), _hello(farm.infoAt(leftOut)));
+        await _quiet();
+        expect(farm.total, tried);
+        expect(s.service.current, hasLength(Limits.maxListedUnpaired));
+
+        await channel.deliver(_host(200), _hello(farm.infoAt(200)));
+        await _until(() => s.lists(newcomer.fingerprint));
+        expect(s.find(newcomer.fingerprint)!.paired, isTrue);
+        expect(s.service.current, hasLength(Limits.maxListedUnpaired + 1));
+        expect(s.unpaired, Limits.maxListedUnpaired);
+
+        final gone = s.service.current.firstWhere((d) => !d.paired);
+        await channel.deliver(gone.address, _bye(gone.info));
+        await _until(() => !s.lists(gone.info.fingerprint));
+        await channel.deliver(_host(leftOut), _hello(farm.infoAt(leftOut)));
+        await _until(() => s.lists(farm.infoAt(leftOut).fingerprint));
+
+        expect(s.unpaired, Limits.maxListedUnpaired);
+        expect(farm.totalAt(leftOut), 2);
+      });
+    });
+  });
+
+  group('leaving a trusted interface (SEC-06, RF-18)', () {
+    test('syncInterfaces([]) cuts the checks in flight within 1 s, empties '
+        'the queue, lets no device in afterwards, and a later hello is tried '
+        'at once because a cut is not a failure', () async {
+      final sources = [for (var n = 2; n <= 11; n++) n];
+      final farm = await _Farm.start([
+        for (final n in sources) _Endpoint.silent(n),
+        _Endpoint.held(12, dave),
+      ]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      await channel.deliver(_host(12), _hello(farm.infoAt(12)));
+      await farm.requestAt(12);
+      for (var i = 0; i < 20; i++) {
+        await channel.inject(
+          _host(sources[i % sources.length]),
+          _hello(_invented(1000 + i, farm.port)),
+        );
+      }
+      await _until(
+        () => channel.countFrom({for (final n in sources) '127.0.0.$n'}) >= 20,
+      );
+      await _settle(() => farm.total);
+      final before = farm.total;
+      expect(farm.open, greaterThan(1));
+      expect(before, lessThan(21));
+
+      await s.service.syncInterfaces([]);
+      await farm.allClosed.timeout(_oneSecond);
+      farm.endpointAt(12).release();
+      await _quiet(const Duration(milliseconds: 500));
+
+      expect(farm.total, before);
+      expect(s.service.current, isEmpty);
+
+      await s.service.syncInterfaces([first]);
+      await _quiet();
+      expect(farm.total, before);
+
+      await channel.deliver(_host(12), _hello(farm.infoAt(12)));
+      await _until(() => s.lists(dave.fingerprint));
+      expect(farm.totalAt(12), 2);
+    });
+
+    test('the devices of an interface that leaves are dropped and its '
+        'hellos are ignored afterwards', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      await s.service.syncInterfaces([]);
+      expect(s.service.current, isEmpty);
+      expect(s.emitted.last, isEmpty);
+
+      await channel.deliver(loopback, _hello(peer.info));
+      await _quiet();
+      expect(s.service.current, isEmpty);
+      expect(peer.registrations, hasLength(1));
+    });
+
+    test('only the checks of the interface that leaves are cut', () async {
+      final farm = await _Farm.start([
+        _Endpoint.held(12, dave),
+        _Endpoint.held(13, erin),
+      ]);
+      final channel = await _Channel.open([first, second]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first, second]);
+
+      s.service.handleRegistration(farm.infoAt(12), _host(12), first);
+      s.service.handleRegistration(farm.infoAt(13), _host(13), second);
+      await farm.requestAt(12);
+      await farm.requestAt(13);
+
+      await s.service.syncInterfaces([second]);
+      await (await farm.linkTo(12)).closed.future.timeout(_oneSecond);
+      await _quiet();
+      expect((await farm.linkTo(13)).isClosed, isFalse);
+
+      farm.endpointAt(12).release();
+      farm.endpointAt(13).release();
+      await _until(() => s.lists(erin.fingerprint));
+      await _quiet();
+
+      expect(s.find(erin.fingerprint)!.interfaceId, second.id);
+      expect(s.lists(dave.fingerprint), isFalse);
+    });
+
+    test('a rescan in flight is cut within 1 s when the interface leaves, '
+        'ends, and lets nothing in', () async {
+      final scanned = [for (var n = 20; n < 60; n++) n];
+      final farm = await _Farm.start([
+        _Endpoint.held(12, dave),
+        for (final n in scanned) _Endpoint.silent(n),
+      ]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: farm.port,
+          hostsOf: (_) => [_host(12), for (final n in scanned) _host(n)],
+        ),
+      );
+      await s.service.syncInterfaces([first]);
+
+      final scan = s.service.rescan();
+      await farm.requestAt(12);
+      await _until(() => farm.openIn(scanned) > 0);
+      await _settle(() => farm.total);
+      final before = farm.total;
+
+      await s.service.syncInterfaces([]);
+      await farm.allClosed.timeout(_oneSecond);
+      await scan.timeout(_oneSecond);
+      farm.endpointAt(12).release();
+      await _quiet(const Duration(milliseconds: 500));
+
+      expect(farm.total, before);
+      expect(s.service.current, isEmpty);
+    });
+
+    test('a rescan in flight is cut when one of two interfaces leaves, so '
+        'nothing found through it gets in (v2.10 point 4)', () async {
+      final scanned = [for (var n = 20; n < 40; n++) n];
+      final farm = await _Farm.start([
+        _Endpoint.held(12, dave),
+        for (final n in scanned) _Endpoint.silent(n),
+      ]);
+      final channel = await _Channel.open([first, second]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: farm.port,
+          hostsOf: (iface) => iface.id == second.id
+              ? [_host(12), for (final n in scanned) _host(n)]
+              : const [],
+        ),
+      );
+      await s.service.syncInterfaces([first, second]);
+
+      final scan = s.service.rescan();
+      await farm.requestAt(12);
+      await _settle(() => farm.total);
+
+      await s.service.syncInterfaces([first]);
+      await farm.allClosed.timeout(_oneSecond);
+      await scan.timeout(_oneSecond);
+      farm.endpointAt(12).release();
+      await _quiet(const Duration(milliseconds: 500));
+
+      expect(s.lists(dave.fingerprint), isFalse);
+      expect(s.service.current, isEmpty);
+    });
+  });
+
+  group('stop (RF-51)', () {
+    test('stop in the middle of checks and of a rescan leaves no uncaught '
+        'error, cuts every connection within 1 s, ends the rescan, closes '
+        'devices and makes later events do nothing', () async {
+      final errors = await _uncaughtErrorsOf(() async {
+        final sources = [for (var n = 2; n <= 11; n++) n];
+        final scanned = [for (var n = 20; n < 60; n++) n];
+        final farm = await _Farm.start([
+          _Endpoint.held(12, dave),
+          for (final n in sources) _Endpoint.silent(n),
+          for (final n in scanned) _Endpoint.silent(n),
+        ]);
+        final peer = await _Peer.start(bob);
+        final channel = await _Channel.open([first]);
+        final s = await _Subject.create(
+          channel,
+          identity: self,
+          announceInterval: _fast,
+          scanner: (verifier) => SubnetScanner(
+            verifier: verifier,
+            port: farm.port,
+            hostsOf: (_) => [for (final n in scanned) _host(n)],
+          ),
+        );
+        await s.service.syncInterfaces([first]);
+        await channel.deliver(_host(12), _hello(farm.infoAt(12)));
+        await farm.requestAt(12);
+        for (var i = 0; i < 20; i++) {
+          await channel.inject(
+            _host(sources[i % sources.length]),
+            _hello(_invented(3000 + i, farm.port)),
+          );
+        }
+        final scan = s.service.rescan();
+        await _until(() => farm.openIn(scanned) > 0);
+        await _settle(() => farm.total);
+        final emissions = s.emitted.length;
+
+        await s.service.stop(sayGoodbye: false);
+        await farm.allClosed.timeout(_oneSecond);
+        await scan.timeout(_oneSecond);
+        farm.endpointAt(12).release();
+        await _quiet(const Duration(milliseconds: 100));
+        final tried = farm.total;
+        final announced = channel.of(self.fingerprint).length;
+
+        s.service.handleRegistration(peer.info, loopback, first);
+        s.service.announceNow();
+        await channel.deliver(_host(2), _hello(_invented(4000, farm.port)));
+        await _quiet(const Duration(milliseconds: 500));
+
+        expect(farm.total, tried);
+        expect(peer.registrations, isEmpty);
+        expect(channel.of(self.fingerprint), hasLength(announced));
+        expect(s.emitted, hasLength(emissions));
+        expect(s.done, isTrue);
+        expect(s.lists(dave.fingerprint), isFalse);
+      });
+
+      expect(errors, isEmpty);
+    });
+
+    test('stop is idempotent: called three times it sends one bye per '
+        'active interface once, and afterwards neither announceNow nor '
+        'syncInterfaces send anything, while the channel stays open', () async {
+      final channel = await _Channel.open([first, second]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first, second]);
+      await _until(() => channel.of(self.fingerprint).length == 2);
+      final before = channel.received.length;
+
+      await Future.wait([
+        s.service.stop(sayGoodbye: true),
+        s.service.stop(sayGoodbye: true),
+      ]);
+      await s.service.stop(sayGoodbye: true);
+      await _until(
+        () =>
+            channel
+                .of(self.fingerprint, kind: AnnouncementKind.bye, skip: before)
+                .length >=
+            2,
+      );
+      s.service.announceNow();
+      await s.service.syncInterfaces([first]);
+      await _quiet();
+
+      expect(
+        channel.of(self.fingerprint, kind: AnnouncementKind.bye, skip: before),
+        hasLength(2),
+      );
+      expect(
+        channel.of(
+          self.fingerprint,
+          kind: AnnouncementKind.hello,
+          skip: before,
+        ),
+        isEmpty,
+      );
+      expect(s.done, isTrue);
+      await channel.deliver(_host(2), _hello(_invented(1, 40000)));
+    });
+
+    test('stop(sayGoodbye: false) sends no bye', () async {
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await _until(() => channel.of(self.fingerprint).length == 1);
+
+      await s.service.stop(sayGoodbye: false);
+      await _quiet();
+
+      expect(channel.of(self.fingerprint, kind: AnnouncementKind.bye), isEmpty);
+      expect(s.done, isTrue);
+    });
+  });
+
+  group('paired label', () {
+    test('paired.changes makes devices emit again with the new label, both '
+        'ways', () async {
+      final peer = await _Peer.start(bob);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(loopback, _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      expect(s.emitted.last.single.paired, isFalse);
+      final emissions = s.emitted.length;
+
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await _until(() => s.emitted.length > emissions);
+      expect(s.emitted.last.single.paired, isTrue);
+      expect(s.find(bob.fingerprint)!.paired, isTrue);
+
+      await s.paired.replaceAll([]);
+      await _until(() => s.emitted.length > emissions + 1);
+      expect(s.emitted.last.single.paired, isFalse);
+      await _quiet();
+      expect(s.emitted, hasLength(emissions + 2));
+    });
+  });
+}
