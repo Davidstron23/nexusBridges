@@ -14,7 +14,7 @@ import 'reconcile.dart';
 
 export '../discovery/discovery.dart' show DiscoveredDevice;
 export '../identity/identity.dart' show SecretProtector;
-export '../network/network.dart' show NetworkDecision, AdapterInfo;
+export '../network/network.dart' show NetworkDecision, AdapterInfo, Ipv4Subnet;
 export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
 export 'node_state.dart';
 
