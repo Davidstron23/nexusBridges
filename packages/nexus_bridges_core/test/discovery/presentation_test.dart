@@ -104,15 +104,101 @@ void main() {
       });
     });
 
-    test('names that differ only in case are not repeated', () {
+    test('names that differ only in case count as repeated and keep their '
+        'own spelling', () {
       final names = displayNames([
         _device('1A2B3C4D', name: 'PC'),
         _device('9F8E7D6C', name: 'pc'),
       ]);
 
       expect(names, {
-        _fingerprint('1A2B3C4D'): 'PC',
-        _fingerprint('9F8E7D6C'): 'pc',
+        _fingerprint('1A2B3C4D'): 'PC $_dot 1A2B3C4D',
+        _fingerprint('9F8E7D6C'): 'pc $_dot 9F8E7D6C',
+      });
+    });
+
+    test('a no-break space counts as a normal space and each device keeps '
+        'its own spelling (v2.11 point 3)', () {
+      final names = displayNames([
+        _device('1A2B3C4D', name: 'My PC'),
+        _device('9F8E7D6C', name: 'My\u00A0PC'),
+      ]);
+
+      expect(names, {
+        _fingerprint('1A2B3C4D'): 'My PC $_dot 1A2B3C4D',
+        _fingerprint('9F8E7D6C'): 'My\u00A0PC $_dot 9F8E7D6C',
+      });
+    });
+
+    test('a run of spaces counts as one space (v2.11 point 3)', () {
+      final names = displayNames([
+        _device('1A2B3C4D', name: 'My  PC'),
+        _device('9F8E7D6C', name: 'My PC'),
+      ]);
+
+      expect(names, {
+        _fingerprint('1A2B3C4D'): 'My  PC $_dot 1A2B3C4D',
+        _fingerprint('9F8E7D6C'): 'My PC $_dot 9F8E7D6C',
+      });
+    });
+
+    test('spaces at the start or the end do not count (v2.11 point 3)', () {
+      final names = displayNames([
+        _device('1A2B3C4D', name: ' PC'),
+        _device('9F8E7D6C', name: 'PC '),
+      ]);
+
+      expect(names, {
+        _fingerprint('1A2B3C4D'): ' PC $_dot 1A2B3C4D',
+        _fingerprint('9F8E7D6C'): 'PC  $_dot 9F8E7D6C',
+      });
+    });
+
+    test('every Unicode space of the plan collapses to one space, mixed with '
+        'case changes (v2.11 point 3)', () {
+      const spaces = [
+        '\u0009',
+        '\u0020',
+        '\u00A0',
+        '\u1680',
+        '\u2000',
+        '\u2005',
+        '\u200A',
+        '\u202F',
+        '\u205F',
+        '\u3000',
+      ];
+      final devices = [
+        _device('00000000', name: 'my pc'),
+        for (var i = 0; i < spaces.length; i++)
+          _device('${i + 1}' * 8, name: 'MY${spaces[i]}Pc'),
+      ];
+
+      final names = displayNames(devices);
+
+      for (final device in devices) {
+        final short = device.info.fingerprint.substring(0, 8);
+        expect(
+          names[device.info.fingerprint],
+          '${device.info.name} $_dot $short',
+        );
+      }
+    });
+
+    test('names that only look alike after removing a space or adding a '
+        'character are still different (v2.11 point 3)', () {
+      final names = displayNames([
+        _device('11111111', name: 'My PC'),
+        _device('22222222', name: 'MyPC'),
+        _device('33333333', name: 'My PC 2'),
+        _device('44444444', name: 'My-PC'),
+      ]);
+
+      expect(names, {
+        _fingerprint('11111111'): 'My PC',
+        _fingerprint('22222222'): 'MyPC',
+        _fingerprint('33333333'): 'My PC 2',
+        _fingerprint('44444444'): 'My-PC',
       });
     });
 
