@@ -424,6 +424,131 @@ void main() {
     });
   });
 
+  group('openInterfaceIds (v2.8 point 15)', () {
+    test('it is empty with no interface and follows the listeners that '
+        'syncInterfaces opens and closes', () async {
+      final first = loopbackInterface(adapterId: 'first');
+      final second = loopbackInterface(
+        adapterId: 'second',
+        address: '127.0.0.2',
+      );
+      final harness = await ServerHarness.start(
+        identity: alice,
+        active: const [],
+      );
+
+      expect(harness.server.openInterfaceIds, isEmpty);
+
+      await harness.server.syncInterfaces([first, second]);
+      expect(harness.server.openInterfaceIds, {first.id, second.id});
+
+      await harness.server.syncInterfaces([second]);
+      expect(harness.server.openInterfaceIds, {second.id});
+
+      await harness.server.syncInterfaces(const []);
+      expect(harness.server.openInterfaceIds, isEmpty);
+    });
+
+    test('an interface whose listener could not be opened is not in it, and '
+        'it is once the listener opens', () async {
+      final port = await freePort();
+      final squatter = await ServerSocket.bind(otherLoopback, port);
+      var squatterOpen = true;
+      addTearDown(() async {
+        if (squatterOpen) await squatter.close();
+      });
+      final first = loopbackInterface(adapterId: 'first');
+      final blocked = loopbackInterface(
+        adapterId: 'blocked',
+        address: '127.0.0.2',
+      );
+      final foreign = loopbackInterface(
+        adapterId: 'foreign',
+        address: _unassignable.address,
+        prefixLength: 24,
+      );
+      final harness = await ServerHarness.start(
+        identity: alice,
+        port: port,
+        active: [first, blocked, foreign],
+      );
+
+      expect(harness.server.openInterfaceIds, {first.id});
+
+      await squatter.close();
+      squatterOpen = false;
+      await harness.server.syncInterfaces([first, blocked, foreign]);
+
+      expect(harness.server.openInterfaceIds, {first.id, blocked.id});
+    });
+
+    test('rebuildTrust keeps the same ids on the same port', () async {
+      final first = loopbackInterface(adapterId: 'first');
+      final second = loopbackInterface(
+        adapterId: 'second',
+        address: '127.0.0.2',
+      );
+      final harness = await ServerHarness.start(
+        identity: alice,
+        active: [first, second],
+      );
+      final port = harness.port;
+
+      await harness.pair([bob]);
+      await harness.server.rebuildTrust();
+
+      expect(harness.server.openInterfaceIds, {first.id, second.id});
+      expect(harness.server.boundPort, port);
+    });
+
+    test('a PortInUseException leaves only the listeners from earlier '
+        'calls', () async {
+      final port = await holdPortInChildProcess(loopback);
+      final earlier = loopbackInterface(
+        adapterId: 'earlier',
+        address: '127.0.0.3',
+      );
+      final opened = loopbackInterface(
+        adapterId: 'opened',
+        address: '127.0.0.2',
+      );
+      final blocked = loopbackInterface(adapterId: 'blocked');
+      final harness = await ServerHarness.start(
+        identity: alice,
+        port: port,
+        active: [earlier],
+      );
+
+      await expectLater(
+        harness.server.syncInterfaces([earlier, opened, blocked]),
+        throwsA(isA<PortInUseException>()),
+      );
+
+      expect(harness.server.openInterfaceIds, {earlier.id});
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
+    test('close empties it and a later syncInterfaces keeps it '
+        'empty', () async {
+      final harness = await ServerHarness.start(identity: alice);
+      expect(harness.server.openInterfaceIds, {loopbackInterface().id});
+
+      await harness.server.close();
+      expect(harness.server.openInterfaceIds, isEmpty);
+
+      await harness.server.syncInterfaces([loopbackInterface()]);
+      expect(harness.server.openInterfaceIds, isEmpty);
+    });
+
+    test('the set cannot be modified from outside', () async {
+      final harness = await ServerHarness.start(identity: alice);
+      final ids = harness.server.openInterfaceIds;
+
+      expect(() => ids.add('intruder#127.0.0.9'), throwsUnsupportedError);
+      expect(() => ids.clear(), throwsUnsupportedError);
+      expect(harness.server.openInterfaceIds, {loopbackInterface().id});
+    });
+  });
+
   group('close', () {
     test('close releases the port, leaves boundPort null and can be called '
         'twice', () async {
