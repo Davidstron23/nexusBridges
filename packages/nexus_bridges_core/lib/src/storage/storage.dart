@@ -3,6 +3,14 @@ import 'dart:io';
 
 int _tempCounter = 0;
 
+Directory defaultDataDir({Map<String, String>? environment}) {
+  final localAppData = (environment ?? Platform.environment)['LOCALAPPDATA'];
+  if (localAppData == null || localAppData.isEmpty) {
+    throw StateError('LOCALAPPDATA is not set');
+  }
+  return Directory('$localAppData${Platform.pathSeparator}NexusBridges');
+}
+
 final Map<String, Future<void>> _pendingWrites = {};
 
 String _writeKey(File file) {

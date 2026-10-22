@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:nexus_bridges_core/src/settings/settings.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
@@ -106,5 +108,156 @@ void main() {
         );
       });
     }
+  });
+
+  group('loadLanguage (RF-63 and RF-64 of spec 002)', () {
+    Future<String> load(String platform) =>
+        loadLanguage(platformLanguageCode: platform, dataDir: dataDir);
+
+    test('a saved en wins over a Spanish Windows (RF-64)', () async {
+      await settingsFile.writeAsString('{"version":1,"language":"en"}');
+
+      expect(await load('es'), 'en');
+    });
+
+    test('a saved es wins over an English or French Windows (RF-64)', () async {
+      await settingsFile.writeAsString('{"version":1,"language":"es"}');
+
+      expect(await load('en'), 'es');
+      expect(await load('fr'), 'es');
+    });
+
+    test('without a file a Spanish Windows gives es (RF-63)', () async {
+      expect(await load('es'), 'es');
+    });
+
+    test('without a file a French Windows gives en (RF-63)', () async {
+      expect(await load('fr'), 'en');
+    });
+
+    test('without a file an English Windows gives en (RF-63)', () async {
+      expect(await load('en'), 'en');
+      expect(await load(''), 'en');
+    });
+
+    test('reads and writes nothing else in the folder', () async {
+      await settingsFile.writeAsString('{"version":1,"language":"en"}');
+
+      await load('es');
+
+      expect(await namesIn(dataDir), ['settings.json']);
+      expect(
+        await settingsFile.readAsString(),
+        '{"version":1,"language":"en"}',
+      );
+    });
+
+    test('without a file it creates nothing', () async {
+      await load('es');
+
+      expect(await namesIn(dataDir), isEmpty);
+    });
+
+    final unusable = <String, String>{
+      'broken JSON': '{"version": 1, "language": "en"',
+      'a JSON array': '["en"]',
+      'plain text': 'en',
+      'an empty file': '',
+      'an unknown language': '{"version": 1, "language": "fr"}',
+      'a null language': '{"version": 1, "language": null}',
+      'an upper-case language': '{"version": 1, "language": "EN"}',
+    };
+
+    for (final MapEntry(key: label, value: content) in unusable.entries) {
+      test('$label falls back to the Windows language', () async {
+        await settingsFile.writeAsString(content);
+
+        expect(await load('es'), 'es');
+        expect(await load('fr'), 'en');
+        expect(await namesIn(dataDir), ['settings.json']);
+        expect(await settingsFile.readAsString(), content);
+      });
+    }
+
+    test(
+      'bytes that are not UTF-8 fall back to the Windows language',
+      () async {
+        await settingsFile.writeAsBytes(const [0xFF, 0xFE, 0x00, 0xC3]);
+
+        expect(await load('es'), 'es');
+        expect(await load('de'), 'en');
+      },
+    );
+
+    test('a folder named settings.json falls back without throwing', () async {
+      await Directory(settingsFile.path).create();
+
+      expect(await load('es'), 'es');
+      expect(await load('fr'), 'en');
+    });
+
+    test('a data folder that does not exist falls back and is not '
+        'created', () async {
+      final missing = Directory(
+        '${dataDir.path}${Platform.pathSeparator}missing',
+      );
+
+      expect(
+        await loadLanguage(platformLanguageCode: 'es', dataDir: missing),
+        'es',
+      );
+      expect(
+        await loadLanguage(platformLanguageCode: 'fr', dataDir: missing),
+        'en',
+      );
+      expect(await missing.exists(), isFalse);
+    });
+
+    test('with no dataDir it uses the real environment and does not '
+        'throw', () async {
+      final language = await loadLanguage(platformLanguageCode: 'es');
+
+      expect(language, isIn(['es', 'en']));
+    });
+
+    test('with no dataDir and no LOCALAPPDATA it falls back to the Windows '
+        'language', () async {
+      final packageConfig = await Isolate.packageConfig;
+      expect(packageConfig, isNotNull);
+      final script = File(
+        '${dataDir.path}${Platform.pathSeparator}load_language.dart',
+      );
+      await script.writeAsString('''
+import 'package:nexus_bridges_core/src/settings/settings.dart';
+
+Future<void> main(List<String> args) async {
+  for (final code in args) {
+    print(await loadLanguage(platformLanguageCode: code));
+  }
+}
+''');
+      final environment = Map.of(Platform.environment)
+        ..removeWhere((key, _) => key.toUpperCase() == 'LOCALAPPDATA');
+
+      final result = await Process.run(
+        Platform.resolvedExecutable,
+        [
+          '--packages=${packageConfig!.toFilePath()}',
+          script.path,
+          'es',
+          'fr',
+          'en',
+        ],
+        environment: environment,
+        includeParentEnvironment: false,
+      );
+
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      expect(const LineSplitter().convert('${result.stdout}'), [
+        'es',
+        'en',
+        'en',
+      ]);
+    }, timeout: const Timeout(Duration(minutes: 2)));
   });
 }

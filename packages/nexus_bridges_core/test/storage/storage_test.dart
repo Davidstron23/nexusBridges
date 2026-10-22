@@ -23,6 +23,69 @@ void main() {
     return names..sort();
   }
 
+  group('defaultDataDir (plan v2.7 point 9)', () {
+    final sep = Platform.pathSeparator;
+    final notSet = isA<StateError>().having(
+      (e) => e.message,
+      'message',
+      'LOCALAPPDATA is not set',
+    );
+
+    test('ends in NexusBridges under LOCALAPPDATA', () {
+      final dir = defaultDataDir(environment: {'LOCALAPPDATA': r'C:\x'});
+
+      expect(dir.path, 'C:\\x${sep}NexusBridges');
+      expect(
+        dir.uri.pathSegments.where((s) => s.isNotEmpty).last,
+        'NexusBridges',
+      );
+    });
+
+    test('uses only LOCALAPPDATA and ignores other variables', () {
+      final dir = defaultDataDir(
+        environment: {
+          'APPDATA': r'C:\roaming',
+          'LOCALAPPDATA': temp.path,
+          'USERPROFILE': r'C:\home',
+        },
+      );
+
+      expect(dir.path, '${temp.path}${sep}NexusBridges');
+    });
+
+    test('does not create the folder', () async {
+      final dir = defaultDataDir(environment: {'LOCALAPPDATA': temp.path});
+
+      expect(await dir.exists(), isFalse);
+      expect(await namesIn(temp), isEmpty);
+    });
+
+    test('throws StateError without LOCALAPPDATA', () {
+      expect(() => defaultDataDir(environment: {}), throwsA(notSet));
+      expect(
+        () => defaultDataDir(environment: {'APPDATA': r'C:\roaming'}),
+        throwsA(notSet),
+      );
+    });
+
+    test('throws StateError with an empty LOCALAPPDATA', () {
+      expect(
+        () => defaultDataDir(environment: {'LOCALAPPDATA': ''}),
+        throwsA(notSet),
+      );
+    });
+
+    test('reads the process environment when none is given', () {
+      final localAppData = Platform.environment['LOCALAPPDATA'];
+      if (localAppData == null || localAppData.isEmpty) {
+        expect(defaultDataDir, throwsA(notSet));
+        return;
+      }
+
+      expect(defaultDataDir().path, '$localAppData${sep}NexusBridges');
+    });
+  });
+
   group('writeFileAtomic', () {
     test('creates missing parent folders and writes the exact bytes', () async {
       final file = fileIn(
