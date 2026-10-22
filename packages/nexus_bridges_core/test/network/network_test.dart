@@ -500,6 +500,155 @@ void main() {
     });
   });
 
+  group('only valid unicast addresses are usable (M5)', () {
+    final rejected = <String, Ipv4Subnet>{
+      '0.0.0.0/0': subnet('0.0.0.0', 0),
+      '0.0.0.0/8': subnet('0.0.0.0', 8),
+      '0.1.2.3/8': subnet('0.1.2.3', 8),
+      '0.255.255.255/24': subnet('0.255.255.255', 24),
+      '127.0.0.1/8': subnet('127.0.0.1', 8),
+      '127.5.6.7/32': subnet('127.5.6.7', 32),
+      '127.255.255.254/24': subnet('127.255.255.254', 24),
+      '224.0.0.1/4': subnet('224.0.0.1', 4),
+      '224.0.0.169/24': subnet('224.0.0.169', 24),
+      '239.255.255.250/32': subnet('239.255.255.250', 32),
+      '240.0.0.1/8': subnet('240.0.0.1', 8),
+      '250.1.2.3/16': subnet('250.1.2.3', 16),
+      '255.255.255.255/32': subnet('255.255.255.255', 32),
+      '192.168.1.5/0': subnet('192.168.1.5', 0),
+      '192.168.1.5/1': subnet('192.168.1.5', 1),
+      '10.0.0.1/7': subnet('10.0.0.1', 7),
+      '172.16.0.1/4': subnet('172.16.0.1', 4),
+      '192.168.1.5/33': subnet('192.168.1.5', 33),
+      '192.168.1.5/-1': subnet('192.168.1.5', -1),
+    };
+
+    final accepted = <String, Ipv4Subnet>{
+      '10.0.0.1/8': subnet('10.0.0.1', 8),
+      '172.16.0.1/12': subnet('172.16.0.1', 12),
+      '192.168.1.5/24': subnet('192.168.1.5', 24),
+      '10.2.0.2/32': subnet('10.2.0.2', 32),
+      '1.0.0.1/8': subnet('1.0.0.1', 8),
+      '126.255.255.254/8': subnet('126.255.255.254', 8),
+      '128.0.0.1/16': subnet('128.0.0.1', 16),
+      '223.255.255.254/24': subnet('223.255.255.254', 24),
+      '100.64.0.5/10': subnet('100.64.0.5', 10),
+    };
+
+    for (final MapEntry(key: label, value: block) in rejected.entries) {
+      test('$label alone makes the adapter unusable', () {
+        final a = adapter(ipv4: [block]);
+
+        expect(isUsableAdapter(a), isFalse);
+        expect(
+          evaluateInterfaces([
+            a,
+          ], decisions({'{NETWORK-HOME}': NetworkDecision.trusted})),
+          isEmpty,
+        );
+      });
+
+      test('$label never becomes an active interface', () {
+        final active = activeInterfaces([
+          InterfaceState(
+            adapter(id: '{A}', ipv4: [block, subnet('192.168.1.5', 24)]),
+            InterfaceStatus.active,
+          ),
+        ]);
+
+        expect(active.map((i) => i.id), ['{A}#192.168.1.5']);
+        expect(active.single.subnet, subnet('192.168.1.5', 24));
+      });
+    }
+
+    for (final MapEntry(key: label, value: block) in accepted.entries) {
+      test('$label is usable and gives an active interface', () {
+        final a = adapter(id: '{A}', ipv4: [block]);
+
+        expect(isUsableAdapter(a), isTrue);
+        final active = activeInterfaces(
+          evaluateInterfaces([
+            a,
+          ], decisions({'{NETWORK-HOME}': NetworkDecision.trusted})),
+        );
+        expect(active, hasLength(1));
+        expect(active.single.subnet, block);
+        expect(active.single.id, '{A}#${block.address.address}');
+      });
+    }
+
+    test('a valid and an invalid IPv4 on one adapter emit only the valid', () {
+      final a = adapter(
+        id: '{MIXED}',
+        ipv4: [
+          subnet('0.0.0.0', 0),
+          subnet('192.168.1.5', 24),
+          subnet('127.0.0.1', 8),
+          subnet('10.0.0.1', 7),
+          subnet('224.0.0.169', 24),
+        ],
+      );
+
+      expect(isUsableAdapter(a), isTrue);
+      final active = activeInterfaces(
+        evaluateInterfaces([
+          a,
+        ], decisions({'{NETWORK-HOME}': NetworkDecision.trusted})),
+      );
+      expect(active.map((i) => i.id), ['{MIXED}#192.168.1.5']);
+    });
+
+    test('an adapter with only invalid IPv4 is not usable', () {
+      final a = adapter(
+        ipv4: [
+          subnet('0.0.0.0', 0),
+          subnet('127.0.0.1', 8),
+          subnet('224.0.0.169', 24),
+          subnet('240.0.0.1', 8),
+          subnet('255.255.255.255', 32),
+          subnet('192.168.1.5', 7),
+          subnet('169.254.1.1', 16),
+        ],
+      );
+
+      expect(isUsableAdapter(a), isFalse);
+      expect(
+        activeInterfaces([InterfaceState(a, InterfaceStatus.active)]),
+        isEmpty,
+      );
+    });
+
+    test('random subnets: every active interface is valid unicast', () {
+      final random = Random(5);
+      var seen = 0;
+      for (var i = 0; i < 3000; i++) {
+        final a = AdapterInfo(
+          id: '{R}',
+          friendlyName: 'Wi-Fi',
+          description: 'Generic adapter',
+          ifType: 71,
+          isUp: true,
+          ipv4: [for (var j = 0; j < 3; j++) randomSubnet(random)],
+          hasGateway: true,
+          networkId: '{N}',
+        );
+        for (final iface in activeInterfaces([
+          InterfaceState(a, InterfaceStatus.active),
+        ])) {
+          seen++;
+          final raw = iface.subnet.address.rawAddress;
+          expect(iface.subnet.address.type, InternetAddressType.IPv4);
+          expect(raw[0], isNot(0));
+          expect(raw[0], isNot(127));
+          expect(raw[0], lessThan(224));
+          expect(raw[0] == 169 && raw[1] == 254, isFalse);
+          expect(iface.subnet.prefixLength, inInclusiveRange(8, 32));
+        }
+      }
+      expect(seen, greaterThan(0));
+    });
+  });
+
   group('originAllowed (RF-25)', () {
     final lan = subnet('192.168.50.21', 24);
 

@@ -98,10 +98,18 @@ const List<String> _virtualAdapterPatterns = [
 ];
 
 const int _linkLocalPrefix = 0xA9FE;
+const int _minimumPrefixLength = 8;
+const int _maximumPrefixLength = 32;
 
 bool _isRoutableSubnet(Ipv4Subnet subnet) {
   final value = _ipv4ToInt(subnet.address);
   if (value == null) return false;
+  if (subnet.prefixLength < _minimumPrefixLength ||
+      subnet.prefixLength > _maximumPrefixLength) {
+    return false;
+  }
+  final firstOctet = value >> 24;
+  if (firstOctet == 0 || firstOctet == 127 || firstOctet >= 224) return false;
   return (value >> 16) != _linkLocalPrefix;
 }
 
@@ -308,15 +316,25 @@ bool _adaptersChanged(List<AdapterInfo> before, List<AdapterInfo> after) {
   return false;
 }
 
+final class _ReadTimedOut implements Exception {
+  const _ReadTimedOut();
+}
+
+final class _MonitorStopped implements Exception {
+  const _MonitorStopped();
+}
+
 final class NetworkMonitor {
   NetworkMonitor({
     required this._read,
     this._interval = const Duration(seconds: 2),
+    this._readTimeout = const Duration(seconds: 10),
     this._now = DateTime.now,
     this._log = _noLog,
   });
 
   final Duration _interval;
+  final Duration _readTimeout;
   final Future<List<AdapterInfo>> Function() _read;
   final DateTime Function() _now;
   final void Function(String) _log;
@@ -324,6 +342,8 @@ final class NetworkMonitor {
       StreamController<NetworkChange>.broadcast();
 
   Timer? _timer;
+  Timer? _readDeadline;
+  Completer<List<AdapterInfo>>? _pendingRead;
   bool _reading = false;
   DateTime? _previousTick;
   List<AdapterInfo>? _last;
@@ -339,6 +359,13 @@ final class NetworkMonitor {
   Future<void> stop() async {
     _timer?.cancel();
     _timer = null;
+    _readDeadline?.cancel();
+    _readDeadline = null;
+    final pending = _pendingRead;
+    _pendingRead = null;
+    if (pending != null && !pending.isCompleted) {
+      pending.completeError(const _MonitorStopped());
+    }
     if (!_controller.isClosed) await _controller.close();
   }
 
@@ -350,11 +377,40 @@ final class NetworkMonitor {
       final previousTick = _previousTick;
       _previousTick = tickTime;
       final List<AdapterInfo> adapters;
+      final pending = Completer<List<AdapterInfo>>();
+      _pendingRead = pending;
+      _readDeadline = Timer(_readTimeout, () {
+        if (!pending.isCompleted) pending.completeError(const _ReadTimedOut());
+      });
+      Future<List<AdapterInfo>>.sync(_read).then(
+        (value) {
+          if (!pending.isCompleted) pending.complete(value);
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!pending.isCompleted) pending.completeError(error, stackTrace);
+        },
+      );
       try {
-        adapters = await _read();
+        adapters = await pending.future;
+      } on _MonitorStopped {
+        return;
+      } on _ReadTimedOut {
+        if (_controller.isClosed) return;
+        _log('network read timed out');
+        final previous = _last;
+        _last = const [];
+        if (previous == null || previous.isNotEmpty) {
+          _controller.add(const NetworkChange([], resumed: false));
+        }
+        return;
       } catch (e) {
+        if (_controller.isClosed) return;
         _log('network read failed: ${e.runtimeType}');
         return;
+      } finally {
+        _readDeadline?.cancel();
+        _readDeadline = null;
+        if (identical(_pendingRead, pending)) _pendingRead = null;
       }
       if (_controller.isClosed) return;
       final resumed =
