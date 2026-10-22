@@ -57,7 +57,7 @@ List<String> findViolations(Map<String, String> files) {
         continue;
       }
       final from = _moduleOf(path);
-      if (from == null) continue; // already reported above
+      if (from == null) continue;
       if (target == rootLibrary) {
         violations.add('$where: modules may not import the root library');
         continue;
