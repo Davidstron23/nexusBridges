@@ -99,7 +99,24 @@ Map<String, Object?> randomMap(Random random, int depth) {
 }
 
 String randomName(Random random) {
-  const pieces = ['a', 'Z', ' ', '\t', '\u0000', '\x7F', 'é', '😀', '💻'];
+  const pieces = [
+    'a',
+    'Z',
+    ' ',
+    '\t',
+    '\u0000',
+    '\x7F',
+    'é',
+    '😀',
+    '💻',
+    '\u202E',
+    '\u0085',
+    '\u200B',
+    '\uFEFF',
+    '\u2028',
+    '\u2066',
+    '\u00A0',
+  ];
   return [
     for (var i = 0, n = random.nextInt(100); i < n; i++)
       pieces[random.nextInt(pieces.length)],
@@ -416,6 +433,273 @@ void main() {
     });
   });
 
+  group('sanitizeDisplayName (RF-10, RF-56, plan v2.7 point 1)', () {
+    const spoofing = <String, String>{
+      'U+202E right-to-left override': '\u202E',
+      'U+0085 next line': '\u0085',
+      'U+200B zero width space': '\u200B',
+      'U+FEFF byte order mark': '\uFEFF',
+      'U+2028 line separator': '\u2028',
+      'U+2066 left-to-right isolate': '\u2066',
+    };
+
+    for (final MapEntry(key: label, value: c) in spoofing.entries) {
+      test('removes $label inside a name', () {
+        expect(sanitizeDisplayName('Da${c}vid PC'), 'David PC');
+      });
+
+      test('removes $label at the edges of a name', () {
+        expect(sanitizeDisplayName('${c}David PC$c'), 'David PC');
+      });
+    }
+
+    test('the right-to-left override trick loses its override', () {
+      final cleaned = sanitizeDisplayName('Invoice\u202Efdp.exe');
+      expect(cleaned, 'Invoicefdp.exe');
+      expect(cleaned!.runes, isNot(contains(0x202E)));
+    });
+
+    test('removes every code point of the ranges of the plan', () {
+      const ranges = [
+        (0x0000, 0x001F),
+        (0x007F, 0x007F),
+        (0x0080, 0x009F),
+        (0x2028, 0x2029),
+        (0x200B, 0x200F),
+        (0x202A, 0x202E),
+        (0x2060, 0x2060),
+        (0x2066, 0x2069),
+        (0xFEFF, 0xFEFF),
+      ];
+      for (final (first, last) in ranges) {
+        for (var c = first; c <= last; c++) {
+          final raw = 'Da${String.fromCharCode(c)}vid';
+          expect(
+            sanitizeDisplayName(raw),
+            'David',
+            reason: 'U+${c.toRadixString(16).padLeft(4, '0')}',
+          );
+        }
+      }
+    });
+
+    test('removes all of them at once', () {
+      final all = [
+        for (var c = 0x0000; c <= 0x001F; c++) c,
+        for (var c = 0x007F; c <= 0x009F; c++) c,
+        0x2028,
+        0x2029,
+        for (var c = 0x200B; c <= 0x200F; c++) c,
+        for (var c = 0x202A; c <= 0x202E; c++) c,
+        0x2060,
+        for (var c = 0x2066; c <= 0x2069; c++) c,
+        0xFEFF,
+      ];
+      expect(
+        sanitizeDisplayName('Port${String.fromCharCodes(all)}átil'),
+        'Portátil',
+      );
+    });
+
+    test('keeps visible characters right next to the ranges', () {
+      const kept = [
+        0x0020,
+        0x007E,
+        0x00A0,
+        0x00A1,
+        0x200A,
+        0x2010,
+        0x2027,
+        0x202F,
+        0x2030,
+        0x205F,
+        0xFF01,
+      ];
+      for (final c in kept) {
+        final raw = 'Da${String.fromCharCode(c)}vid';
+        expect(
+          sanitizeDisplayName(raw),
+          raw,
+          reason: 'U+${c.toRadixString(16).padLeft(4, '0')}',
+        );
+      }
+    });
+
+    test('keeps a no-break space U+00A0 inside a name', () {
+      expect(sanitizeDisplayName('David\u00A0PC'), 'David\u00A0PC');
+    });
+
+    test('a no-break space U+00A0 at the edges goes away with the trim', () {
+      expect(sanitizeDisplayName('\u00A0David PC\u00A0'), 'David PC');
+    });
+
+    test('a name of only zero-width characters is null', () {
+      expect(sanitizeDisplayName('\u200B'), isNull);
+      expect(sanitizeDisplayName('\uFEFF'), isNull);
+      expect(sanitizeDisplayName('\u200B\u200C\u200D\u2060\uFEFF'), isNull);
+    });
+
+    test('a name of only spaces is null', () {
+      expect(sanitizeDisplayName(' '), isNull);
+      expect(sanitizeDisplayName('     '), isNull);
+      expect(sanitizeDisplayName('\u00A0\u3000\u2003'), isNull);
+    });
+
+    test('a name of invisible characters and spaces is null', () {
+      expect(sanitizeDisplayName(' \u202E \u200B \u2066 \u0085 '), isNull);
+    });
+
+    test('an empty name is null', () {
+      expect(sanitizeDisplayName(''), isNull);
+    });
+
+    test('removes before trimming', () {
+      expect(sanitizeDisplayName('\u200B  David PC  \u200B'), 'David PC');
+      expect(sanitizeDisplayName('\uFEFF\t David \u2066'), 'David');
+    });
+
+    test('truncates after removing, so invisible characters do not count', () {
+      final raw = '${'a' * 40}${'\u200B' * 20}${'b' * 40}';
+      expect(raw.runes.length, 100);
+      final name = sanitizeDisplayName(raw);
+      expect(name, '${'a' * 40}${'b' * 24}');
+      expect(name!.runes.length, Limits.maxNameLength);
+    });
+
+    test('80 emojis outside the BMP become 64 without splitting one', () {
+      final raw = '\u{1F600}' * 80;
+      expect(raw.runes.length, 80);
+      expect(raw.length, 160);
+
+      final name = sanitizeDisplayName(raw)!;
+
+      expect(name, '\u{1F600}' * 64);
+      expect(name.runes.length, 64);
+      expect(name.length, 128);
+    });
+
+    test('80 runes with an odd offset are cut on a whole emoji', () {
+      final raw = 'x${'\u{1F4BB}' * 79}';
+      expect(raw.runes.length, 80);
+
+      final name = sanitizeDisplayName(raw)!;
+
+      expect(name, 'x${'\u{1F4BB}' * 63}');
+      expect(name.runes.length, 64);
+      expect(name.length, 127);
+      final last = name.codeUnitAt(name.length - 1);
+      expect(last, inInclusiveRange(0xDC00, 0xDFFF));
+      expect(name.runes.last, 0x1F4BB);
+    });
+
+    test('64 emojis are kept whole', () {
+      final raw = '\u{1F600}\u{1F4BB}' * 32;
+      expect(sanitizeDisplayName(raw), raw);
+    });
+
+    test('a 65-rune name loses only its last rune', () {
+      expect(sanitizeDisplayName('${'n' * 64}z'), 'n' * 64);
+    });
+
+    test('a clean name comes back unchanged', () {
+      expect(sanitizeDisplayName('Portátil de David'), 'Portátil de David');
+      expect(sanitizeDisplayName('PC-1 \u{1F4BB}'), 'PC-1 \u{1F4BB}');
+    });
+
+    test('applying it twice gives the same as once', () {
+      final samples = [
+        'Da\u202Evid',
+        '  \u200BPC\uFEFF  ',
+        'x${'\u{1F4BB}' * 79}',
+        '\u00A0Port\u00A0átil\u00A0',
+        '${'a' * 63}\u0085${'b' * 10}',
+      ];
+      for (final raw in samples) {
+        final once = sanitizeDisplayName(raw);
+        expect(sanitizeDisplayName(once!), once, reason: raw);
+      }
+    });
+  });
+
+  group('DeviceInfo.tryParse with names to sanitize (RF-56)', () {
+    DeviceInfo? parsedWithName(String name) =>
+        DeviceInfo.tryParse(validInfoJson()..['name'] = name);
+
+    final cleaned = <String, String>{
+      'Da\u202Evid PC': 'David PC',
+      'Da\u0085vid PC': 'David PC',
+      '\u200BDavid PC\u200B': 'David PC',
+      '\uFEFFDavid PC': 'David PC',
+      'David\u2028PC': 'DavidPC',
+      '\u2066David PC\u2069': 'David PC',
+      'David\u00A0PC': 'David\u00A0PC',
+      '\u00A0David PC\u00A0': 'David PC',
+    };
+
+    var index = 0;
+    for (final MapEntry(key: raw, value: expected) in cleaned.entries) {
+      test('gives the clean name for sample ${index++}', () {
+        final parsed = parsedWithName(raw);
+        expect(parsed, isNotNull);
+        expect(parsed!.name, expected);
+        expect(parsed.fingerprint, validFingerprint);
+        expect(parsed.port, 53530);
+        expect(parsed.protocol, '1.0');
+        expect(parsed.deviceType, DeviceType.desktop);
+      });
+    }
+
+    final empty = <String>[
+      '\u200B',
+      '\u200B\u200C\u200D\uFEFF',
+      '   ',
+      ' \u202E \u0085 \u2066 ',
+      '\u00A0\u00A0',
+    ];
+
+    for (final (i, raw) in empty.indexed) {
+      test('keeps the device with name: null for invisible sample $i', () {
+        final parsed = parsedWithName(raw);
+        expect(parsed, isNotNull);
+        expect(parsed!.name, isNull);
+        expect(parsed.fingerprint, validFingerprint);
+      });
+    }
+
+    test('80 emojis outside the BMP become 64 whole ones', () {
+      final name = parsedWithName('\u{1F600}' * 80)!.name!;
+      expect(name, '\u{1F600}' * 64);
+      expect(name.runes.length, 64);
+    });
+
+    test('an announcement over JSON gets the same clean name', () {
+      final decoded = Announcement.tryDecode(
+        bytesOf(validAnnouncementJson()..['name'] = '\u2066Da\u202Evid\u200B'),
+      );
+      expect(decoded, isNotNull);
+      expect(decoded!.info.name, 'David');
+    });
+
+    test('an announcement whose name is only invisible gives name: null', () {
+      final decoded = Announcement.tryDecode(
+        bytesOf(validAnnouncementJson()..['name'] = '\uFEFF\u200B'),
+      );
+      expect(decoded, isNotNull);
+      expect(decoded!.info.name, isNull);
+    });
+
+    test('tryParse gives the same name as sanitizeDisplayName', () {
+      final samples = [...cleaned.keys, ...empty, 'x${'\u{1F4BB}' * 79}'];
+      for (final raw in samples) {
+        expect(
+          parsedWithName(raw)?.name,
+          sanitizeDisplayName(raw),
+          reason: raw,
+        );
+      }
+    });
+  });
+
   group('Announcement.encode (RF-40)', () {
     test('produces UTF-8 JSON with exactly the announcement keys', () {
       final bytes = Announcement(AnnouncementKind.hello, sampleInfo()).encode();
@@ -660,7 +944,10 @@ void main() {
 
   group('robustness: tryParse and tryDecode never throw', () {
     const iterations = 5000;
-    final controlCharacters = RegExp(r'[\x00-\x1F\x7F]');
+    final controlCharacters = RegExp(
+      r'[\u0000-\u001F\u007F-\u009F\u2028\u2029\u200B-\u200F\u202A-\u202E'
+      r'\u2060\u2066-\u2069\uFEFF]',
+    );
 
     void expectValidInfo(DeviceInfo info, Object input) {
       expect(

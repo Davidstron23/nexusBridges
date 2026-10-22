@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../storage/storage.dart';
 
 final class SettingsStore {
@@ -21,4 +23,26 @@ String resolveLanguage({
 }) {
   if (saved == 'es' || saved == 'en') return saved!;
   return platformLanguageCode == 'es' ? 'es' : 'en';
+}
+
+Future<String> loadLanguage({
+  required String platformLanguageCode,
+  Directory? dataDir,
+}) async {
+  final Directory dir;
+  try {
+    dir = dataDir ?? defaultDataDir();
+  } on StateError {
+    return resolveLanguage(
+      saved: null,
+      platformLanguageCode: platformLanguageCode,
+    );
+  }
+  final saved = await SettingsStore(
+    JsonFileStore(File('${dir.path}${Platform.pathSeparator}settings.json')),
+  ).readLanguage();
+  return resolveLanguage(
+    saved: saved,
+    platformLanguageCode: platformLanguageCode,
+  );
 }

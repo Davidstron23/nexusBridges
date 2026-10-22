@@ -46,7 +46,10 @@ const int _maxProtocolLength = 16;
 
 final RegExp _fingerprintPattern = RegExp(r'^[0-9A-F]{64}$');
 final RegExp _protocolPattern = RegExp(r'^\d+\.\d+$');
-final RegExp _controlCharacters = RegExp(r'[\x00-\x1F\x7F]');
+final RegExp _invisibleCharacters = RegExp(
+  r'[\u0000-\u001F\u007F-\u009F\u2028\u2029\u200B-\u200F\u202A-\u202E'
+  r'\u2060\u2066-\u2069\uFEFF]',
+);
 
 const Set<String> _deviceInfoKeys = {
   'name',
@@ -114,7 +117,7 @@ final class DeviceInfo {
     if (type == null) return null;
 
     return DeviceInfo(
-      name: _cleanName(rawName as String?),
+      name: rawName is String ? sanitizeDisplayName(rawName) : null,
       fingerprint: fingerprint,
       port: port,
       protocol: protocol,
@@ -123,9 +126,8 @@ final class DeviceInfo {
   }
 }
 
-String? _cleanName(String? raw) {
-  if (raw == null) return null;
-  final cleaned = raw.replaceAll(_controlCharacters, '').trim();
+String? sanitizeDisplayName(String raw) {
+  final cleaned = raw.replaceAll(_invisibleCharacters, '').trim();
   final truncated = String.fromCharCodes(
     cleaned.runes.take(Limits.maxNameLength),
   );
