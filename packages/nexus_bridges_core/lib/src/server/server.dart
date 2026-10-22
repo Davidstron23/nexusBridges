@@ -158,6 +158,8 @@ final class ApiServer {
   int? get boundPort =>
       _listeners.values.isEmpty ? null : _listeners.values.first.socket.port;
 
+  Set<String> get openInterfaceIds => Set.unmodifiable(_listeners.keys);
+
   Future<void> syncInterfaces(List<ActiveInterface> active) {
     return _exclusive(() async {
       if (_closed) return;
