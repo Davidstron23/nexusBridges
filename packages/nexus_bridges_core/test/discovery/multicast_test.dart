@@ -788,6 +788,25 @@ void main() {
       expect(f.logs, isEmpty);
     });
 
+    test('a burst that is still queued when the channel closes is sent '
+        'before the sockets close', () async {
+      final f = await _Fixture.create();
+      final iface = _loopback('127.0.0.1');
+      await f.channel.syncInterfaces([iface]);
+      final probe = await _Probe.bind(_third, f.port);
+      final sent = [for (var i = 1; i <= 8; i++) _hello(i)];
+
+      for (final announcement in sent) {
+        f.channel.sendTo(announcement, iface, _third);
+      }
+      await f.channel.close();
+      await _until(() => probe.datagrams.length == sent.length);
+      await _quiet();
+
+      expect(probe.datagrams, [for (final a in sent) a.encode()]);
+      expect(f.logs, isEmpty);
+    });
+
     test('sendTo on a channel that was never opened does nothing, does not '
         'throw and keeps nothing for later', () async {
       final f = await _Fixture.create(open: false);

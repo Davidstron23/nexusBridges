@@ -9,6 +9,10 @@ import '../protocol/protocol.dart';
 const int _addressInUseErrorCode = 10048;
 const int _maxPendingDatagrams = 8;
 
+const Duration _flushLimit = Duration(milliseconds: 200);
+
+const Duration _flushRetry = Duration(milliseconds: 5);
+
 void _noLog(String message) {}
 
 final class _Sender {
@@ -65,6 +69,20 @@ final class _Sender {
   }
 
   Future<void> dispose() async {
+    final elapsed = Stopwatch()..start();
+    while (_pending.isNotEmpty && elapsed.elapsed < _flushLimit) {
+      final (bytes, destination) = _pending.first;
+      try {
+        if (socket.send(bytes, destination, _port) < bytes.length) {
+          await Future<void>.delayed(_flushRetry);
+          continue;
+        }
+      } catch (e) {
+        _log('multicast send failed: ${e.runtimeType}');
+        break;
+      }
+      _pending.removeFirst();
+    }
     await _subscription.cancel();
     _pending.clear();
     socket.close();
