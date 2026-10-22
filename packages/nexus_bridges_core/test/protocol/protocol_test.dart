@@ -133,6 +133,8 @@ void main() {
       expect(Limits.rescanHintAfter, const Duration(seconds: 15));
       expect(Limits.scanConcurrency, 32);
       expect(Limits.scanConnectTimeout, const Duration(milliseconds: 1500));
+      expect(Limits.maxPendingHandshakesPerIp, 8);
+      expect(Limits.maxPendingHandshakes, 128);
     });
 
     test('protocolVersion is re-exported by the protocol module', () {
@@ -301,6 +303,26 @@ void main() {
       withValue('protocol', '99999999999999999999999.0'),
     );
     expectRejected('a numeric protocol', withValue('protocol', 1.0));
+    test('accepts a protocol of exactly 16 characters and rejects one of '
+        '17 (v2.6.10)', () {
+      final sixteen = '1.${'0' * 14}';
+      final seventeen = '1.${'0' * 15}';
+
+      expect(sixteen, hasLength(16));
+      expect(seventeen, hasLength(17));
+      expect(
+        DeviceInfo.tryParse(withValue('protocol', sixteen))?.protocol,
+        sixteen,
+      );
+      expect(DeviceInfo.tryParse(withValue('protocol', seventeen)), isNull);
+    });
+    test('rejects a protocol of 5002 characters with the right major '
+        '(v2.6.10)', () {
+      final huge = '1.${'0' * 5000}';
+
+      expect(huge, hasLength(5002));
+      expect(DeviceInfo.tryParse(withValue('protocol', huge)), isNull);
+    });
     test('accepts protocol "1.5" (same major, other minor)', () {
       expect(
         DeviceInfo.tryParse(withValue('protocol', '1.5'))?.protocol,
@@ -595,6 +617,25 @@ void main() {
     );
     expectRejectedJson('a numeric deviceType', withValue('deviceType', 1));
     expectRejectedJson('a numeric name', withValue('name', 7));
+
+    test('accepts a protocol of exactly 16 characters and rejects one of '
+        '17 that still fits in a datagram (v2.6.10)', () {
+      final sixteen = bytesOf(withValue('protocol', '1.${'0' * 14}'));
+      final seventeen = bytesOf(withValue('protocol', '1.${'0' * 15}'));
+
+      expect(seventeen.length, lessThan(maxDatagramBytes));
+      expect(Announcement.tryDecode(sixteen)?.info.protocol, '1.${'0' * 14}');
+      expect(Announcement.tryDecode(seventeen), isNull);
+    });
+
+    test('rejects the 5002-character protocol of the QA (v2.6.10)', () {
+      expect(
+        Announcement.tryDecode(
+          bytesOf(withValue('protocol', '1.${'0' * 5000}')),
+        ),
+        isNull,
+      );
+    });
 
     test('accepts protocol "1.5" (same major, other minor)', () {
       final decoded = Announcement.tryDecode(

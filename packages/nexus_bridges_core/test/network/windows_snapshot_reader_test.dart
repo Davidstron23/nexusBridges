@@ -8,6 +8,24 @@ final RegExp _guid = RegExp(r'^\{[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}\}$');
 
 const int _loopbackIfType = 24;
 
+const String _leakProbeScript = '''
+import 'dart:io';
+
+import 'package:nexus_bridges_core/src/network/network.dart';
+
+void main() {
+  final reader = WindowsNetworkSnapshotReader();
+  for (var i = 0; i < 20; i++) {
+    reader.read();
+  }
+  final before = ProcessInfo.currentRss;
+  for (var i = 0; i < 300; i++) {
+    reader.read();
+  }
+  stdout.writeln(ProcessInfo.currentRss - before);
+}
+''';
+
 void _expectWellFormed(List<AdapterInfo> adapters) {
   for (var i = 0; i < adapters.length; i++) {
     final a = adapters[i];
@@ -125,24 +143,28 @@ void main() {
       );
     });
 
-    test('three hundred readings do not leak native memory', () {
-      final reader = WindowsNetworkSnapshotReader();
-      for (var i = 0; i < 20; i++) {
-        reader.read();
-      }
-      final rssBefore = ProcessInfo.currentRss;
+    test('three hundred readings do not leak native memory', () async {
+      final dir = await Directory.systemTemp.createTemp('nexus_leak_');
+      addTearDown(() => dir.delete(recursive: true));
+      final script = File(
+        '${dir.path}${Platform.pathSeparator}leak_probe.dart',
+      );
+      await script.writeAsString(_leakProbeScript);
+      final packages = await Isolate.packageConfig;
 
-      for (var i = 0; i < 300; i++) {
-        reader.read();
-      }
+      final result = await Process.run(Platform.resolvedExecutable, [
+        '--packages=${packages!.toFilePath()}',
+        script.path,
+      ]);
 
-      final growth = ProcessInfo.currentRss - rssBefore;
+      expect(result.exitCode, 0, reason: '${result.stderr}');
+      final growth = int.parse((result.stdout as String).trim());
       expect(
         growth < 8 * 1024 * 1024,
         isTrue,
         reason: 'resident memory grew by ${growth ~/ 1024} KiB',
       );
-    });
+    }, timeout: const Timeout(Duration(seconds: 120)));
 
     test('the pure functions accept the real reading', () {
       final adapters = WindowsNetworkSnapshotReader().read();
