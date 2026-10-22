@@ -52,12 +52,53 @@ Future<void> _deleteWithRetry(FileSystemEntity entity) async {
   }
 }
 
+const String _homeId = '{network-a}';
+
+final AdapterInfo _homeWifi = AdapterInfo(
+  id: '{WIFI-ADAPTER}',
+  friendlyName: 'Wi-Fi',
+  description: 'Test wireless adapter',
+  ifType: 71,
+  isUp: true,
+  ipv4: [Ipv4Subnet(InternetAddress('192.168.50.21'), 24)],
+  hasGateway: true,
+  networkId: _homeId,
+  networkName: 'Home',
+);
+
+bool _prompting(NodeState state) =>
+    state.prompts.any((prompt) => prompt.networkId == _homeId);
+
+bool _pausing(NodeState state) =>
+    state.pausedNetworks.any((prompt) => prompt.networkId == _homeId);
+
+Future<void> _waitFor(
+  AppController controller,
+  bool Function(NodeState) condition,
+) {
+  final current = controller.state;
+  if (current != null && condition(current)) return Future<void>.value();
+  final reached = Completer<void>();
+  void check() {
+    final state = controller.state;
+    if (state != null && condition(state) && !reached.isCompleted) {
+      reached.complete();
+    }
+  }
+
+  controller.addListener(check);
+  return reached.future
+      .timeout(const Duration(seconds: 5))
+      .whenComplete(() => controller.removeListener(check));
+}
+
 final class _Harness {
   _Harness({required this.dataDir, required this.port});
 
   final Directory dataDir;
   final int port;
   final List<NexusNode> nodes = [];
+  List<AdapterInfo> adapters = const [];
   int startCalls = 0;
   int failuresLeft = 0;
   Completer<void>? gate;
@@ -73,7 +114,8 @@ final class _Harness {
     final node = await NexusNode.start(
       dataDir: dataDir,
       protector: _XorProtector(),
-      readNetworks: () async => const [],
+      readNetworks: () async => adapters,
+      pollInterval: const Duration(milliseconds: 50),
       port: port,
       deviceName: 'Test PC',
     );
@@ -356,51 +398,85 @@ void main() {
 
   group('node states', () {
     test('each state of the node updates state and notifies', () async {
+      harness.adapters = [_homeWifi];
       final controller = controllerFor();
       await controller.init();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await _waitFor(controller, _prompting);
       final counter = _Counter(controller);
       final before = controller.state;
 
       final notified = counter.next();
-      controller.dismissPrompt('{network-a}');
+      controller.dismissPrompt(_homeId);
       await notified;
 
       expect(counter.count, greaterThanOrEqualTo(1));
       expect(controller.state, isNot(same(before)));
       expect(controller.state, same(harness.nodes.single.state));
+      expect(_prompting(controller.state!), isFalse);
+      expect(_pausing(controller.state!), isTrue);
     });
 
     test('decideNetwork goes to the node and saves the decision', () async {
+      harness.adapters = [_homeWifi];
       final controller = controllerFor();
       await controller.init();
+      await _waitFor(controller, _prompting);
       final counter = _Counter(controller);
 
       final notified = counter.next();
-      await controller.decideNetwork('{network-b}', NetworkDecision.untrusted);
+      await controller.decideNetwork(_homeId, NetworkDecision.untrusted);
       await notified;
 
       final saved = await File(
         '${harness.dataDir.path}${Platform.pathSeparator}networks.json',
       ).readAsString();
-      expect(saved, contains('{network-b}'));
+      expect(saved, contains(_homeId));
       expect(saved, contains('untrusted'));
+      expect(controller.state, same(harness.nodes.single.state));
       expect(controller.state!.decisionNotSaved, isFalse);
+      expect(_prompting(controller.state!), isFalse);
+      expect(_pausing(controller.state!), isTrue);
     });
 
     test('askAgain goes to the node', () async {
+      harness.adapters = [_homeWifi];
       final controller = controllerFor();
       await controller.init();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await _waitFor(controller, _prompting);
+      controller.dismissPrompt(_homeId);
+      await _waitFor(controller, _pausing);
       final counter = _Counter(controller);
 
       final notified = counter.next();
-      controller.askAgain('{network-c}');
+      controller.askAgain(_homeId);
       await notified;
 
       expect(counter.count, greaterThanOrEqualTo(1));
       expect(controller.state, same(harness.nodes.single.state));
+      expect(_prompting(controller.state!), isTrue);
+      expect(_pausing(controller.state!), isFalse);
     });
+
+    test(
+      'an action that changes nothing in the node does not notify',
+      () async {
+        harness.adapters = [_homeWifi];
+        final controller = controllerFor();
+        await controller.init();
+        await _waitFor(controller, _prompting);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        final counter = _Counter(controller);
+        final before = controller.state;
+
+        controller.dismissPrompt('{unknown-network}');
+        controller.askAgain('{unknown-network}');
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+
+        expect(counter.count, 0);
+        expect(controller.state, same(before));
+        expect(_prompting(controller.state!), isTrue);
+      },
+    );
 
     test('rescan goes to the node and completes', () async {
       final controller = controllerFor();
@@ -454,15 +530,20 @@ void main() {
     });
 
     test('a new node state does not bring the warning back', () async {
+      harness.adapters = [_homeWifi];
       final controller = controllerFor();
       await controller.init();
+      await _waitFor(controller, _prompting);
       controller.dismissIdentityWarning();
       final counter = _Counter(controller);
+      final before = controller.state;
 
       final notified = counter.next();
-      controller.dismissPrompt('{network-e}');
+      controller.dismissPrompt(_homeId);
       await notified;
 
+      expect(controller.state, isNot(same(before)));
+      expect(_pausing(controller.state!), isTrue);
       expect(controller.identityWarningDismissed, isTrue);
     });
   });
