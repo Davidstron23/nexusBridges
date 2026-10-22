@@ -66,10 +66,14 @@ final class _ControlledReader {
 }
 
 final class _Harness {
-  _Harness({required Duration interval}) : now = DateTime.utc(2026, 10, 21, 9) {
+  _Harness({
+    required Duration interval,
+    Duration readTimeout = const Duration(seconds: 10),
+  }) : now = DateTime.utc(2026, 10, 21, 9) {
     monitor = NetworkMonitor(
       read: reader.call,
       interval: interval,
+      readTimeout: readTimeout,
       now: () => now,
       log: logs.add,
     );
@@ -108,12 +112,250 @@ final class _Harness {
   }
 }
 
+Future<void> _until(bool Function() condition) async {
+  final watch = Stopwatch()..start();
+  while (!condition()) {
+    if (watch.elapsed > _waitLimit) fail('the condition was never met');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
+final class _TimerProbe {
+  final List<Timer> timers = [];
+
+  late final Zone zone = Zone.current.fork(
+    specification: ZoneSpecification(
+      createTimer: (self, parent, zone, duration, callback) {
+        final timer = parent.createTimer(zone, duration, callback);
+        timers.add(timer);
+        return timer;
+      },
+      createPeriodicTimer: (self, parent, zone, duration, callback) {
+        final timer = parent.createPeriodicTimer(zone, duration, callback);
+        timers.add(timer);
+        return timer;
+      },
+    ),
+  );
+
+  int get active => timers.where((t) => t.isActive).length;
+}
+
 void main() {
-  _Harness harness({Duration interval = _shortInterval}) {
-    final h = _Harness(interval: interval);
+  _Harness harness({
+    Duration interval = _shortInterval,
+    Duration readTimeout = const Duration(seconds: 10),
+  }) {
+    final h = _Harness(interval: interval, readTimeout: readTimeout);
     addTearDown(h.dispose);
     return h;
   }
+
+  group('a read that never ends fails closed (plan v2.6, point 8)', () {
+    const readTimeout = Duration(milliseconds: 300);
+
+    test('nothing is emitted before the deadline', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.reader.next();
+
+      await Future<void>.delayed(readTimeout ~/ 2);
+
+      expect(h.events, isEmpty);
+      expect(h.logs, isEmpty);
+      expect(h.reader.calls, 1);
+    });
+
+    test(
+      'the deadline emits NetworkChange([]) once and logs no data',
+      () async {
+        final h = harness(readTimeout: readTimeout);
+        final watch = Stopwatch()..start();
+        h.monitor.start();
+        await h.reader.next();
+
+        await _until(() => h.events.isNotEmpty);
+        final elapsed = watch.elapsed;
+        await Future<void>.delayed(_shortInterval * 3);
+
+        expect(
+          elapsed,
+          greaterThanOrEqualTo(readTimeout - const Duration(milliseconds: 20)),
+        );
+        expect(h.events, hasLength(1));
+        expect(h.events.single.adapters, isEmpty);
+        expect(h.events.single.resumed, isFalse);
+        expect(h.logs, ['network read timed out']);
+      },
+    );
+
+    test('a trusted list is dropped when the next read hangs', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.answerNext([_adapter()]);
+      await h.reader.next();
+
+      await _until(() => h.events.length == 2);
+
+      expect(h.events.first.adapters, hasLength(1));
+      expect(h.events.last.adapters, isEmpty);
+      expect(h.events.last.resumed, isFalse);
+      expect(h.logs, ['network read timed out']);
+    });
+
+    test('a second deadline with the list already empty is silent', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.reader.next();
+      await _until(() => h.events.isNotEmpty);
+
+      await h.reader.next();
+      await _until(() => h.logs.length == 2);
+      await pumpEventQueue();
+
+      expect(h.events, hasLength(1));
+      expect(h.logs, ['network read timed out', 'network read timed out']);
+    });
+
+    test('a deadline after an empty reading emits nothing', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.answerNext(const []);
+      await h.reader.next();
+
+      await _until(() => h.logs.isNotEmpty);
+      await pumpEventQueue();
+
+      expect(h.events, hasLength(1));
+      expect(h.events.single.adapters, isEmpty);
+      expect(h.logs, ['network read timed out']);
+    });
+
+    test('the next tick reads again and emits the real network', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      final hung = await h.reader.next();
+      await _until(() => h.events.isNotEmpty);
+
+      final real = [_adapter()];
+      await h.answerNext(real);
+
+      expect(h.reader.calls, greaterThanOrEqualTo(2));
+      expect(h.events, hasLength(2));
+      expect(h.events.last.adapters, same(real));
+      expect(h.events.last.resumed, isFalse);
+
+      hung.complete([_adapter(isUp: false)]);
+      await pumpEventQueue();
+      await h.reader.next();
+      await pumpEventQueue();
+
+      expect(h.events, hasLength(2));
+      expect(h.events.last.adapters, same(real));
+    });
+
+    test('the late result of a timed out read is ignored', () async {
+      final h = harness(readTimeout: readTimeout, interval: _neverInterval);
+      h.monitor.start();
+      final hung = await h.reader.next();
+      await _until(() => h.events.isNotEmpty);
+
+      hung.complete([_adapter()]);
+      await pumpEventQueue();
+      await Future<void>.delayed(_shortInterval * 3);
+
+      expect(h.events, hasLength(1));
+      expect(h.events.single.adapters, isEmpty);
+      expect(h.logs, ['network read timed out']);
+    });
+
+    test('a late failure of a timed out read is not logged', () async {
+      final h = harness(readTimeout: readTimeout, interval: _neverInterval);
+      h.monitor.start();
+      final hung = await h.reader.next();
+      await _until(() => h.events.isNotEmpty);
+
+      hung.completeError(StateError('late 10.9.8.7'));
+      await pumpEventQueue();
+
+      expect(h.events, hasLength(1));
+      expect(h.logs, ['network read timed out']);
+    });
+
+    test('ticks are skipped while the read hangs', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.reader.next();
+
+      await Future<void>.delayed(readTimeout ~/ 2);
+
+      expect(h.reader.calls, 1);
+      expect(h.reader.maxActive, 1);
+    });
+
+    test('errors before the deadline are still logged by type', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+
+      await h.failNext(_SecretBearingError());
+      await h.answerNext([_adapter()]);
+
+      expect(h.logs, ['network read failed: _SecretBearingError']);
+      expect(h.events, hasLength(1));
+      expect(h.events.single.adapters, hasLength(1));
+    });
+
+    test('the default deadline is not reached by a normal slow read', () async {
+      final h = harness();
+      h.monitor.start();
+      final pending = await h.reader.next();
+
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      pending.complete([_adapter()]);
+      await pumpEventQueue();
+
+      expect(h.logs, isEmpty);
+      expect(h.events.single.adapters, hasLength(1));
+    });
+
+    test('stop during a hung read emits nothing and reads no more', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.reader.next();
+
+      await h.monitor.stop();
+      await Future<void>.delayed(readTimeout * 2);
+
+      expect(h.events, isEmpty);
+      expect(h.done, isTrue);
+      expect(h.reader.calls, 1);
+    });
+
+    test('stop during a hung read leaves no timer running', () async {
+      final probe = _TimerProbe();
+      final h = harness(readTimeout: readTimeout);
+      probe.zone.run(h.monitor.start);
+      await h.reader.next();
+      await pumpEventQueue();
+      expect(probe.active, greaterThanOrEqualTo(2));
+
+      await h.monitor.stop();
+      await pumpEventQueue();
+
+      expect(probe.active, 0);
+    });
+
+    test('nothing is logged after stop during a hung read', () async {
+      final h = harness(readTimeout: readTimeout);
+      h.monitor.start();
+      await h.reader.next();
+
+      await h.monitor.stop();
+      await Future<void>.delayed(readTimeout * 2);
+
+      expect(h.logs, isEmpty);
+    });
+  });
 
   group('first reading', () {
     test('start reads at once, without waiting for the interval', () async {

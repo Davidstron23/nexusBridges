@@ -27,6 +27,8 @@ abstract final class Limits {
   static const Duration rescanHintAfter = Duration(seconds: 15);
   static const int scanConcurrency = 32;
   static const Duration scanConnectTimeout = Duration(milliseconds: 1500);
+  static const int maxPendingHandshakesPerIp = 8;
+  static const int maxPendingHandshakes = 128;
 }
 
 final class PortInUseException implements Exception {
@@ -39,6 +41,8 @@ final class PortInUseException implements Exception {
 }
 
 enum DeviceType { desktop, mobile }
+
+const int _maxProtocolLength = 16;
 
 final RegExp _fingerprintPattern = RegExp(r'^[0-9A-F]{64}$');
 final RegExp _protocolPattern = RegExp(r'^\d+\.\d+$');
@@ -97,7 +101,9 @@ final class DeviceInfo {
       return null;
     }
     if (port is! int || port < 1 || port > 65535) return null;
-    if (protocol is! String || !_protocolPattern.hasMatch(protocol)) {
+    if (protocol is! String ||
+        protocol.length > _maxProtocolLength ||
+        !_protocolPattern.hasMatch(protocol)) {
       return null;
     }
     final major = int.tryParse(protocol.split('.').first);

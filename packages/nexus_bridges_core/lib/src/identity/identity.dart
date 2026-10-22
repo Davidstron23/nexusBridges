@@ -105,15 +105,22 @@ final class DeviceIdentity {
     required Iterable<String> trustedCertificatesPem,
   }) {
     final context = SecurityContext(withTrustedRoots: false)
+      ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3
       ..useCertificateChainBytes(utf8.encode(_certificatePem))
       ..usePrivateKeyBytes(utf8.encode(_privateKeyPem));
     for (final pem in trustedCertificatesPem) {
-      context.setTrustedCertificatesBytes(utf8.encode(pem));
+      try {
+        context.setTrustedCertificatesBytes(utf8.encode(pem));
+      } catch (_) {
+        continue;
+      }
     }
     return context;
   }
 
-  SecurityContext clientContext() => SecurityContext(withTrustedRoots: false);
+  SecurityContext clientContext() =>
+      SecurityContext(withTrustedRoots: false)
+        ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3;
 
   Uint8List protectPrivateKey(SecretProtector p) =>
       p.protect(Uint8List.fromList(utf8.encode(_privateKeyPem)));

@@ -1,18 +1,44 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:test/test.dart';
 
-const String _fingerprintA =
-    'A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90';
-const String _fingerprintB =
-    '0F1E2D3C4B5A69788796A5B4C3D2E1F00F1E2D3C4B5A69788796A5B4C3D2E1F0';
-const String _pemA =
-    '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n';
-const String _pemB =
-    '-----BEGIN CERTIFICATE-----\nBBBB\n-----END CERTIFICATE-----\n';
+final class _PassThroughProtector implements SecretProtector {
+  @override
+  Uint8List protect(Uint8List data) => Uint8List.fromList(data);
+
+  @override
+  Uint8List? unprotect(Uint8List data) => Uint8List.fromList(data);
+}
+
+final DeviceIdentity _identityA = DeviceIdentity.generate(
+  commonName: 'NexusBridges-laptop',
+);
+final DeviceIdentity _identityB = DeviceIdentity.generate(
+  commonName: 'NexusBridges-desktop',
+);
+
+final String _fingerprintA = _identityA.fingerprint;
+final String _fingerprintB = _identityB.fingerprint;
+final String _pemA = _identityA.certificatePem;
+final String _pemB = _identityB.certificatePem;
+final String _privateKeyPemA = utf8.decode(
+  _identityA.protectPrivateKey(_PassThroughProtector()),
+);
+
+String _bodyOf(String pem) =>
+    LineSplitter.split(pem)
+        .map((l) => l.trim())
+        .where((l) => !l.startsWith('-----'))
+        .join();
+
+String _sha256Upper(List<int> bytes) =>
+    sha256.convert(bytes).toString().toUpperCase();
 
 final PairedDevice _laptop = PairedDevice(
   fingerprint: _fingerprintA,
@@ -30,6 +56,15 @@ final PairedDevice _desktop = PairedDevice(
   pairedAt: DateTime.utc(2026, 10, 21, 8, 30, 15, 250),
 );
 
+PairedDevice _laptopWith({String? fingerprint, String? certificatePem}) =>
+    PairedDevice(
+      fingerprint: fingerprint ?? _fingerprintA,
+      name: 'Laptop',
+      certificatePem: certificatePem ?? _pemA,
+      permissions: const {Permission.send},
+      pairedAt: DateTime.utc(2026, 10, 20, 12),
+    );
+
 Map<String, Object?> _fieldsOf(PairedDevice d) => {
   'fingerprint': d.fingerprint,
   'name': d.name,
@@ -39,16 +74,98 @@ Map<String, Object?> _fieldsOf(PairedDevice d) => {
 };
 
 Map<String, Object?> _rawDevice({
-  String fingerprint = _fingerprintA,
+  String? fingerprint,
+  String? certificatePem,
   String pairedAt = '2026-10-20T12:00:00.000Z',
   List<String> permissions = const ['send'],
 }) => {
-  'fingerprint': fingerprint,
+  'fingerprint': fingerprint ?? _fingerprintA,
   'name': 'Laptop',
-  'certificatePem': _pemA,
+  'certificatePem': certificatePem ?? _pemA,
   'permissions': permissions,
   'pairedAt': pairedAt,
 };
+
+Map<String, ({String fingerprint, String certificatePem})>
+_invalidIdentities() {
+  final body = _bodyOf(_pemA);
+  return {
+    'a garbage PEM': (fingerprint: _fingerprintA, certificatePem: 'garbage'),
+    'an empty PEM': (fingerprint: _fingerprintA, certificatePem: ''),
+    'two CERTIFICATE blocks': (
+      fingerprint: _fingerprintA,
+      certificatePem: '$_pemA\n$_pemB',
+    ),
+    'the same block twice': (
+      fingerprint: _fingerprintA,
+      certificatePem: '$_pemA$_pemA',
+    ),
+    'a private key pasted after the certificate': (
+      fingerprint: _fingerprintA,
+      certificatePem: '$_pemA\n$_privateKeyPemA',
+    ),
+    'a private key pasted before the certificate': (
+      fingerprint: _fingerprintA,
+      certificatePem: '$_privateKeyPemA\n$_pemA',
+    ),
+    'only a private key': (
+      fingerprint: _fingerprintA,
+      certificatePem: _privateKeyPemA,
+    ),
+    'text before the block': (
+      fingerprint: _fingerprintA,
+      certificatePem: 'subject=NexusBridges\n$_pemA',
+    ),
+    'a body that is not base64': (
+      fingerprint: _fingerprintA,
+      certificatePem:
+          '-----BEGIN CERTIFICATE-----\n@@@@!!!!\n-----END CERTIFICATE-----\n',
+    ),
+    'a truncated base64 body': (
+      fingerprint: _fingerprintA,
+      certificatePem:
+          '-----BEGIN CERTIFICATE-----\n'
+          '${body.substring(0, body.length - 3)}\n'
+          '-----END CERTIFICATE-----\n',
+    ),
+    'an empty body': (
+      fingerprint: _sha256Upper(const []),
+      certificatePem:
+          '-----BEGIN CERTIFICATE-----\n\n-----END CERTIFICATE-----\n',
+    ),
+    'a BEGIN without END': (
+      fingerprint: _fingerprintA,
+      certificatePem: '-----BEGIN CERTIFICATE-----\n$body\n',
+    ),
+    'a lowercase fingerprint': (
+      fingerprint: _fingerprintA.toLowerCase(),
+      certificatePem: _pemA,
+    ),
+    'the fingerprint of another certificate': (
+      fingerprint: _fingerprintB,
+      certificatePem: _pemA,
+    ),
+    'a fingerprint of 63 characters': (
+      fingerprint: _fingerprintA.substring(0, 63),
+      certificatePem: _pemA,
+    ),
+    'a fingerprint of 65 characters': (
+      fingerprint: '${_fingerprintA}0',
+      certificatePem: _pemA,
+    ),
+    'an empty fingerprint': (fingerprint: '', certificatePem: _pemA),
+    'a fingerprint with colons': (
+      fingerprint: [
+        for (var i = 0; i < 64; i += 2) _fingerprintA.substring(i, i + 2),
+      ].join(':'),
+      certificatePem: _pemA,
+    ),
+    'a fingerprint with surrounding spaces': (
+      fingerprint: ' $_fingerprintA ',
+      certificatePem: _pemA,
+    ),
+  };
+}
 
 void main() {
   final sep = Platform.pathSeparator;
@@ -77,6 +194,14 @@ void main() {
 
   Future<Map<String, Object?>> rawFile() async =>
       jsonDecode(await pairedFile.readAsString()) as Map<String, Object?>;
+
+  test('the fixtures are real certificates with their own fingerprint', () {
+    expect(_fingerprintA, matches(RegExp(r'^[0-9A-F]{64}$')));
+    expect(_fingerprintA, _sha256Upper(base64.decode(_bodyOf(_pemA))));
+    expect(_fingerprintB, _sha256Upper(base64.decode(_bodyOf(_pemB))));
+    expect(_fingerprintA, isNot(_fingerprintB));
+    expect(_privateKeyPemA, contains('PRIVATE KEY'));
+  });
 
   group('persistent list (RF-27)', () {
     test('a new store on the same file loads the same devices', () async {
@@ -221,14 +346,19 @@ void main() {
         'version': 1,
         'devices': [
           _rawDevice(),
-          {..._rawDevice(fingerprint: _fingerprintB)}..remove('fingerprint'),
+          {..._rawDevice(fingerprint: _fingerprintB, certificatePem: _pemB)}
+            ..remove('fingerprint'),
         ],
       }),
       'an invalid pairedAt': jsonEncode({
         'version': 1,
         'devices': [
           _rawDevice(),
-          _rawDevice(fingerprint: _fingerprintB, pairedAt: 'yesterday'),
+          _rawDevice(
+            fingerprint: _fingerprintB,
+            certificatePem: _pemB,
+            pairedAt: 'yesterday',
+          ),
         ],
       }),
     };
@@ -262,6 +392,203 @@ void main() {
       expect(store.isPaired(_fingerprintA), isFalse);
       expect(await namesIn(dataDir), [brokenName]);
     });
+  });
+
+  group('an entry whose identity is invalid quarantines paired.json (M2)', () {
+    for (final MapEntry(key: label, value: bad)
+        in _invalidIdentities().entries) {
+      test('$label: renamed with the clock, nobody paired', () async {
+        final content = jsonEncode({
+          'version': 1,
+          'devices': [
+            _rawDevice(fingerprint: _fingerprintB, certificatePem: _pemB),
+            _rawDevice(
+              fingerprint: bad.fingerprint,
+              certificatePem: bad.certificatePem,
+            ),
+          ],
+        });
+        await pairedFile.writeAsString(content);
+        final store = storeOn(pairedFile);
+        var events = 0;
+        final subscription = store.changes.listen((_) => events++);
+        addTearDown(subscription.cancel);
+
+        await store.load();
+        await pumpEventQueue();
+
+        expect(store.devices, isEmpty);
+        expect(store.isPaired(_fingerprintA), isFalse);
+        expect(store.isPaired(_fingerprintB), isFalse);
+        expect(store.isPaired(bad.fingerprint), isFalse);
+        expect(await namesIn(dataDir), [brokenName]);
+        expect(
+          await File('${dataDir.path}$sep$brokenName').readAsString(),
+          content,
+        );
+        expect(events, 0);
+      });
+    }
+
+    test('a truncated DER no longer matches its old fingerprint', () async {
+      final der = base64.decode(_bodyOf(_pemA));
+      final truncated = der.sublist(0, der.length - 3);
+      final pem =
+          '-----BEGIN CERTIFICATE-----\n'
+          '${base64.encode(truncated)}\n'
+          '-----END CERTIFICATE-----\n';
+      await pairedFile.writeAsString(
+        jsonEncode({
+          'version': 1,
+          'devices': [
+            _rawDevice(fingerprint: _fingerprintA, certificatePem: pem),
+          ],
+        }),
+      );
+      final store = storeOn(pairedFile);
+
+      await store.load();
+
+      expect(store.devices, isEmpty);
+      expect(await namesIn(dataDir), [brokenName]);
+    });
+  });
+
+  group('replaceAll rejects an invalid identity (M2)', () {
+    for (final MapEntry(key: label, value: bad)
+        in _invalidIdentities().entries) {
+      test('$label: ArgumentError without secrets, nothing written', () async {
+        final store = storeOn(pairedFile);
+        await store.replaceAll([_desktop]);
+        final before = await pairedFile.readAsString();
+        var events = 0;
+        final subscription = store.changes.listen((_) => events++);
+        addTearDown(subscription.cancel);
+        final invalid = _laptopWith(
+          fingerprint: bad.fingerprint,
+          certificatePem: bad.certificatePem,
+        );
+
+        Object? caught;
+        try {
+          await store.replaceAll([_desktop, invalid]);
+        } catch (e) {
+          caught = e;
+        }
+        await pumpEventQueue();
+
+        expect(caught, isA<ArgumentError>());
+        final error = caught! as ArgumentError;
+        final texts = [
+          '$error',
+          '${error.message}',
+          '${error.invalidValue}',
+          '${error.name}',
+        ];
+        for (final text in texts) {
+          expect(text, isNot(contains('BEGIN')));
+          expect(text, isNot(contains('PRIVATE')));
+          expect(text, isNot(contains(_fingerprintA)));
+          expect(text, isNot(contains(_fingerprintA.toLowerCase())));
+          expect(text, isNot(contains(_fingerprintB)));
+          expect(text, isNot(contains(_fingerprintA.substring(0, 16))));
+          expect(text, isNot(contains(_bodyOf(_pemA).substring(20, 52))));
+          expect(text, isNot(contains(_bodyOf(_pemB).substring(20, 52))));
+          if (bad.certificatePem.length >= 7) {
+            expect(text, isNot(contains(bad.certificatePem)));
+          }
+        }
+        expect(await pairedFile.readAsString(), before);
+        expect(await namesIn(dataDir), ['paired.json']);
+        expect(store.devices.map(_fieldsOf).toList(), [_fieldsOf(_desktop)]);
+        expect(store.isPaired(_fingerprintB), isTrue);
+        expect(store.isPaired(_fingerprintA), isFalse);
+        expect(events, 0);
+      });
+    }
+
+    test('a first call with an invalid entry creates no file', () async {
+      final store = storeOn(pairedFile);
+      var events = 0;
+      final subscription = store.changes.listen((_) => events++);
+      addTearDown(subscription.cancel);
+
+      await expectLater(
+        store.replaceAll([
+          _laptopWith(fingerprint: _fingerprintB, certificatePem: _pemA),
+        ]),
+        throwsA(isA<ArgumentError>()),
+      );
+      await pumpEventQueue();
+
+      expect(await pairedFile.exists(), isFalse);
+      expect(await namesIn(dataDir), isEmpty);
+      expect(store.devices, isEmpty);
+      expect(events, 0);
+    });
+
+    test('the store keeps working after a rejected call', () async {
+      final store = storeOn(pairedFile);
+      await expectLater(
+        store.replaceAll([_laptopWith(certificatePem: 'garbage')]),
+        throwsA(isA<ArgumentError>()),
+      );
+
+      await store.replaceAll([_laptop]);
+
+      expect(store.isPaired(_fingerprintA), isTrue);
+      final reloaded = storeOn(pairedFile);
+      await reloaded.load();
+      expect(reloaded.devices.map(_fieldsOf).toList(), [_fieldsOf(_laptop)]);
+    });
+  });
+
+  group('whitespace around a valid block (M2)', () {
+    final variants = <String, String>{
+      'blank lines and spaces around': '\n\n  $_pemA  \n\n',
+      'CRLF line endings': _pemA.replaceAll('\n', '\r\n'),
+      'no trailing newline': _pemA.trimRight(),
+      'tabs before the block': '\t\t$_pemA',
+      'the body re-wrapped at 76 columns': [
+        '-----BEGIN CERTIFICATE-----',
+        for (var i = 0; i < _bodyOf(_pemA).length; i += 76)
+          _bodyOf(_pemA).substring(
+            i,
+            i + 76 > _bodyOf(_pemA).length ? _bodyOf(_pemA).length : i + 76,
+          ),
+        '-----END CERTIFICATE-----',
+      ].join('\n'),
+    };
+
+    for (final MapEntry(key: label, value: pem) in variants.entries) {
+      test('$label is accepted by load and kept as written', () async {
+        await pairedFile.writeAsString(
+          jsonEncode({
+            'version': 1,
+            'devices': [_rawDevice(certificatePem: pem)],
+          }),
+        );
+        final store = storeOn(pairedFile);
+
+        await store.load();
+
+        expect(store.isPaired(_fingerprintA), isTrue);
+        expect(store.devices.single.certificatePem, pem);
+        expect(await namesIn(dataDir), ['paired.json']);
+      });
+
+      test('$label is accepted by replaceAll and written as given', () async {
+        final store = storeOn(pairedFile);
+
+        await store.replaceAll([_laptopWith(certificatePem: pem)]);
+
+        expect(store.isPaired(_fingerprintA), isTrue);
+        final written =
+            ((await rawFile())['devices'] as List<Object?>).single
+                as Map<String, Object?>;
+        expect(written['certificatePem'], pem);
+      });
+    }
   });
 
   group('replaceAll', () {

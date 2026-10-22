@@ -1,11 +1,40 @@
 import 'dart:convert';
 import 'dart:io';
 
-Future<void> writeFileAtomic(File file, List<int> bytes) async {
+int _tempCounter = 0;
+
+final Map<String, Future<void>> _pendingWrites = {};
+
+String _writeKey(File file) {
+  final path = file.absolute.path;
+  return Platform.isWindows ? path.toLowerCase() : path;
+}
+
+Future<void> writeFileAtomic(File file, List<int> bytes) {
+  final key = _writeKey(file);
+  final previous = _pendingWrites[key] ?? Future<void>.value();
+  final result = previous.then((_) => _writeFileOnce(file, bytes));
+  final tail = result.then<void>((_) {}, onError: (Object _) {});
+  _pendingWrites[key] = tail;
+  tail.whenComplete(() {
+    if (identical(_pendingWrites[key], tail)) _pendingWrites.remove(key);
+  });
+  return result;
+}
+
+Future<void> _writeFileOnce(File file, List<int> bytes) async {
   await file.parent.create(recursive: true);
-  final temp = File('${file.path}.tmp');
-  await temp.writeAsBytes(bytes, flush: true);
-  await temp.rename(file.path);
+  final unique = '${DateTime.now().microsecondsSinceEpoch}.${_tempCounter++}';
+  final temp = File('${file.path}.$unique.tmp');
+  try {
+    await temp.writeAsBytes(bytes, flush: true);
+    await temp.rename(file.path);
+  } catch (_) {
+    try {
+      if (await temp.exists()) await temp.delete();
+    } catch (_) {}
+    rethrow;
+  }
 }
 
 final class JsonFileStore {
