@@ -30,9 +30,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExeName}
-; No administrator rights needed: it installs for the current user unless they choose otherwise.
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequired=admin
 WizardStyle=modern
 
 [Files]
@@ -46,4 +44,10 @@ Source: "{#CrtDir}\vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""NexusBridges"""; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""NexusBridges"" dir=in action=allow program=""{app}\nexus_bridges.exe"" enable=yes profile=any remoteip=localsubnet protocol=TCP localport=53530"; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""NexusBridges"" dir=in action=allow program=""{app}\nexus_bridges.exe"" enable=yes profile=any remoteip=localsubnet protocol=UDP localport=53530"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+
+[UninstallRun]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""NexusBridges"""; Flags: runhidden; RunOnceId: "DelFirewall"
