@@ -38,7 +38,11 @@ class _NexusBridgesAppState extends State<NexusBridgesApp> {
     super.initState();
     _lifecycle = AppLifecycleListener(
       onExitRequested: () async {
-        await widget.controller.shutdown();
+        try {
+          await widget.controller.shutdown().timeout(
+            const Duration(seconds: 3),
+          );
+        } catch (_) {}
         return AppExitResponse.exit;
       },
     );

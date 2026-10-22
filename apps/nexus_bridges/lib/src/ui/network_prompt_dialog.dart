@@ -72,16 +72,15 @@ class _NetworkPromptHostState extends State<NetworkPromptHost> {
   }
 
   void _show(NetworkPrompt prompt) {
-    final open = _OpenDialog(prompt);
-    _open = open;
-    showDialog<NetworkDecision>(
+    final navigator = Navigator.of(context);
+    final route = DialogRoute<NetworkDecision>(
       context: context,
       barrierDismissible: true,
-      builder: (dialogContext) {
-        open.route = ModalRoute.of(dialogContext);
-        return _NetworkPromptDialog(prompt);
-      },
-    ).then((decision) => _answer(open, decision));
+      builder: (_) => _NetworkPromptDialog(prompt),
+    );
+    final open = _OpenDialog(prompt)..route = route;
+    _open = open;
+    navigator.push(route).then((decision) => _answer(open, decision));
   }
 
   void _answer(_OpenDialog open, NetworkDecision? decision) {
@@ -120,6 +119,7 @@ class _NetworkPromptDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = AppStringsDelegate.of(context);
     return AlertDialog(
+      scrollable: true,
       title: Text(strings.networkPromptTitle),
       content: Text(strings.networkPromptBody(prompt.networkName)),
       actions: [

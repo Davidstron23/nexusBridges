@@ -357,4 +357,171 @@ void main() {
       expect(second.shutdownCalls, 1);
     });
   });
+
+  group('closing the window with a stuck or failing shutdown (B2)', () {
+    testWidgets('a shutdown that never ends is answered with exit after 3 s', (
+      tester,
+    ) async {
+      final controller = TestAppController(
+        onShutdown: () => Completer<void>().future,
+      );
+      await pumpApp(tester, controller);
+
+      AppExitResponse? response;
+      final pending = tester.binding.handleRequestAppExit().then(
+        (value) => response = value,
+      );
+      await tester.pump();
+      expect(controller.shutdownCalls, 1);
+      expect(response, isNull);
+
+      await tester.pump(const Duration(milliseconds: 2990));
+      expect(response, isNull);
+
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(response, AppExitResponse.exit);
+      await pending;
+      expect(controller.shutdownCalls, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a shutdown that never ends answers the platform message', (
+      tester,
+    ) async {
+      final controller = TestAppController(
+        onShutdown: () => Completer<void>().future,
+      );
+      await pumpApp(tester, controller);
+
+      Map<String, Object?>? reply;
+      final pending = sendPlatformExitRequest(tester)
+          .then((value) => reply = value);
+      await tester.pump(const Duration(milliseconds: 2990));
+      expect(reply, isNull);
+
+      await tester.pump(const Duration(milliseconds: 20));
+      await pending;
+      expect(reply, {'response': 'exit'});
+      expect(controller.shutdownCalls, 1);
+    });
+
+    testWidgets('a shutdown slower than 3 s is not waited for to the end', (
+      tester,
+    ) async {
+      var finished = false;
+      final controller = TestAppController(
+        onShutdown: () async {
+          await Future<void>.delayed(const Duration(seconds: 5));
+          finished = true;
+        },
+      );
+      await pumpApp(tester, controller);
+
+      AppExitResponse? response;
+      final pending = tester.binding.handleRequestAppExit().then(
+        (value) => response = value,
+      );
+      await tester.pump(const Duration(milliseconds: 3010));
+      await pending;
+
+      expect(response, AppExitResponse.exit);
+      expect(finished, isFalse);
+
+      await tester.pump(const Duration(seconds: 3));
+      expect(finished, isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a shutdown that ends in 1 s is answered without waiting 3 s', (
+      tester,
+    ) async {
+      final controller = TestAppController(
+        onShutdown: () => Future<void>.delayed(const Duration(seconds: 1)),
+      );
+      await pumpApp(tester, controller);
+
+      AppExitResponse? response;
+      final pending = tester.binding.handleRequestAppExit().then(
+        (value) => response = value,
+      );
+      await tester.pump(const Duration(milliseconds: 990));
+      expect(response, isNull);
+
+      await tester.pump(const Duration(milliseconds: 20));
+      await pending;
+      expect(response, AppExitResponse.exit);
+    });
+
+    testWidgets('a shutdown that throws is answered with exit', (tester) async {
+      final controller = TestAppController(
+        onShutdown: () async => throw StateError('shutdown failed'),
+      );
+      await pumpApp(tester, controller);
+
+      final response = await tester.binding.handleRequestAppExit();
+
+      expect(response, AppExitResponse.exit);
+      expect(controller.shutdownCalls, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a shutdown that throws synchronously is answered with exit', (
+      tester,
+    ) async {
+      final controller = TestAppController(
+        onShutdown: () => throw const FileSystemException('broken'),
+      );
+      await pumpApp(tester, controller);
+
+      final response = await tester.binding.handleRequestAppExit();
+
+      expect(response, AppExitResponse.exit);
+      expect(controller.shutdownCalls, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a shutdown that throws after a while is answered with exit', (
+      tester,
+    ) async {
+      final controller = TestAppController(
+        onShutdown: () async {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          throw StateError('late failure');
+        },
+      );
+      await pumpApp(tester, controller);
+
+      AppExitResponse? response;
+      final pending = tester.binding.handleRequestAppExit().then(
+        (value) => response = value,
+      );
+      await tester.pump(const Duration(milliseconds: 510));
+      await pending;
+
+      expect(response, AppExitResponse.exit);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a stuck shutdown does not block a second exit request', (
+      tester,
+    ) async {
+      final controller = TestAppController(
+        onShutdown: () => Completer<void>().future,
+      );
+      await pumpApp(tester, controller);
+
+      final responses = <AppExitResponse>[];
+      final first = tester.binding.handleRequestAppExit().then(responses.add);
+      await tester.pump(const Duration(seconds: 1));
+      final second = tester.binding.handleRequestAppExit().then(responses.add);
+      await tester.pump(const Duration(milliseconds: 2010));
+      await first;
+      expect(responses, [AppExitResponse.exit]);
+
+      await tester.pump(const Duration(seconds: 1));
+      await second;
+      expect(responses, [AppExitResponse.exit, AppExitResponse.exit]);
+      expect(controller.shutdownCalls, 2);
+    });
+  });
 }
