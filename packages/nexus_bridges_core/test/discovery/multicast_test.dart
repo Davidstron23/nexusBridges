@@ -17,6 +17,7 @@ const Timeout _childTimeout = Timeout(Duration(minutes: 2));
 
 final InternetAddress _first = InternetAddress('127.0.0.1');
 final InternetAddress _second = InternetAddress('127.0.0.2');
+final InternetAddress _third = InternetAddress('127.0.0.3');
 
 late String _loopbackName;
 
@@ -124,6 +125,39 @@ final class _Fixture {
       }
     }
   }
+}
+
+final class _Probe {
+  _Probe._(this.socket);
+
+  final RawDatagramSocket socket;
+  final List<Uint8List> datagrams = [];
+
+  static Future<_Probe> bind(InternetAddress address, int port) async {
+    final socket = await RawDatagramSocket.bind(
+      address,
+      port,
+      reuseAddress: false,
+    );
+    final probe = _Probe._(socket);
+    final subscription = socket.listen((event) {
+      if (event != RawSocketEvent.read) return;
+      Datagram? datagram;
+      while ((datagram = socket.receive()) != null) {
+        probe.datagrams.add(datagram!.data);
+      }
+    });
+    addTearDown(() async {
+      await subscription.cancel();
+      socket.close();
+    });
+    return probe;
+  }
+
+  List<String?> get fingerprints => [
+    for (final bytes in datagrams)
+      Announcement.tryDecode(bytes)?.info.fingerprint,
+  ];
 }
 
 const String _holdUdpPortScript = '''
@@ -687,6 +721,236 @@ void main() {
       expect(f.logs, hasLength(1));
       expect(f.received.single.$3, same(ghost));
     });
+  });
+
+  group('unicast with sendTo (RF-45, plan v2.11 point 1)', () {
+    test('sendTo through the loopback interface to 127.0.0.1 at the channel '
+        'port arrives on incoming with exactly that announcement, that via '
+        'and origin 127.0.0.1', () async {
+      final f = await _Fixture.create();
+      final iface = _loopback('127.0.0.1');
+      await f.channel.syncInterfaces([iface]);
+      final sent = _hello(1);
+
+      f.channel.sendTo(sent, iface, _first);
+      await f.waitFor(1);
+      await _quiet();
+
+      final (announcement, from, via) = f.received.single;
+      expect(from, _first);
+      expect(via, same(iface));
+      expect(announcement.kind, AnnouncementKind.hello);
+      expect(announcement.encode(), sent.encode());
+      expect(jsonDecode(utf8.decode(announcement.encode())), _wire(1));
+      expect(f.logs, isEmpty);
+    });
+
+    test('a bye sent with sendTo arrives as a bye', () async {
+      final f = await _Fixture.create();
+      final iface = _loopback('127.0.0.1');
+      await f.channel.syncInterfaces([iface]);
+      final sent = Announcement(AnnouncementKind.bye, _info(2));
+
+      f.channel.sendTo(sent, iface, _first);
+      await f.waitFor(1);
+
+      expect(f.received.single.$1.encode(), sent.encode());
+    });
+
+    test('sendTo to another address goes only there: a socket on 127.0.0.3 '
+        'and the channel port gets the exact bytes and incoming gets '
+        'nothing', () async {
+      final f = await _Fixture.create();
+      final iface = _loopback('127.0.0.1');
+      await f.channel.syncInterfaces([iface]);
+      final probe = await _Probe.bind(_third, f.port);
+      final sent = _hello(3);
+
+      f.channel.sendTo(sent, iface, _third);
+      await _until(() => probe.datagrams.isNotEmpty);
+      await _quiet();
+
+      expect(probe.datagrams.single, sent.encode());
+      expect(f.received, isEmpty);
+      expect(f.logs, isEmpty);
+    });
+
+    test('sendTo on a channel that was never opened does nothing, does not '
+        'throw and keeps nothing for later', () async {
+      final f = await _Fixture.create(open: false);
+      final iface = _loopback('127.0.0.1');
+
+      await f.channel.syncInterfaces([iface]);
+      f.channel.sendTo(_hello(1), iface, _first);
+      await f.channel.open();
+      await f.channel.syncInterfaces([iface]);
+      await _quiet();
+      expect(f.received, isEmpty);
+
+      f.channel.sendTo(_hello(2), iface, _first);
+      await f.waitFor(1);
+      expect(f.fingerprints, [_fingerprint(2)]);
+      expect(f.logs, isEmpty);
+    });
+
+    test('sendTo after close sends nothing to the destination and keeps '
+        'nothing for the next open', () async {
+      final f = await _Fixture.create();
+      final iface = _loopback('127.0.0.1');
+      await f.channel.syncInterfaces([iface]);
+      await f.channel.close();
+      final probe = await _Probe.bind(_third, f.port);
+
+      f.channel.sendTo(_hello(1), iface, _third);
+      f.channel.sendTo(_hello(2), iface, _first);
+      await _quiet();
+      expect(probe.datagrams, isEmpty);
+
+      await f.channel.open();
+      await f.channel.syncInterfaces([iface]);
+      await _quiet();
+      expect(f.received, isEmpty);
+      expect(probe.datagrams, isEmpty);
+
+      f.channel.sendTo(_hello(3), iface, _first);
+      await f.waitFor(1);
+      expect(f.fingerprints, [_fingerprint(3)]);
+      expect(f.logs, isEmpty);
+    });
+
+    test('sendTo through an interface that is not active sends nothing to any '
+        'destination', () async {
+      final f = await _Fixture.create();
+      final active = _loopback('127.0.0.1');
+      final inactive = _loopback('127.0.0.2');
+      await f.channel.syncInterfaces([active]);
+      final probe = await _Probe.bind(_third, f.port);
+
+      f.channel.sendTo(_hello(1), inactive, _third);
+      f.channel.sendTo(_hello(2), inactive, _first);
+      f.channel.sendTo(_hello(3), active, _first);
+      await f.waitFor(1);
+      await _quiet();
+
+      expect(f.fingerprints, [_fingerprint(3)]);
+      expect(probe.datagrams, isEmpty);
+      expect(f.logs, isEmpty);
+    });
+
+    test('a burst mixing send and sendTo keeps the order and each one '
+        'reaches its own destination', () async {
+      final f = await _Fixture.create();
+      final iface = _loopback('127.0.0.1');
+      await f.channel.syncInterfaces([iface]);
+      final probe = await _Probe.bind(_third, f.port);
+
+      f.channel.send(_hello(1), iface);
+      f.channel.sendTo(_hello(2), iface, _first);
+      f.channel.sendTo(_hello(3), iface, _third);
+      f.channel.send(_hello(4), iface);
+      f.channel.sendTo(_hello(5), iface, _first);
+      f.channel.sendTo(_hello(6), iface, _third);
+      f.channel.send(_hello(7), iface);
+      f.channel.sendTo(_hello(8), iface, _first);
+      await f.waitFor(6);
+      await _until(() => probe.datagrams.length >= 2);
+      await _quiet();
+
+      expect(f.fingerprints, [
+        _fingerprint(1),
+        _fingerprint(2),
+        _fingerprint(4),
+        _fingerprint(5),
+        _fingerprint(7),
+        _fingerprint(8),
+      ]);
+      expect(probe.fingerprints, [_fingerprint(3), _fingerprint(6)]);
+      expect(f.logs, isEmpty);
+    });
+  });
+
+  group('joining the group again (plan v2.11 point 6)', () {
+    test('an interface whose system interface is not found does not join and '
+        'logs it, and a later syncInterfaces with the same adapter and its '
+        'real name joins and receives', () async {
+      final f = await _Fixture.create();
+      final ghost = _loopback('127.0.0.1', friendlyName: 'No Such Interface');
+      final real = _loopback('127.0.0.1');
+
+      await f.channel.syncInterfaces([ghost]);
+      expect(f.logs, hasLength(1));
+
+      await f.channel.syncInterfaces([real]);
+      expect(f.logs, hasLength(1));
+
+      f.channel.send(_hello(2), real);
+      await _until(() => f.fingerprints.contains(_fingerprint(2)));
+      expect(f.received.last.$3, same(real));
+    });
+
+    test('a failed join is tried again when the adapter comes back as another '
+        'interface with its real name, and it then receives', () async {
+      final f = await _Fixture.create();
+      final ghost = _loopback('127.0.0.1', friendlyName: 'No Such Interface');
+      final real = _loopback('127.0.0.2');
+
+      await f.channel.syncInterfaces([ghost]);
+      expect(f.logs, hasLength(1));
+
+      await f.channel.syncInterfaces([real]);
+      expect(f.logs, hasLength(1));
+
+      f.channel.send(_hello(2), real);
+      await _until(() => f.fingerprints.contains(_fingerprint(2)));
+      expect(f.received.last.$3, same(real));
+    });
+
+    test('a failed join is tried again on every syncInterfaces until it '
+        'works, and logged each time', () async {
+      final f = await _Fixture.create();
+      final ghost = _loopback('127.0.0.1', friendlyName: 'No Such Interface');
+
+      await f.channel.syncInterfaces([ghost]);
+      await f.channel.syncInterfaces([ghost]);
+      await f.channel.syncInterfaces([ghost]);
+
+      expect(f.logs, hasLength(3));
+    });
+
+    test(
+      'with everything joined, repeated syncInterfaces log nothing',
+      () async {
+        final f = await _Fixture.create();
+        final a = _loopback('127.0.0.1');
+        final b = _loopback('127.0.0.2');
+
+        for (var i = 0; i < 4; i++) {
+          await f.channel.syncInterfaces([a, b]);
+        }
+        f.channel.send(_hello(1), a);
+        await f.waitFor(1);
+        await _quiet();
+
+        expect(f.logs, isEmpty);
+        expect(f.fingerprints, [_fingerprint(1)]);
+      },
+    );
+
+    test(
+      'after the retry joins, more syncInterfaces log nothing more',
+      () async {
+        final f = await _Fixture.create();
+        final ghost = _loopback('127.0.0.1', friendlyName: 'No Such Interface');
+        final real = _loopback('127.0.0.1');
+
+        await f.channel.syncInterfaces([ghost]);
+        await f.channel.syncInterfaces([real]);
+        await f.channel.syncInterfaces([real]);
+        await f.channel.syncInterfaces([real]);
+
+        expect(f.logs, hasLength(1));
+      },
+    );
   });
 
   group('lifecycle', () {

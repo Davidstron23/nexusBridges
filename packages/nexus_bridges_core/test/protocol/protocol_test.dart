@@ -621,6 +621,179 @@ void main() {
     });
   });
 
+  group('sanitizeDisplayName with the ranges of plan v2.11 point 3 (RF-50, '
+      'RF-56)', () {
+    const added = [
+      (0x00AD, 0x00AD),
+      (0x034F, 0x034F),
+      (0x061C, 0x061C),
+      (0x115F, 0x1160),
+      (0x17B4, 0x17B5),
+      (0x180B, 0x180F),
+      (0x2061, 0x2064),
+      (0x206A, 0x206F),
+      (0x3164, 0x3164),
+      (0xFE00, 0xFE0F),
+      (0xFFA0, 0xFFA0),
+      (0xFFF0, 0xFFF8),
+      (0x1BCA0, 0x1BCA3),
+      (0x1D173, 0x1D17A),
+      (0xE0000, 0xE0FFF),
+    ];
+
+    String hex(int c) =>
+        'U+${c.toRadixString(16).toUpperCase().padLeft(4, '0')}';
+
+    for (final (first, last) in added) {
+      final label = first == last ? hex(first) : '${hex(first)}-${hex(last)}';
+      test('removes every code point of $label inside and at the edges of a '
+          'name', () {
+        for (var c = first; c <= last; c++) {
+          final invisible = String.fromCharCode(c);
+          expect(
+            sanitizeDisplayName('Da${invisible}vid'),
+            'David',
+            reason: hex(c),
+          );
+          expect(
+            sanitizeDisplayName('${invisible}David PC$invisible'),
+            'David PC',
+            reason: hex(c),
+          );
+        }
+      });
+    }
+
+    test('the edges outside the BMP of the plan go away, also '
+        'next to each other', () {
+      expect(sanitizeDisplayName('Da\u{1BCA0}vid'), 'David');
+      expect(sanitizeDisplayName('Da\u{1D173}vid'), 'David');
+      expect(sanitizeDisplayName('Da\u{E0001}vid'), 'David');
+      expect(sanitizeDisplayName('Da\u{E0FFF}vid'), 'David');
+      expect(
+        sanitizeDisplayName('\u{E0001}\u{1D17A}PC\u{1BCA3}\u{E0FFF}'),
+        'PC',
+      );
+    });
+
+    test('removes all the new ranges at once', () {
+      final all = [
+        for (final (first, last) in added)
+          for (var c = first; c <= last; c++) c,
+      ];
+      expect(sanitizeDisplayName('Da${String.fromCharCodes(all)}vid'), 'David');
+    });
+
+    test('keeps visible characters right next to the new ranges', () {
+      const kept = [
+        0x00AC,
+        0x00AE,
+        0x034E,
+        0x0350,
+        0x061B,
+        0x115E,
+        0x1161,
+        0x17B3,
+        0x17B6,
+        0x180A,
+        0x1810,
+        0x2070,
+        0x3163,
+        0x3165,
+        0xFE10,
+        0xFF9F,
+        0xFFA1,
+        0xFFFC,
+        0xFFFD,
+        0x1BC9F,
+        0x1D172,
+        0x1D17B,
+      ];
+      for (final c in kept) {
+        final raw = 'Da${String.fromCharCode(c)}vid';
+        expect(sanitizeDisplayName(raw), raw, reason: hex(c));
+      }
+    });
+
+    test('U+2065 is not on the list of the plan and stays', () {
+      expect(sanitizeDisplayName('Da\u2065vid'), 'Da\u2065vid');
+    });
+
+    test('U+FFF9 is not on the list of the plan and stays', () {
+      expect(sanitizeDisplayName('Da\uFFF9vid'), 'Da\uFFF9vid');
+    });
+
+    test('a name made only of the new invisible characters is null', () {
+      expect(sanitizeDisplayName('\u3164'), isNull);
+      expect(sanitizeDisplayName('\u3164\u3164\u3164'), isNull);
+      expect(sanitizeDisplayName('\u115F\u1160\uFFA0'), isNull);
+      expect(sanitizeDisplayName('\u00AD\u034F\u061C\u17B4\u180E'), isNull);
+      expect(sanitizeDisplayName('\u{E0001}\u{E0FFF}\u{1BCA0}'), isNull);
+      expect(
+        sanitizeDisplayName(' \u3164 \u{1D173} \uFE0F \u2064 \u206F '),
+        isNull,
+      );
+    });
+
+    test('the new invisible characters do not count for the 64-rune '
+        'limit', () {
+      final raw = '${'a' * 40}${'\u{E0001}' * 30}${'\u3164' * 10}${'b' * 40}';
+      expect(raw.runes.length, 120);
+
+      final name = sanitizeDisplayName(raw)!;
+
+      expect(name, '${'a' * 40}${'b' * 24}');
+      expect(name.runes.length, Limits.maxNameLength);
+    });
+
+    test('emojis of one code point stay whole', () {
+      expect(sanitizeDisplayName('PC \u{1F4BB}'), 'PC \u{1F4BB}');
+      expect(
+        sanitizeDisplayName('\u{1F600}\u{1F4BB}\u{1F680}'),
+        '\u{1F600}\u{1F4BB}\u{1F680}',
+      );
+      final raw = '\u{1F4BB}' * 64;
+      expect(sanitizeDisplayName(raw), raw);
+    });
+
+    test('an emoji with a variation selector keeps its base emoji and loses '
+        'the selector, as the plan lists U+FE00-U+FE0F', () {
+      expect(sanitizeDisplayName('PC \u2764\uFE0F'), 'PC \u2764');
+    });
+
+    test('a tag flag keeps its base emoji and loses the tags, as the plan '
+        'lists U+E0000-U+E0FFF', () {
+      const scotland =
+          '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}';
+      expect(sanitizeDisplayName('PC $scotland'), 'PC \u{1F3F4}');
+    });
+
+    test('applying it twice gives the same as once', () {
+      final samples = [
+        'Da\u3164vid',
+        '\u00ADPC\u{E0001}',
+        'x${'\u{1F4BB}' * 70}\u{1D173}',
+        '\u2065PC\uFFF9',
+      ];
+      for (final raw in samples) {
+        final once = sanitizeDisplayName(raw);
+        expect(sanitizeDisplayName(once!), once, reason: raw);
+      }
+    });
+
+    test('tryParse and tryDecode clean the new ranges the same way', () {
+      const raw = '\u3164Da\u00ADvid\u{E0001} PC\u{1D173}';
+      final parsed = DeviceInfo.tryParse(validInfoJson()..['name'] = raw);
+      expect(parsed?.name, 'David PC');
+
+      final decoded = Announcement.tryDecode(
+        bytesOf(validAnnouncementJson()..['name'] = '\u3164\u3164'),
+      );
+      expect(decoded, isNotNull);
+      expect(decoded!.info.name, isNull);
+    });
+  });
+
   group('DeviceInfo.tryParse with names to sanitize (RF-56)', () {
     DeviceInfo? parsedWithName(String name) =>
         DeviceInfo.tryParse(validInfoJson()..['name'] = name);

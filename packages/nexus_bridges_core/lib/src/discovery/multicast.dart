@@ -23,23 +23,26 @@ final class _Sender {
     );
   }
 
-  final ActiveInterface iface;
+  ActiveInterface iface;
   final RawDatagramSocket socket;
   final InternetAddress _group;
   final int _port;
   final void Function(String) _log;
-  final Queue<Uint8List> _pending = Queue<Uint8List>();
+  final Queue<(Uint8List, InternetAddress)> _pending =
+      Queue<(Uint8List, InternetAddress)>();
   late final StreamSubscription<RawSocketEvent> _subscription;
 
-  void send(Uint8List bytes) {
-    if (_pending.isEmpty && socket.send(bytes, _group, _port) >= bytes.length) {
+  void send(Uint8List bytes, [InternetAddress? to]) {
+    final destination = to ?? _group;
+    if (_pending.isEmpty &&
+        socket.send(bytes, destination, _port) >= bytes.length) {
       return;
     }
     if (_pending.length >= _maxPendingDatagrams) {
       _pending.removeFirst();
       _log('multicast send queue full');
     }
-    _pending.addLast(bytes);
+    _pending.addLast((bytes, destination));
     socket.writeEventsEnabled = true;
   }
 
@@ -47,8 +50,8 @@ final class _Sender {
     if (event != RawSocketEvent.write) return;
     try {
       while (_pending.isNotEmpty) {
-        final bytes = _pending.first;
-        if (socket.send(bytes, _group, _port) < bytes.length) {
+        final (bytes, destination) = _pending.first;
+        if (socket.send(bytes, destination, _port) < bytes.length) {
           socket.writeEventsEnabled = true;
           return;
         }
@@ -129,20 +132,36 @@ final class MulticastChannel {
       _active = List.of(active);
 
       for (final id in _senders.keys.toList()) {
-        if (wanted.containsKey(id)) continue;
+        final current = wanted[id];
+        if (current != null &&
+            current.adapterId == _senders[id]!.iface.adapterId) {
+          continue;
+        }
         await _removeSender(receiver, _senders.remove(id)!);
       }
 
-      List<NetworkInterface>? system;
       for (final iface in wanted.values) {
-        if (_senders.containsKey(iface.id)) continue;
+        final existing = _senders[iface.id];
+        if (existing != null) {
+          existing.iface = iface;
+          continue;
+        }
         final socket = await _openSender(iface);
         if (socket == null) continue;
         _senders[iface.id] = _Sender(iface, socket, _group, _port, _log);
-        final refs = (_adapterRefs[iface.adapterId] ?? 0) + 1;
-        _adapterRefs[iface.adapterId] = refs;
-        if (refs > 1) continue;
-        system ??= await _systemInterfaces();
+        _adapterRefs[iface.adapterId] =
+            (_adapterRefs[iface.adapterId] ?? 0) + 1;
+      }
+
+      final pending = <String, ActiveInterface>{};
+      for (final sender in _senders.values) {
+        final adapterId = sender.iface.adapterId;
+        if (_joined.containsKey(adapterId)) continue;
+        pending.putIfAbsent(adapterId, () => sender.iface);
+      }
+      if (pending.isEmpty) return;
+      final system = await _systemInterfaces();
+      for (final iface in pending.values) {
         _join(receiver, iface, system);
       }
     });
@@ -153,6 +172,16 @@ final class MulticastChannel {
     if (_receiver == null || sender == null) return;
     try {
       sender.send(a.encode());
+    } catch (e) {
+      _log('multicast send failed: ${e.runtimeType}');
+    }
+  }
+
+  void sendTo(Announcement a, ActiveInterface via, InternetAddress to) {
+    final sender = _senders[via.id];
+    if (_receiver == null || sender == null) return;
+    try {
+      sender.send(a.encode(), to);
     } catch (e) {
       _log('multicast send failed: ${e.runtimeType}');
     }

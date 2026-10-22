@@ -2,6 +2,8 @@ import 'dart:io';
 
 import '../protocol/protocol.dart';
 
+const int _maxUnpairedPerAddress = 4;
+
 final class DiscoveredDevice {
   const DiscoveredDevice({
     required this.info,
@@ -113,7 +115,7 @@ final class DiscoveryRegistry {
       return const Refreshed();
     }
     if (known != null) return Verify(a.info, from, interfaceId);
-    if (_unpairedLimitReached(fingerprint)) return const Ignore();
+    if (_unpairedLimitReached(fingerprint, from)) return const Ignore();
     return Verify(a.info, from, interfaceId);
   }
 
@@ -126,9 +128,13 @@ final class DiscoveryRegistry {
     if (fingerprint == _selfFingerprint) return false;
     final known = _entries[fingerprint];
     if (known == null) {
-      if (_unpairedLimitReached(fingerprint)) return false;
+      if (_unpairedLimitReached(fingerprint, address)) return false;
       _entries[fingerprint] = _Entry(info, address, interfaceId, _now());
       return true;
+    }
+    if (known.address.address != address.address &&
+        _addressLimitReached(fingerprint, address)) {
+      return false;
     }
     known
       ..info = info
@@ -152,9 +158,23 @@ final class DiscoveryRegistry {
     _entries.removeWhere((_, entry) => entry.interfaceId == interfaceId);
   }
 
-  bool _unpairedLimitReached(String fingerprint) {
+  bool _unpairedLimitReached(String fingerprint, InternetAddress address) {
     if (_isPaired(fingerprint)) return false;
     final unpaired = _entries.keys.where((key) => !_isPaired(key)).length;
-    return unpaired >= Limits.maxListedUnpaired;
+    if (unpaired >= Limits.maxListedUnpaired) return true;
+    return _addressLimitReached(fingerprint, address);
+  }
+
+  bool _addressLimitReached(String fingerprint, InternetAddress address) {
+    if (_isPaired(fingerprint)) return false;
+    final sameAddress = _entries.entries
+        .where(
+          (entry) =>
+              entry.key != fingerprint &&
+              entry.value.address.address == address.address &&
+              !_isPaired(entry.key),
+        )
+        .length;
+    return sameAddress >= _maxUnpairedPerAddress;
   }
 }

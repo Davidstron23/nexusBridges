@@ -47,8 +47,11 @@ const int _maxProtocolLength = 16;
 final RegExp _fingerprintPattern = RegExp(r'^[0-9A-F]{64}$');
 final RegExp _protocolPattern = RegExp(r'^\d+\.\d+$');
 final RegExp _invisibleCharacters = RegExp(
-  r'[\u0000-\u001F\u007F-\u009F\u2028\u2029\u200B-\u200F\u202A-\u202E'
-  r'\u2060\u2066-\u2069\uFEFF]',
+  r'[\u0000-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5'
+  r'\u180B-\u180F\u2028\u2029\u200B-\u200F\u202A-\u202E\u2060-\u2064'
+  r'\u2066-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8'
+  r'\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0000}-\u{E0FFF}]',
+  unicode: true,
 );
 
 const Set<String> _deviceInfoKeys = {

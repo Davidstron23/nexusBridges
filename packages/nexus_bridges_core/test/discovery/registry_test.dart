@@ -514,6 +514,255 @@ void main() {
     });
   });
 
+  group('unpaired devices per address (RF-57, plan v2.11 point 2)', () {
+    const crowded = '127.0.0.5';
+
+    void fillAddress([String address = crowded, int firstSeed = 200]) {
+      for (var i = 0; i < 4; i++) {
+        verified(_info(firstSeed + i), address);
+      }
+    }
+
+    test('4 unpaired devices with the same address fit', () {
+      fillAddress();
+
+      expect(registry.devices, hasLength(4));
+      expect(
+        registry.devices.map((device) => device.address.address),
+        everyElement(crowded),
+      );
+    });
+
+    test('a hello from a 5th unpaired device at that address is ignored', () {
+      fillAddress();
+
+      expect(
+        registry.onAnnouncement(_hello(_info(300)), _ip(crowded), 'eth'),
+        isA<Ignore>(),
+      );
+    });
+
+    test('onVerified of a 5th unpaired device at that address returns false '
+        'and the list stays at 4', () {
+      fillAddress();
+
+      expect(registry.onVerified(_info(300), _ip(crowded), 'eth'), isFalse);
+
+      expect(registry.devices, hasLength(4));
+      expect(listed(), isNot(contains(_fingerprint(300))));
+    });
+
+    test('an unpaired device at another address still gets in', () {
+      fillAddress();
+
+      expect(
+        registry.onAnnouncement(_hello(_info(300)), _ip('127.0.0.6'), 'eth'),
+        isA<Verify>(),
+      );
+      verified(_info(300), '127.0.0.6');
+
+      expect(registry.devices, hasLength(5));
+      expect(deviceOf(300).address.address, '127.0.0.6');
+    });
+
+    test('a paired device at that address is still verified and added', () {
+      fillAddress();
+      paired.add(_fingerprint(300));
+
+      expect(
+        registry.onAnnouncement(_hello(_info(300)), _ip(crowded), 'eth'),
+        isA<Verify>(),
+      );
+      verified(_info(300), crowded);
+
+      expect(registry.devices, hasLength(5));
+      expect(deviceOf(300).paired, isTrue);
+    });
+
+    test('paired devices at that address do not count for it', () {
+      for (var i = 0; i < 4; i++) {
+        paired.add(_fingerprint(400 + i));
+        verified(_info(400 + i), crowded);
+      }
+
+      fillAddress();
+
+      expect(registry.devices, hasLength(8));
+      expect(registry.onVerified(_info(300), _ip(crowded), 'eth'), isFalse);
+    });
+
+    test('the 4 listed ones are still refreshed and verified again from that '
+        'address', () {
+      fillAddress();
+      at(const Duration(seconds: 5));
+
+      for (var i = 0; i < 4; i++) {
+        expect(
+          registry.onAnnouncement(_hello(_info(200 + i)), _ip(crowded), 'eth'),
+          isA<Refreshed>(),
+        );
+        verified(_info(200 + i, name: 'renamed'), crowded);
+      }
+
+      expect(registry.devices, hasLength(4));
+      expect(
+        registry.devices.map((device) => device.info.name),
+        everyElement('renamed'),
+      );
+    });
+
+    test('a listed device does not move to an address that already has 4 '
+        'other unpaired devices and stays where it was', () {
+      verified(_info(300), '127.0.0.9', 'wifi');
+      fillAddress();
+      at(const Duration(seconds: 5));
+
+      expect(
+        registry.onVerified(_info(300, name: 'Moved'), _ip(crowded), 'eth'),
+        isFalse,
+      );
+
+      final device = deviceOf(300);
+      expect(device.address.address, '127.0.0.9');
+      expect(device.interfaceId, 'wifi');
+      expect(device.info.name, 'device 300');
+      expect(device.lastSeen, _start);
+      expect(registry.devices, hasLength(5));
+      expect(
+        registry.onAnnouncement(_hello(_info(300)), _ip('127.0.0.9'), 'wifi'),
+        isA<Refreshed>(),
+      );
+    });
+
+    test('a listed device moves to an address with 3 other unpaired '
+        'devices', () {
+      verified(_info(300), '127.0.0.9', 'wifi');
+      for (var i = 0; i < 3; i++) {
+        verified(_info(200 + i), crowded);
+      }
+
+      expect(registry.onVerified(_info(300), _ip(crowded), 'eth'), isTrue);
+
+      expect(deviceOf(300).address.address, crowded);
+      expect(registry.onVerified(_info(301), _ip(crowded), 'eth'), isFalse);
+    });
+
+    test('a paired listed device moves to an address with 4 unpaired '
+        'devices', () {
+      paired.add(_fingerprint(300));
+      verified(_info(300), '127.0.0.9', 'wifi');
+      fillAddress();
+
+      expect(registry.onVerified(_info(300), _ip(crowded), 'eth'), isTrue);
+
+      expect(deviceOf(300).address.address, crowded);
+    });
+
+    test('after one of them says goodbye a new one fits again at that '
+        'address, and only one', () {
+      fillAddress();
+
+      registry.onAnnouncement(_bye(_info(200)), _ip(crowded), 'eth');
+
+      expect(
+        registry.onAnnouncement(_hello(_info(300)), _ip(crowded), 'eth'),
+        isA<Verify>(),
+      );
+      verified(_info(300), crowded);
+      expect(registry.devices, hasLength(4));
+      expect(
+        registry.onAnnouncement(_hello(_info(301)), _ip(crowded), 'eth'),
+        isA<Ignore>(),
+      );
+    });
+
+    test('after one of them expires a new one fits again at that address', () {
+      verified(_info(200), crowded);
+      at(const Duration(seconds: 10));
+      for (var i = 1; i < 4; i++) {
+        verified(_info(200 + i), crowded);
+      }
+      expect(registry.onVerified(_info(300), _ip(crowded), 'eth'), isFalse);
+
+      at(const Duration(seconds: 35));
+      expect(registry.expire(), [_fingerprint(200)]);
+
+      expect(
+        registry.onAnnouncement(_hello(_info(300)), _ip(crowded), 'eth'),
+        isA<Verify>(),
+      );
+      verified(_info(300), crowded);
+      expect(registry.devices, hasLength(4));
+    });
+
+    test('a device that stops being paired counts again at its address', () {
+      paired.add(_fingerprint(400));
+      verified(_info(400), crowded);
+      for (var i = 0; i < 3; i++) {
+        verified(_info(200 + i), crowded);
+      }
+      verified(_info(300), crowded);
+
+      paired.remove(_fingerprint(400));
+
+      expect(registry.onVerified(_info(301), _ip(crowded), 'eth'), isFalse);
+      expect(
+        registry.onAnnouncement(_hello(_info(301)), _ip(crowded), 'eth'),
+        isA<Ignore>(),
+      );
+    });
+
+    test('one address with 70 certificates lists only 4 of them and leaves '
+        'room for the others', () {
+      var verifies = 0;
+      for (var i = 0; i < 70; i++) {
+        final action = registry.onAnnouncement(
+          _hello(_info(10000 + i)),
+          _ip(crowded),
+          'eth',
+        );
+        if (action is Verify) {
+          verifies++;
+          registry.onVerified(action.info, action.address, action.interfaceId);
+        }
+      }
+
+      expect(verifies, 4);
+      expect(registry.devices, hasLength(4));
+      for (var i = 0; i < 10; i++) {
+        final action = registry.onAnnouncement(
+          _hello(_info(500 + i)),
+          _ip('127.0.1.${i + 1}'),
+          'eth',
+        );
+        expect(action, isA<Verify>());
+        verified(_info(500 + i), '127.0.1.${i + 1}');
+      }
+      expect(registry.devices, hasLength(14));
+    });
+
+    test('the global limit of 64 stays: 16 addresses with 4 each fill it and '
+        'a new unpaired device from a fresh address is ignored', () {
+      for (var a = 0; a < 16; a++) {
+        fillAddress('127.0.1.${a + 1}', 1000 + a * 4);
+      }
+      expect(registry.devices, hasLength(Limits.maxListedUnpaired));
+
+      expect(
+        registry.onAnnouncement(_hello(_info(5000)), _ip('127.0.2.1'), 'eth'),
+        isA<Ignore>(),
+      );
+      expect(
+        registry.onVerified(_info(5000), _ip('127.0.2.1'), 'eth'),
+        isFalse,
+      );
+
+      paired.add(_fingerprint(5001));
+      verified(_info(5001), '127.0.2.2');
+      expect(registry.devices, hasLength(Limits.maxListedUnpaired + 1));
+    });
+  });
+
   group('devices', () {
     test('paired is computed when the list is read', () {
       verified(_info(1));
