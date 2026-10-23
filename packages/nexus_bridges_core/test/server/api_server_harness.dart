@@ -29,13 +29,14 @@ ActiveInterface loopbackInterface({
   subnet: Ipv4Subnet(InternetAddress(address), prefixLength),
 );
 
-PairedDevice pairedDeviceOf(DeviceIdentity identity) => PairedDevice(
-  fingerprint: identity.fingerprint,
-  name: 'peer',
-  certificatePem: identity.certificatePem,
-  relation: PeerRelation.mine,
-  pairedAt: DateTime.utc(2026, 10, 21),
-);
+PairedDevice pairedDeviceOf(DeviceIdentity identity, {DateTime? pairedAt}) =>
+    PairedDevice(
+      fingerprint: identity.fingerprint,
+      name: 'peer',
+      certificatePem: identity.certificatePem,
+      relation: PeerRelation.mine,
+      pairedAt: pairedAt ?? DateTime.utc(2026, 10, 21),
+    );
 
 DeviceInfo selfInfoOf(DeviceIdentity identity) => DeviceInfo(
   name: 'Server PC',
@@ -282,11 +283,63 @@ typedef Registration = ({
   ActiveInterface via,
 });
 
+final class RouteProbe {
+  RouteProbe(
+    this.path, {
+    this.access = RouteAccess.anonymous,
+    this.maxBodyBytes = Limits.maxPairingBodyBytes,
+    this.limit,
+    this.answer,
+  });
+
+  final String path;
+  final RouteAccess access;
+  final int maxBodyBytes;
+  final RouteLimit? limit;
+  FutureOr<ApiReply> Function(ApiCall call)? answer;
+  Completer<void>? gate;
+  final List<ApiCall> calls = [];
+  int answered = 0;
+
+  int get count => calls.length;
+
+  ApiRoute get route => ApiRoute(
+    path: path,
+    access: access,
+    handle: _handle,
+    maxBodyBytes: maxBodyBytes,
+    limit: limit,
+  );
+
+  Future<void> arrived(int expected, {Duration limit = waitLimit}) async {
+    final stopwatch = Stopwatch()..start();
+    while (calls.length < expected) {
+      if (stopwatch.elapsed > limit) {
+        throw TimeoutException('$path got ${calls.length} of $expected');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+  }
+
+  Future<ApiReply> _handle(ApiCall call) async {
+    calls.add(call);
+    final held = gate;
+    if (held != null) await held.future;
+    final reply = answer;
+    final result = reply == null
+        ? ApiReply(200, {'path': call.path, 'call': calls.length})
+        : await reply(call);
+    answered++;
+    return result;
+  }
+}
+
 final class ServerHarness {
-  ServerHarness._(this.identity, this.paired);
+  ServerHarness._(this.identity, this.paired, this.pairedFile);
 
   final DeviceIdentity identity;
   final PairedDevicesStore paired;
+  final File pairedFile;
   final List<String> logs = [];
   final List<Registration> registrations = [];
   late final ApiServer server;
@@ -300,21 +353,24 @@ final class ServerHarness {
     Iterable<DeviceIdentity> pairedWith = const [],
     List<ActiveInterface>? active,
     int port = 0,
+    List<ApiRoute> routes = const [],
   }) async {
     final dir = await Directory.systemTemp.createTemp('nexus_api_');
     addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}${Platform.pathSeparator}paired.json');
     final store = PairedDevicesStore(
-      JsonFileStore(File('${dir.path}${Platform.pathSeparator}paired.json')),
+      JsonFileStore(file),
       ownerFingerprint: identity.fingerprint,
     );
     await store.load();
     if (pairedWith.isNotEmpty) {
       await store.replaceAll([for (final p in pairedWith) pairedDeviceOf(p)]);
     }
-    final harness = ServerHarness._(identity, store);
+    final harness = ServerHarness._(identity, store, file);
     harness.server = ApiServer(
       identity: identity,
       paired: store,
+      routes: routes,
       selfInfo: () => selfInfoOf(identity),
       onRegistered: (caller, from, via) {
         final registration = (caller: caller, from: from, via: via);
@@ -351,6 +407,31 @@ Future<int> freePort({InternetAddress? address}) async {
   final port = probe.port;
   await probe.close();
   return port;
+}
+
+Future<int> freePortOn(List<InternetAddress> addresses) async {
+  for (var attempt = 0; attempt < 50; attempt++) {
+    final port = await freePort(address: addresses.first);
+    var free = true;
+    for (final address in addresses) {
+      if (!await canBind(address, port) || !await _canBindUdp(address, port)) {
+        free = false;
+        break;
+      }
+    }
+    if (free) return port;
+  }
+  throw StateError('no port free on every address');
+}
+
+Future<bool> _canBindUdp(InternetAddress address, int port) async {
+  try {
+    final socket = await RawDatagramSocket.bind(address, port);
+    socket.close();
+    return true;
+  } on SocketException {
+    return false;
+  }
 }
 
 Future<bool> canBind(InternetAddress address, int port) async {
