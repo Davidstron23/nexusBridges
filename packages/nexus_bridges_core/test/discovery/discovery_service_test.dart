@@ -123,6 +123,26 @@ Future<int> _freeTcpPort() async {
   return port;
 }
 
+Future<int> _freePort() async {
+  while (true) {
+    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final port = tcp.port;
+    RawDatagramSocket? udp;
+    try {
+      udp = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        port,
+        reuseAddress: false,
+      );
+    } on SocketException {
+      udp = null;
+    }
+    udp?.close();
+    await tcp.close();
+    if (udp != null) return port;
+  }
+}
+
 Future<PairedDevicesStore> _pairedStore() async {
   final dir = await Directory.systemTemp.createTemp('nexus_discovery_');
   addTearDown(() => dir.delete(recursive: true));
@@ -166,9 +186,7 @@ final class _Channel {
   final Map<String, RawDatagramSocket> _senders = {};
 
   static Future<_Channel> open(List<ActiveInterface> active) async {
-    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = probe.port;
-    await probe.close();
+    final port = await _freePort();
     final channel = MulticastChannel(port: port);
     addTearDown(channel.close);
     final fixture = _Channel._(channel, port);
