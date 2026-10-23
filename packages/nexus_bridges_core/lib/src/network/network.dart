@@ -224,7 +224,7 @@ final class NetworkTrustStore {
   Future<void> load() async {
     _entries.clear();
     try {
-      final json = await _store.read();
+      final json = await _store.readVersioned(1);
       if (json != null) _entries.addAll(_parseEntries(json));
     } on FormatException {
       await _store.quarantine(_now());

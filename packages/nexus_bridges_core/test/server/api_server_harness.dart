@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
-import 'package:crypto/crypto.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/network/network.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
@@ -34,27 +33,7 @@ PairedDevice pairedDeviceOf(DeviceIdentity identity) => PairedDevice(
   fingerprint: identity.fingerprint,
   name: 'peer',
   certificatePem: identity.certificatePem,
-  permissions: const {Permission.send, Permission.receive},
-  pairedAt: DateTime.utc(2026, 10, 21),
-);
-
-final List<int> unreadableCertificateDer = utf8.encode(
-  'not a certificate, only bytes that decode from base64',
-);
-
-final String unreadableCertificatePem =
-    '-----BEGIN CERTIFICATE-----\n'
-    '${base64.encode(unreadableCertificateDer)}\n'
-    '-----END CERTIFICATE-----\n';
-
-PairedDevice unreadablePairedDevice() => PairedDevice(
-  fingerprint: sha256
-      .convert(unreadableCertificateDer)
-      .toString()
-      .toUpperCase(),
-  name: 'unreadable',
-  certificatePem: unreadableCertificatePem,
-  permissions: const {Permission.send},
+  relation: PeerRelation.mine,
   pairedAt: DateTime.utc(2026, 10, 21),
 );
 
@@ -219,7 +198,8 @@ final class TlsClient {
     final secure = await SecureSocket.secure(
       raw,
       context: context ?? anonymousContext,
-      onBadCertificate: (c) => fingerprintOf(c.der) == serverFingerprint,
+      onBadCertificate: (c) =>
+          fingerprintOfCertificate(c.der) == serverFingerprint,
     );
     addTearDown(secure.destroy);
     return TlsClient._(secure);
@@ -325,6 +305,7 @@ final class ServerHarness {
     addTearDown(() => dir.delete(recursive: true));
     final store = PairedDevicesStore(
       JsonFileStore(File('${dir.path}${Platform.pathSeparator}paired.json')),
+      ownerFingerprint: identity.fingerprint,
     );
     await store.load();
     if (pairedWith.isNotEmpty) {

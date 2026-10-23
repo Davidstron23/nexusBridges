@@ -140,7 +140,7 @@ Future<void> main(List<String> args) async {
   const long = Duration(seconds: 10);
   const settle = Duration(milliseconds: 300);
   final identity = DeviceIdentity.generate(
-    commonName: 'NexusBridges-verifier-child',
+    commonName: randomCommonName(),
   );
   final verifier = DeviceVerifier(identity: identity);
   final self = DeviceInfo(
@@ -346,9 +346,9 @@ void main() {
   late DeviceInfo self;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-verifier-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-verifier-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-verifier-carol');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
     verifier = DeviceVerifier(identity: bob);
     self = callerInfoOf(bob);
   });

@@ -128,6 +128,7 @@ Future<PairedDevicesStore> _pairedStore() async {
   addTearDown(() => dir.delete(recursive: true));
   final store = PairedDevicesStore(
     JsonFileStore(File('${dir.path}${Platform.pathSeparator}paired.json')),
+    ownerFingerprint: 'A' * 64,
   );
   await store.load();
   return store;
@@ -666,12 +667,12 @@ void main() {
     _loopbackName = all
         .firstWhere((i) => i.addresses.any((a) => a.address == '127.0.0.1'))
         .name;
-    self = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-self');
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-carol');
-    dave = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-dave');
-    erin = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-erin');
+    self = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    dave = DeviceIdentity.generate(commonName: randomCommonName());
+    erin = DeviceIdentity.generate(commonName: randomCommonName());
     first = _iface('127.0.0.1');
     second = _iface('127.0.0.2');
   });
@@ -1375,9 +1376,9 @@ void main() {
       setUpAll(() {
         crowd = [
           for (var i = 0; i < 65; i++)
-            DeviceIdentity.generate(commonName: 'NexusBridges-crowd-$i'),
+            DeviceIdentity.generate(commonName: randomCommonName()),
         ];
-        newcomer = DeviceIdentity.generate(commonName: 'NexusBridges-newcomer');
+        newcomer = DeviceIdentity.generate(commonName: randomCommonName());
       });
 
       test('the list stops at 64 unpaired devices, ignores new ones without '

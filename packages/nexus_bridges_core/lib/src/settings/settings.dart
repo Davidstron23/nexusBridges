@@ -9,7 +9,7 @@ final class SettingsStore {
 
   Future<String?> readLanguage() async {
     try {
-      final language = (await _store.read())?['language'];
+      final language = (await _store.readVersioned(1))?['language'];
       return language == 'es' || language == 'en' ? language as String : null;
     } on Exception {
       return null;

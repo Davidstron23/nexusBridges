@@ -30,13 +30,41 @@ Future<void> writeFileAtomic(File file, List<int> bytes) {
   return result;
 }
 
-Future<void> _writeFileOnce(File file, List<int> bytes) async {
+const List<Duration> _defaultRenameRetryDelays = [
+  Duration(milliseconds: 20),
+  Duration(milliseconds: 40),
+  Duration(milliseconds: 80),
+  Duration(milliseconds: 160),
+  Duration(milliseconds: 320),
+];
+
+Future<void> _renameWithRetry(
+  File temp,
+  String target,
+  List<Duration> delays,
+) async {
+  for (var attempt = 0; ; attempt++) {
+    try {
+      await temp.rename(target);
+      return;
+    } on FileSystemException {
+      if (attempt >= delays.length) rethrow;
+      await Future<void>.delayed(delays[attempt]);
+    }
+  }
+}
+
+Future<void> _writeFileOnce(
+  File file,
+  List<int> bytes, {
+  List<Duration> renameRetryDelays = _defaultRenameRetryDelays,
+}) async {
   await file.parent.create(recursive: true);
   final unique = '${DateTime.now().microsecondsSinceEpoch}.${_tempCounter++}';
   final temp = File('${file.path}.$unique.tmp');
   try {
     await temp.writeAsBytes(bytes, flush: true);
-    await temp.rename(file.path);
+    await _renameWithRetry(temp, file.path, renameRetryDelays);
   } catch (_) {
     try {
       if (await temp.exists()) await temp.delete();
@@ -59,6 +87,16 @@ final class JsonFileStore {
     return decoded;
   }
 
+  Future<Map<String, Object?>?> readVersioned(int version) async {
+    final json = await read();
+    if (json == null) return null;
+    final found = json['version'];
+    if (found is! int || found != version) {
+      throw const FormatException('unsupported version');
+    }
+    return json;
+  }
+
   Future<void> write(Map<String, Object?> json) {
     return writeFileAtomic(
       file,
@@ -66,8 +104,8 @@ final class JsonFileStore {
     );
   }
 
-  Future<File> quarantine(DateTime now) async {
-    final base = '${file.path}.broken-${_timestamp(now)}';
+  Future<File> quarantine(DateTime now, {String reason = 'broken'}) async {
+    final base = '${file.path}.$reason-${_timestamp(now)}';
     var candidate = base;
     for (var n = 2; await _exists(candidate); n++) {
       candidate = '$base-$n';

@@ -76,6 +76,32 @@ void main() {
       });
     }
 
+    final versions = <String, String>{
+      'version 2': '{"version": 2, "language": "es"}',
+      'no version': '{"language": "es"}',
+      'version "1" as text': '{"version": "1", "language": "es"}',
+      'version 1.0': '{"version": 1.0, "language": "es"}',
+      'a null version': '{"version": null, "language": "en"}',
+    };
+
+    for (final MapEntry(key: label, value: content) in versions.entries) {
+      test('$label gives null and the file stays as it was (C10)', () async {
+        expect(await languageIn(content), isNull);
+        expect(await namesIn(dataDir), ['settings.json']);
+        expect(await settingsFile.readAsString(), content);
+      });
+    }
+
+    test('a saved language with version 2 falls back to the Windows '
+        'language (C10)', () async {
+      await settingsFile.writeAsString('{"version": 2, "language": "en"}');
+
+      expect(
+        await loadLanguage(platformLanguageCode: 'es', dataDir: dataDir),
+        'es',
+      );
+    });
+
     test('bytes that are not UTF-8 give null and stay in place', () async {
       await settingsFile.writeAsBytes(const [0xFF, 0xFE, 0x00, 0xC3]);
 
