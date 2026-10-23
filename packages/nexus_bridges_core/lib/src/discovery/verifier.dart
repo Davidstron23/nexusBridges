@@ -142,7 +142,11 @@ final class DeviceVerifier {
       raw,
       context: _identity.clientContext(),
       onBadCertificate: (cert) {
-        seen = fingerprintOf(cert.der);
+        try {
+          seen = fingerprintOfCertificate(cert.der);
+        } catch (_) {
+          return false;
+        }
         return expectedFingerprint == null || seen == expectedFingerprint;
       },
     );

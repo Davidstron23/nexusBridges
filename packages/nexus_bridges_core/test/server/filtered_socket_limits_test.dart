@@ -70,7 +70,9 @@ final class _Server {
     final info = request.connectionInfo!;
     final key = '${info.remoteAddress.address}:${info.remotePort}';
     final certificate = request.certificate;
-    final seen = certificate == null ? 'none' : fingerprintOf(certificate.der);
+    final seen = certificate == null
+        ? 'none'
+        : fingerprintOfCertificate(certificate.der);
     handled.add(seen);
     final body = utf8.encode(seen);
     try {
@@ -154,7 +156,8 @@ Future<String?> _tlsGet(
     final secure = await SecureSocket.secure(
       raw,
       context: context,
-      onBadCertificate: (c) => fingerprintOf(c.der) == serverFingerprint,
+      onBadCertificate: (c) =>
+          fingerprintOfCertificate(c.der) == serverFingerprint,
     ).timeout(_waitLimit);
     addTearDown(secure.destroy);
     secure.done.ignore();
@@ -193,7 +196,7 @@ Future<String> _httpsGet(
 }) async {
   final client = HttpClient(context: context)
     ..badCertificateCallback = (certificate, host, port) =>
-        fingerprintOf(certificate.der) == serverFingerprint;
+        fingerprintOfCertificate(certificate.der) == serverFingerprint;
   try {
     final request = await client.getUrl(Uri.parse('https://127.0.0.1:$port/'));
     final response = await request.close();
@@ -291,8 +294,8 @@ void main() {
   late Uint8List clientHello;
 
   setUpAll(() async {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-a1-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-a1-bob');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
     clientHello = await _captureClientHello();
   });
 

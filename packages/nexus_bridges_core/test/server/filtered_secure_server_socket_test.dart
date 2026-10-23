@@ -67,7 +67,9 @@ final class _HttpHarness {
     final info = request.connectionInfo!;
     final key = '${info.remoteAddress.address}:${info.remotePort}';
     final certificate = request.certificate;
-    final seen = certificate == null ? 'none' : fingerprintOf(certificate.der);
+    final seen = certificate == null
+        ? 'none'
+        : fingerprintOfCertificate(certificate.der);
     handled.add(seen);
     try {
       final body = respond == null ? seen : await respond(request, key, socket);
@@ -135,7 +137,7 @@ Future<String> _get(
 }) async {
   final client = HttpClient(context: context)
     ..badCertificateCallback = (certificate, host, port) =>
-        fingerprintOf(certificate.der) == serverFingerprint;
+        fingerprintOfCertificate(certificate.der) == serverFingerprint;
   try {
     final request = await client.getUrl(Uri.parse('https://127.0.0.1:$port/'));
     final response = await request.close();
@@ -156,7 +158,7 @@ Future<void> _tlsUntilClosed(
       port,
       context: context,
       onBadCertificate: (certificate) =>
-          fingerprintOf(certificate.der) == serverFingerprint,
+          fingerprintOfCertificate(certificate.der) == serverFingerprint,
     );
     socket.done.ignore();
     try {
@@ -294,9 +296,9 @@ void main() {
   late DeviceIdentity carol;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-carol');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
   });
 
   SecurityContext serverTrustingBob() =>
@@ -435,7 +437,8 @@ void main() {
       await expectLater(
         SecureSocket.secure(
           raw,
-          onBadCertificate: (c) => fingerprintOf(c.der) == alice.fingerprint,
+          onBadCertificate: (c) =>
+              fingerprintOfCertificate(c.der) == alice.fingerprint,
         ).timeout(_waitLimit),
         throwsA(isA<IOException>()),
       );
@@ -500,7 +503,9 @@ void main() {
         socket.listen((s) {
           final certificate = (s as SecureSocket).peerCertificate;
           delivered.add(
-            certificate == null ? null : fingerprintOf(certificate.der),
+            certificate == null
+                ? null
+                : fingerprintOfCertificate(certificate.der),
           );
           s.destroy();
         });
@@ -603,7 +608,8 @@ void main() {
         _loopback,
         harness.port,
         context: bob.clientContext(),
-        onBadCertificate: (c) => fingerprintOf(c.der) == alice.fingerprint,
+        onBadCertificate: (c) =>
+            fingerprintOfCertificate(c.der) == alice.fingerprint,
       );
       addTearDown(secure.destroy);
       secure.done.ignore();
@@ -627,7 +633,8 @@ void main() {
         _loopback,
         harness.port,
         context: bob.clientContext(),
-        onBadCertificate: (c) => fingerprintOf(c.der) == alice.fingerprint,
+        onBadCertificate: (c) =>
+            fingerprintOfCertificate(c.der) == alice.fingerprint,
       );
       addTearDown(secure.destroy);
       secure.done.ignore();

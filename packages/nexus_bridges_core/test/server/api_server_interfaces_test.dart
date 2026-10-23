@@ -15,8 +15,8 @@ void main() {
   late DeviceIdentity bob;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-ifaces-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-ifaces-bob');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
   });
 
   Future<Reply?> present(

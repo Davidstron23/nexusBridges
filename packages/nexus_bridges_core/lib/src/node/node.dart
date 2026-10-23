@@ -296,6 +296,7 @@ final class NexusNode {
     );
     final paired = PairedDevicesStore(
       JsonFileStore(_fileIn(dir, 'paired.json')),
+      ownerFingerprint: identity.fingerprint,
       now: _now,
     );
     try {

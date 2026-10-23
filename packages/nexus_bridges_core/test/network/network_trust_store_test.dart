@@ -408,4 +408,71 @@ void main() {
       expect(await namesIn(dataDir), ['networks.json']);
     });
   });
+
+  group('the version of networks.json is checked on load (C10)', () {
+    Map<String, Object?> validBody() => {
+      'networks': {
+        _homeId: {
+          'decision': 'trusted',
+          'name': 'Home',
+          'decidedAt': '2026-10-20T12:00:00.000Z',
+        },
+      },
+    };
+
+    final versions = <String, Map<String, Object?> Function()>{
+      'version 2': () => {'version': 2, ...validBody()},
+      'no version': validBody,
+      'version "1" as text': () => {'version': '1', ...validBody()},
+      'version 1.0': () => {'version': 1.0, ...validBody()},
+      'version 0': () => {'version': 0, ...validBody()},
+    };
+
+    for (final MapEntry(key: label, value: build) in versions.entries) {
+      test('$label: quarantined and nothing trusted', () async {
+        final content = jsonEncode(build());
+        await networksFile.writeAsString(content);
+        final store = storeOn(networksFile);
+
+        await store.load();
+
+        expect(store.decisionFor(_homeId), isNull);
+        expect(await namesIn(dataDir), [brokenName]);
+        expect(
+          await File('${dataDir.path}$sep$brokenName').readAsString(),
+          content,
+        );
+      });
+    }
+
+    test('version 1 with the same body is loaded', () async {
+      await networksFile.writeAsString(
+        jsonEncode({'version': 1, ...validBody()}),
+      );
+      final store = storeOn(networksFile);
+
+      await store.load();
+
+      expect(store.decisionFor(_homeId), NetworkDecision.trusted);
+      expect(await namesIn(dataDir), ['networks.json']);
+    });
+
+    test('after a quarantine for the version, a new decision writes '
+        'version 1', () async {
+      await networksFile.writeAsString(
+        jsonEncode({'version': 2, ...validBody()}),
+      );
+      final store = storeOn(networksFile);
+      await store.load();
+
+      expect(
+        await store.setDecision(_cafeId, NetworkDecision.trusted, name: 'C'),
+        isTrue,
+      );
+
+      expect((await rawFile())['version'], 1);
+      expect(networksOf(await rawFile()).keys, [_cafeId]);
+      expect(await namesIn(dataDir), ['networks.json', brokenName]);
+    });
+  });
 }

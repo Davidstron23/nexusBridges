@@ -46,8 +46,8 @@ void main() {
   late DeviceIdentity bob;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-limits-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-limits-bob');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
   });
 
   Future<ServerHarness> start() => ServerHarness.start(identity: alice);
