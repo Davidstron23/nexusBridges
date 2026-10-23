@@ -316,9 +316,15 @@ final class ApiServer {
       return;
     }
     final certificate = request.certificate;
-    final fingerprint = certificate == null
-        ? null
-        : fingerprintOf(certificate.der);
+    final String? fingerprint;
+    try {
+      fingerprint = certificate == null
+          ? null
+          : fingerprintOfCertificate(certificate.der);
+    } catch (_) {
+      await _fail(request, body, _Failure.unauthorized);
+      return;
+    }
     final decision = decideRoute(
       method: request.method,
       path: request.uri.path,

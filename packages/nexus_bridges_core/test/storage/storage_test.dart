@@ -369,6 +369,71 @@ void main() {
     });
   });
 
+  group('JsonFileStore.readVersioned (C9)', () {
+    final unsupported = isA<FormatException>().having(
+      (e) => e.message,
+      'message',
+      'unsupported version',
+    );
+
+    Future<Map<String, Object?>?> readAs(int version, String content) async {
+      final file = fileIn('data.json');
+      await file.writeAsString(content);
+      return JsonFileStore(file).readVersioned(version);
+    }
+
+    test('returns the map when the version is the one asked', () async {
+      expect(await readAs(1, '{"version": 1, "language": "es"}'), {
+        'version': 1,
+        'language': 'es',
+      });
+      expect(await readAs(2, '{"version": 2, "devices": []}'), {
+        'version': 2,
+        'devices': <Object?>[],
+      });
+    });
+
+    test('returns null when the file does not exist', () async {
+      expect(
+        await JsonFileStore(fileIn('missing.json')).readVersioned(1),
+        isNull,
+      );
+      expect(await namesIn(temp), isEmpty);
+    });
+
+    final wrong = <String, (int, String)>{
+      'version 2 read as 1': (1, '{"version": 2}'),
+      'version 1 read as 2': (2, '{"version": 1, "devices": []}'),
+      'no version': (1, '{"language": "es"}'),
+      'a null version': (1, '{"version": null}'),
+      'the version as text': (1, '{"version": "1"}'),
+      'the version as 1.0': (1, '{"version": 1.0}'),
+      'the version as 1.5': (1, '{"version": 1.5}'),
+      'a negative version': (1, '{"version": -1}'),
+      'the version inside a list': (1, '{"version": [1]}'),
+      'an empty object': (1, '{}'),
+    };
+
+    for (final MapEntry(key: label, value: (version, content))
+        in wrong.entries) {
+      test('$label throws FormatException and leaves the file', () async {
+        await expectLater(readAs(version, content), throwsA(unsupported));
+        expect(await fileIn('data.json').readAsString(), content);
+      });
+    }
+
+    test(
+      'a file that is not a JSON object still throws FormatException',
+      () async {
+        await expectLater(readAs(1, '[1]'), throwsA(isA<FormatException>()));
+        await expectLater(
+          readAs(1, '{ broken'),
+          throwsA(isA<FormatException>()),
+        );
+      },
+    );
+  });
+
   group('JsonFileStore.write', () {
     test('round-trips through read', () async {
       final store = JsonFileStore(
@@ -429,6 +494,39 @@ void main() {
       expect(await file.exists(), isFalse);
       expect(await moved.readAsString(), 'second');
       expect(await first.readAsString(), 'first');
+    });
+
+    test('uses the reason in the name when one is given', () async {
+      final file = fileIn('paired.json');
+      await file.writeAsString('{"version": 2}');
+
+      final moved = await JsonFileStore(file)
+          .quarantine(now, reason: 'previous-identity');
+
+      expect(moved.path, '${file.path}.previous-identity-$stamp');
+      expect(await file.exists(), isFalse);
+      expect(await moved.readAsString(), '{"version": 2}');
+      expect(await namesIn(temp), ['paired.json.previous-identity-$stamp']);
+    });
+
+    test('appends -2 to a reason that is already taken, without touching '
+        'the broken copy', () async {
+      final file = fileIn('paired.json');
+      await File('${file.path}.broken-$stamp').writeAsString('broken');
+      await File('${file.path}.previous-identity-$stamp')
+          .writeAsString('first');
+      await file.writeAsString('second');
+
+      final moved = await JsonFileStore(file)
+          .quarantine(now, reason: 'previous-identity');
+
+      expect(moved.path, '${file.path}.previous-identity-$stamp-2');
+      expect(await moved.readAsString(), 'second');
+      expect(
+        await File('${file.path}.previous-identity-$stamp').readAsString(),
+        'first',
+      );
+      expect(await File('${file.path}.broken-$stamp').readAsString(), 'broken');
     });
 
     test('appends -3 when both the base name and -2 exist', () async {

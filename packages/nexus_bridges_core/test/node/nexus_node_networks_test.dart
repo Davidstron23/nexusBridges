@@ -410,13 +410,12 @@ final class _Peer {
     _Fixture f, {
     Duration announceInterval = _slowPoll,
   }) async {
-    final identity = DeviceIdentity.generate(
-      commonName: 'NexusBridges-node-peer',
-    );
+    final identity = DeviceIdentity.generate(commonName: randomCommonName());
     final dir = await Directory.systemTemp.createTemp('nexus_node_peer_');
     addTearDown(() => dir.delete(recursive: true));
     final paired = PairedDevicesStore(
       JsonFileStore(File('${dir.path}${_sep}paired.json')),
+      ownerFingerprint: identity.fingerprint,
     );
     await paired.load();
     final verifier = DeviceVerifier(identity: identity);
@@ -461,7 +460,7 @@ void main() {
 
   setUpAll(() async {
     _loopbackName = await _systemLoopbackName();
-    caller = DeviceIdentity.generate(commonName: 'NexusBridges-node-caller');
+    caller = DeviceIdentity.generate(commonName: randomCommonName());
   });
 
   group('asking about a network (RF-11, RF-13, RF-19)', () {

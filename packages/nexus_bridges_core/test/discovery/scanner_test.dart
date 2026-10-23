@@ -167,9 +167,9 @@ void main() {
   late DeviceInfo self;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-scanner-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-scanner-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-scanner-carol');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
     verifier = DeviceVerifier(identity: bob);
     self = callerInfoOf(bob);
   });

@@ -6,7 +6,7 @@ const Map<String, Set<String>> allowedImports = {
   'storage': {},
   'identity': {'storage'},
   'network': {'storage'},
-  'pairing': {'storage'},
+  'pairing': {'storage', 'identity'},
   'settings': {'storage'},
   'protocol': {},
   'server': {'identity', 'network', 'pairing', 'protocol'},

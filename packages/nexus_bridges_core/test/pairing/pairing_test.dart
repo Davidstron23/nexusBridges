@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
@@ -17,16 +16,17 @@ final class _PassThroughProtector implements SecretProtector {
 }
 
 final DeviceIdentity _identityA = DeviceIdentity.generate(
-  commonName: 'NexusBridges-laptop',
+  commonName: randomCommonName(),
 );
 final DeviceIdentity _identityB = DeviceIdentity.generate(
-  commonName: 'NexusBridges-desktop',
+  commonName: randomCommonName(),
 );
 
 final String _fingerprintA = _identityA.fingerprint;
 final String _fingerprintB = _identityB.fingerprint;
 final String _pemA = _identityA.certificatePem;
 final String _pemB = _identityB.certificatePem;
+final String _owner = 'C' * 64;
 final String _privateKeyPemA = utf8.decode(
   _identityA.protectPrivateKey(_PassThroughProtector()),
 );
@@ -37,14 +37,11 @@ String _bodyOf(String pem) =>
         .where((l) => !l.startsWith('-----'))
         .join();
 
-String _sha256Upper(List<int> bytes) =>
-    sha256.convert(bytes).toString().toUpperCase();
-
 final PairedDevice _laptop = PairedDevice(
   fingerprint: _fingerprintA,
   name: 'Laptop',
   certificatePem: _pemA,
-  permissions: {Permission.send, Permission.receive},
+  relation: PeerRelation.mine,
   pairedAt: DateTime.utc(2026, 10, 20, 12, 0, 0),
 );
 
@@ -52,7 +49,7 @@ final PairedDevice _desktop = PairedDevice(
   fingerprint: _fingerprintB,
   name: 'Desktop',
   certificatePem: _pemB,
-  permissions: {Permission.browse},
+  relation: PeerRelation.foreign,
   pairedAt: DateTime.utc(2026, 10, 21, 8, 30, 15, 250),
 );
 
@@ -61,7 +58,7 @@ PairedDevice _laptopWith({String? fingerprint, String? certificatePem}) =>
       fingerprint: fingerprint ?? _fingerprintA,
       name: 'Laptop',
       certificatePem: certificatePem ?? _pemA,
-      permissions: const {Permission.send},
+      relation: PeerRelation.mine,
       pairedAt: DateTime.utc(2026, 10, 20, 12),
     );
 
@@ -69,7 +66,7 @@ Map<String, Object?> _fieldsOf(PairedDevice d) => {
   'fingerprint': d.fingerprint,
   'name': d.name,
   'certificatePem': d.certificatePem,
-  'permissions': d.permissions.toSet(),
+  'relation': d.relation,
   'pairedAt': d.pairedAt,
 };
 
@@ -77,12 +74,12 @@ Map<String, Object?> _rawDevice({
   String? fingerprint,
   String? certificatePem,
   String pairedAt = '2026-10-20T12:00:00.000Z',
-  List<String> permissions = const ['send'],
+  String relation = 'mine',
 }) => {
   'fingerprint': fingerprint ?? _fingerprintA,
   'name': 'Laptop',
   'certificatePem': certificatePem ?? _pemA,
-  'permissions': permissions,
+  'relation': relation,
   'pairedAt': pairedAt,
 };
 
@@ -129,7 +126,7 @@ _invalidIdentities() {
           '-----END CERTIFICATE-----\n',
     ),
     'an empty body': (
-      fingerprint: _sha256Upper(const []),
+      fingerprint: 'A' * 64,
       certificatePem:
           '-----BEGIN CERTIFICATE-----\n\n-----END CERTIFICATE-----\n',
     ),
@@ -181,8 +178,11 @@ void main() {
     pairedFile = File('${dataDir.path}${sep}paired.json');
   });
 
-  PairedDevicesStore storeOn(File file) =>
-      PairedDevicesStore(JsonFileStore(file), now: () => clock);
+  PairedDevicesStore storeOn(File file) => PairedDevicesStore(
+    JsonFileStore(file),
+    ownerFingerprint: _owner,
+    now: () => clock,
+  );
 
   Future<List<String>> namesIn(Directory dir) async {
     final names = await dir
@@ -197,8 +197,14 @@ void main() {
 
   test('the fixtures are real certificates with their own fingerprint', () {
     expect(_fingerprintA, matches(RegExp(r'^[0-9A-F]{64}$')));
-    expect(_fingerprintA, _sha256Upper(base64.decode(_bodyOf(_pemA))));
-    expect(_fingerprintB, _sha256Upper(base64.decode(_bodyOf(_pemB))));
+    expect(
+      _fingerprintA,
+      fingerprintOfCertificate(base64.decode(_bodyOf(_pemA))),
+    );
+    expect(
+      _fingerprintB,
+      fingerprintOfCertificate(base64.decode(_bodyOf(_pemB))),
+    );
     expect(_fingerprintA, isNot(_fingerprintB));
     expect(_privateKeyPemA, contains('PRIVATE KEY'));
   });
@@ -219,13 +225,14 @@ void main() {
       expect(reloaded.isPaired(_fingerprintB), isTrue);
     });
 
-    test('the file has version 1 and every field by name', () async {
+    test('the file has version 2, the owner and every field by name', () async {
       await storeOn(pairedFile).replaceAll([_laptop, _desktop]);
 
       final json = await rawFile();
 
-      expect(json.keys.toSet(), {'version', 'devices'});
-      expect(json['version'], 1);
+      expect(json.keys.toSet(), {'version', 'owner', 'devices'});
+      expect(json['version'], 2);
+      expect(json['owner'], _owner);
       final devices = json['devices'] as List<Object?>;
       expect(devices, hasLength(2));
       final first = devices[0] as Map<String, Object?>;
@@ -234,16 +241,16 @@ void main() {
         'fingerprint',
         'name',
         'certificatePem',
-        'permissions',
+        'relation',
         'pairedAt',
       });
       expect(first['fingerprint'], _fingerprintA);
       expect(first['name'], 'Laptop');
       expect(first['certificatePem'], _pemA);
-      expect(first['permissions'], unorderedEquals(['send', 'receive']));
+      expect(first['relation'], 'mine');
       expect(first['pairedAt'], '2026-10-20T12:00:00.000Z');
       expect(second['fingerprint'], _fingerprintB);
-      expect(second['permissions'], ['browse']);
+      expect(second['relation'], 'foreign');
       expect(second['pairedAt'], '2026-10-21T08:30:15.250Z');
     });
 
@@ -253,7 +260,7 @@ void main() {
         fingerprint: _fingerprintA,
         name: 'Laptop',
         certificatePem: _pemA,
-        permissions: const {},
+        relation: PeerRelation.foreign,
         pairedAt: local,
       );
 
@@ -266,10 +273,10 @@ void main() {
               as Map<String, Object?>;
       expect(written['pairedAt'], local.toUtc().toIso8601String());
       expect(written['pairedAt'] as String, endsWith('Z'));
-      expect(written['permissions'], isEmpty);
+      expect(written['relation'], 'foreign');
       expect(reloaded.devices.single.pairedAt.isUtc, isTrue);
       expect(reloaded.devices.single.pairedAt.isAtSameMomentAs(local), isTrue);
-      expect(reloaded.devices.single.permissions, isEmpty);
+      expect(reloaded.devices.single.relation, PeerRelation.foreign);
     });
 
     test(
@@ -285,28 +292,6 @@ void main() {
         expect(await namesIn(dataDir), isEmpty);
       },
     );
-
-    test('an unknown permission in the file is ignored', () async {
-      await pairedFile.writeAsString(
-        jsonEncode({
-          'version': 1,
-          'devices': [
-            _rawDevice(permissions: ['send', 'teleport', 'browse']),
-          ],
-        }),
-      );
-      final store = storeOn(pairedFile);
-
-      await store.load();
-
-      expect(store.devices, hasLength(1));
-      expect(store.devices.single.permissions, {
-        Permission.send,
-        Permission.browse,
-      });
-      expect(store.isPaired(_fingerprintA), isTrue);
-      expect(await namesIn(dataDir), ['paired.json']);
-    });
   });
 
   group('isPaired', () {
@@ -339,19 +324,27 @@ void main() {
       'broken JSON': '{"version": 1, "devices": [',
       'a JSON array': '[]',
       'devices that is not a list': jsonEncode({
-        'version': 1,
+        'version': 2,
+        'owner': _owner,
         'devices': {'fingerprint': _fingerprintA},
       }),
       'an entry without fingerprint': jsonEncode({
-        'version': 1,
+        'version': 2,
+        'owner': _owner,
         'devices': [
           _rawDevice(),
           {..._rawDevice(fingerprint: _fingerprintB, certificatePem: _pemB)}
             ..remove('fingerprint'),
         ],
       }),
+      'an unknown relation': jsonEncode({
+        'version': 2,
+        'owner': _owner,
+        'devices': [_rawDevice(relation: 'teleport')],
+      }),
       'an invalid pairedAt': jsonEncode({
-        'version': 1,
+        'version': 2,
+        'owner': _owner,
         'devices': [
           _rawDevice(),
           _rawDevice(
@@ -399,7 +392,8 @@ void main() {
         in _invalidIdentities().entries) {
       test('$label: renamed with the clock, nobody paired', () async {
         final content = jsonEncode({
-          'version': 1,
+          'version': 2,
+          'owner': _owner,
           'devices': [
             _rawDevice(fingerprint: _fingerprintB, certificatePem: _pemB),
             _rawDevice(
@@ -439,7 +433,8 @@ void main() {
           '-----END CERTIFICATE-----\n';
       await pairedFile.writeAsString(
         jsonEncode({
-          'version': 1,
+          'version': 2,
+          'owner': _owner,
           'devices': [
             _rawDevice(fingerprint: _fingerprintA, certificatePem: pem),
           ],
@@ -564,7 +559,8 @@ void main() {
       test('$label is accepted by load and kept as written', () async {
         await pairedFile.writeAsString(
           jsonEncode({
-            'version': 1,
+            'version': 2,
+            'owner': _owner,
             'devices': [_rawDevice(certificatePem: pem)],
           }),
         );

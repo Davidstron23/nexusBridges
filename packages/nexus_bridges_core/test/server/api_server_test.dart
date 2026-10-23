@@ -14,10 +14,10 @@ void main() {
   late DeviceIdentity dave;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-api-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-api-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-api-carol');
-    dave = DeviceIdentity.generate(commonName: 'NexusBridges-api-dave');
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    dave = DeviceIdentity.generate(commonName: randomCommonName());
   });
 
   Future<ServerHarness> start({
@@ -330,102 +330,10 @@ void main() {
     );
   });
 
-  group('an unreadable paired certificate (v2.6.2)', () {
-    test('the scenario is real: pairing accepts the entry and TLS cannot load '
-        'its certificate', () async {
-      final harness = await ServerHarness.start(
-        identity: alice,
-        active: const [],
-      );
-
-      await harness.paired.replaceAll([unreadablePairedDevice()]);
-
-      expect(harness.paired.devices, hasLength(1));
-      expect(
-        () => SecurityContext(withTrustedRoots: false)
-            .setTrustedCertificatesBytes(utf8.encode(unreadableCertificatePem)),
-        throwsA(isA<TlsException>()),
-      );
-    });
-
-    test('rebuildTrust with it keeps register open on the same port and the '
-        'readable paired device still enters', () async {
-      final harness = await start(pairedWith: [bob]);
-      final port = harness.port;
-
-      await harness.paired.replaceAll([
-        unreadablePairedDevice(),
-        pairedDeviceOf(bob),
-      ]);
-      await harness.server.rebuildTrust();
-      final anonymous = await harness.send(
-        registerRequest(callerInfoOf(carol)),
-      );
-      final paired = await harness.send(
-        httpRequest('GET', '$apiPrefix/anything'),
-        context: presenting(bob),
-      );
-
-      expect(harness.server.boundPort, port);
-      expect(anonymous!.status, 200);
-      expectError(paired, 404, 'not_found');
-    });
-
-    test('syncInterfaces building the first trust context with it opens the '
-        'interface and serves register', () async {
-      final harness = await ServerHarness.start(
-        identity: alice,
-        active: const [],
-      );
-      await harness.paired.replaceAll([
-        unreadablePairedDevice(),
-        pairedDeviceOf(bob),
-      ]);
-
-      await harness.server.syncInterfaces([loopbackInterface()]);
-      final anonymous = await harness.send(
-        registerRequest(callerInfoOf(carol)),
-      );
-      final paired = await harness.send(
-        httpRequest('GET', '$apiPrefix/anything'),
-        context: presenting(bob),
-      );
-
-      expect(harness.server.boundPort, isNotNull);
-      expect(anonymous!.status, 200);
-      expectError(paired, 404, 'not_found');
-      expect(
-        harness.logs.where((l) => l.startsWith('trust context failed')),
-        isEmpty,
-      );
-    });
-
-    test('with only the unreadable entry a client certificate is still cut '
-        'and register still serves anonymous callers', () async {
-      final harness = await ServerHarness.start(
-        identity: alice,
-        active: const [],
-      );
-      await harness.paired.replaceAll([unreadablePairedDevice()]);
-
-      await harness.server.syncInterfaces([loopbackInterface()]);
-      final anonymous = await harness.send(
-        registerRequest(callerInfoOf(carol)),
-      );
-      final withCertificate = await harness.send(
-        registerRequest(callerInfoOf(bob)),
-        context: presenting(bob),
-      );
-
-      expect(anonymous!.status, 200);
-      expect(withCertificate, isNull);
-    });
-  });
-
   group('certificate dates (RF-9)', () {
     test('a server whose own certificate has expired is reached by a client '
         'that pins its fingerprint', () async {
-      final expired = expiredIdentity('NexusBridges-api-expired-server');
+      final expired = expiredIdentity(randomCommonName());
       final harness = await ServerHarness.start(identity: expired);
 
       final reply = await harness.send(registerRequest(callerInfoOf(bob)));
@@ -438,7 +346,7 @@ void main() {
       'observed (risk R7): a paired client whose certificate has expired '
       'is cut in the handshake, while a paired one in its dates is served',
       () async {
-        final expired = expiredIdentity('NexusBridges-api-expired-client');
+        final expired = expiredIdentity(randomCommonName());
         final harness = await start(pairedWith: [expired, bob]);
 
         final cut = await harness.send(

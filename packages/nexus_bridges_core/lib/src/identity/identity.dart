@@ -7,11 +7,154 @@ import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
 
 import '../storage/storage.dart';
+import 'certificate_builder.dart';
+import 'certificate_parser.dart';
 
 export 'dpapi_secret_protector.dart' show DpapiSecretProtector;
 
-String fingerprintOf(List<int> der) =>
-    sha256.convert(der).toString().toUpperCase();
+String _fingerprintOfSpki(List<int> spki) =>
+    sha256.convert(spki).toString().toUpperCase();
+
+String fingerprintOfCertificate(List<int> certificateDer) {
+  try {
+    return _fingerprintOfSpki(
+      parseCertificate(Uint8List.fromList(certificateDer)).spki,
+    );
+  } catch (_) {
+    throw const FormatException('certificate is not readable');
+  }
+}
+
+String canonicalSubjectName(String commonName) =>
+    commonName.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+
+String randomCommonName() {
+  final random = Random.secure();
+  final suffix = List<int>.generate(
+    8,
+    (_) => random.nextInt(256),
+  ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  return 'NexusBridges-$suffix';
+}
+
+const int _maxPemLength = 4096;
+
+final RegExp _whitespace = RegExp(r'\s+');
+
+final BigInt _curveOrder = BigInt.parse(
+  'FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551',
+  radix: 16,
+);
+
+List<int> _certificateDerOf(String pem) {
+  final begin = pem.indexOf(pemBegin);
+  if (begin < 0 || pem.indexOf(pemBegin, begin + 1) >= 0) {
+    throw const FormatException('certificate is not a single PEM block');
+  }
+  final bodyStart = begin + pemBegin.length;
+  final end = pem.indexOf(pemEnd, bodyStart);
+  if (end < 0 || pem.indexOf(pemEnd, end + 1) >= 0) {
+    throw const FormatException('certificate is not a single PEM block');
+  }
+  if (pem.substring(0, begin).trim().isNotEmpty ||
+      pem.substring(end + pemEnd.length).trim().isNotEmpty) {
+    throw const FormatException('certificate has data outside the PEM block');
+  }
+  final body = pem.substring(bodyStart, end).replaceAll(_whitespace, '');
+  if (body.isEmpty || body.contains('-')) {
+    throw const FormatException('certificate body is not valid');
+  }
+  final List<int> der;
+  try {
+    der = base64.decode(body);
+  } on FormatException {
+    throw const FormatException('certificate body is not valid base64');
+  }
+  if (der.isEmpty) {
+    throw const FormatException('certificate body is empty');
+  }
+  return der;
+}
+
+BigInt _bigIntOf(List<int> bytes, int start, int end) {
+  var value = BigInt.zero;
+  for (var i = start; i < end; i++) {
+    value = (value << 8) | BigInt.from(bytes[i]);
+  }
+  return value;
+}
+
+final class PeerCertificate {
+  PeerCertificate._(this.pem, this.der, this.commonName, this._spki)
+    : fingerprint = _fingerprintOfSpki(_spki),
+      canonicalName = canonicalSubjectName(commonName);
+
+  static PeerCertificate? tryParse(String pem) {
+    try {
+      if (pem.length > _maxPemLength) return null;
+      final der = Uint8List.fromList(_certificateDerOf(pem));
+      final parsed = parseCertificate(der);
+      return PeerCertificate._(
+        normalizedPemOf(der),
+        der,
+        parsed.commonName,
+        parsed.spki,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static PeerCertificate? fromDer(List<int> der) {
+    try {
+      return tryParse(normalizedPemOf(der));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final String pem;
+
+  final Uint8List der;
+
+  final String fingerprint;
+
+  final String commonName;
+
+  final String canonicalName;
+
+  final Uint8List _spki;
+
+  bool verify(List<int> data, List<int> signature) {
+    try {
+      if (signature.length != 64) return false;
+      final r = _bigIntOf(signature, 0, 32);
+      final s = _bigIntOf(signature, 32, 64);
+      if (r == BigInt.zero ||
+          s == BigInt.zero ||
+          r >= _curveOrder ||
+          s >= _curveOrder) {
+        return false;
+      }
+      return CryptoUtils.ecVerify(
+        CryptoUtils.ecPublicKeyFromDerBytes(_spki),
+        Uint8List.fromList(data),
+        ECSignature(r, s),
+        algorithm: _signatureAlgorithm,
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+void _writeBigEndian(Uint8List target, int offset, BigInt value) {
+  var rest = value;
+  for (var i = offset + 31; i >= offset; i--) {
+    target[i] = (rest & BigInt.from(0xFF)).toInt();
+    rest = rest >> 8;
+  }
+}
 
 abstract interface class SecretProtector {
   Uint8List protect(Uint8List data);
@@ -26,22 +169,26 @@ final class DeviceIdentity {
     this._certificatePem,
     this._privateKeyPem,
     this._certificateDer,
-  ) : fingerprint = fingerprintOf(_certificateDer);
+  ) : fingerprint = fingerprintOfCertificate(_certificateDer),
+      certificate = PeerCertificate.fromDer(_certificateDer)!;
 
   static DeviceIdentity generate({required String commonName}) {
+    if (!commonNamePattern.hasMatch(commonName)) {
+      throw ArgumentError.value(commonName, 'commonName', 'invalid format');
+    }
     final keyPair = CryptoUtils.generateEcKeyPair();
     final privateKey = keyPair.privateKey as ECPrivateKey;
     final publicKey = keyPair.publicKey as ECPublicKey;
-    final csr = X509Utils.generateEccCsrPem(
-      {'CN': commonName},
-      privateKey,
-      publicKey,
+    final random = Random.secure();
+    final serialNumber = Uint8List.fromList(
+      List<int>.generate(16, (_) => random.nextInt(256)),
     );
-    final certificatePem = X509Utils.generateSelfSignedCertificate(
-      privateKey,
-      csr,
-      18262,
-      notBefore: DateTime.utc(2000),
+    serialNumber[0] = 1 + random.nextInt(0x7F);
+    final certificatePem = buildSelfSignedCertificatePem(
+      privateKey: privateKey,
+      publicKey: publicKey,
+      commonName: commonName,
+      serialNumber: serialNumber,
     );
     return DeviceIdentity._(
       certificatePem,
@@ -61,11 +208,8 @@ final class DeviceIdentity {
         CryptoUtils.getBytesFromPEMString(certificatePem),
       );
       final privateKey = CryptoUtils.ecPrivateKeyFromPem(privateKeyPem);
-      final certificate = X509Utils.x509CertificateFromPem(certificatePem);
       final publicKey = CryptoUtils.ecPublicKeyFromDerBytes(
-        HexUtils.decode(
-          certificate.tbsCertificate!.subjectPublicKeyInfo.bytes!,
-        ),
+        parseCertificate(identity._certificateDer).spki,
       );
 
       final random = Random.secure();
@@ -101,6 +245,24 @@ final class DeviceIdentity {
 
   Uint8List get certificateDer => _certificateDer;
 
+  late final ECPrivateKey _privateKey = CryptoUtils.ecPrivateKeyFromPem(
+    _privateKeyPem,
+  );
+
+  final PeerCertificate certificate;
+
+  Uint8List sign(List<int> data) {
+    final signature = CryptoUtils.ecSign(
+      _privateKey,
+      Uint8List.fromList(data),
+      algorithmName: _signatureAlgorithm,
+    );
+    final out = Uint8List(64);
+    _writeBigEndian(out, 0, signature.r);
+    _writeBigEndian(out, 32, signature.s);
+    return out;
+  }
+
   SecurityContext serverContext({
     required Iterable<String> trustedCertificatesPem,
   }) {
@@ -108,19 +270,30 @@ final class DeviceIdentity {
       ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3
       ..useCertificateChainBytes(utf8.encode(_certificatePem))
       ..usePrivateKeyBytes(utf8.encode(_privateKeyPem));
+    final names = <String>{};
     for (final pem in trustedCertificatesPem) {
+      final peer = PeerCertificate.tryParse(pem);
+      if (peer == null || names.contains(peer.canonicalName)) continue;
       try {
-        context.setTrustedCertificatesBytes(utf8.encode(pem));
+        context.setTrustedCertificatesBytes(utf8.encode(peer.pem));
       } catch (_) {
         continue;
       }
+      names.add(peer.canonicalName);
     }
     return context;
   }
 
-  SecurityContext clientContext() =>
-      SecurityContext(withTrustedRoots: false)
-        ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3;
+  SecurityContext clientContext({bool presentCertificate = false}) {
+    final context = SecurityContext(withTrustedRoots: false)
+      ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3;
+    if (presentCertificate) {
+      context
+        ..useCertificateChainBytes(utf8.encode(_certificatePem))
+        ..usePrivateKeyBytes(utf8.encode(_privateKeyPem));
+    }
+    return context;
+  }
 
   Uint8List protectPrivateKey(SecretProtector p) =>
       p.protect(Uint8List.fromList(utf8.encode(_privateKeyPem)));
@@ -233,7 +406,7 @@ final class IdentityStore {
 
   Future<DeviceIdentity> _createAndWrite() async {
     try {
-      final identity = DeviceIdentity.generate(commonName: _newCommonName());
+      final identity = DeviceIdentity.generate(commonName: randomCommonName());
       await writeFileAtomic(
         _certificateFile,
         utf8.encode(identity.certificatePem),
@@ -256,15 +429,6 @@ final class IdentityStore {
     }
     return candidate;
   }
-}
-
-String _newCommonName() {
-  final random = Random.secure();
-  final suffix = List<int>.generate(
-    8,
-    (_) => random.nextInt(256),
-  ).map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-  return 'NexusBridges-$suffix';
 }
 
 Future<bool> _exists(String path) async {

@@ -123,11 +123,32 @@ Future<int> _freeTcpPort() async {
   return port;
 }
 
+Future<int> _freePort() async {
+  while (true) {
+    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final port = tcp.port;
+    RawDatagramSocket? udp;
+    try {
+      udp = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        port,
+        reuseAddress: false,
+      );
+    } on SocketException {
+      udp = null;
+    }
+    udp?.close();
+    await tcp.close();
+    if (udp != null) return port;
+  }
+}
+
 Future<PairedDevicesStore> _pairedStore() async {
   final dir = await Directory.systemTemp.createTemp('nexus_discovery_');
   addTearDown(() => dir.delete(recursive: true));
   final store = PairedDevicesStore(
     JsonFileStore(File('${dir.path}${Platform.pathSeparator}paired.json')),
+    ownerFingerprint: 'A' * 64,
   );
   await store.load();
   return store;
@@ -165,9 +186,7 @@ final class _Channel {
   final Map<String, RawDatagramSocket> _senders = {};
 
   static Future<_Channel> open(List<ActiveInterface> active) async {
-    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = probe.port;
-    await probe.close();
+    final port = await _freePort();
     final channel = MulticastChannel(port: port);
     addTearDown(channel.close);
     final fixture = _Channel._(channel, port);
@@ -666,12 +685,12 @@ void main() {
     _loopbackName = all
         .firstWhere((i) => i.addresses.any((a) => a.address == '127.0.0.1'))
         .name;
-    self = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-self');
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-carol');
-    dave = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-dave');
-    erin = DeviceIdentity.generate(commonName: 'NexusBridges-discovery-erin');
+    self = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    dave = DeviceIdentity.generate(commonName: randomCommonName());
+    erin = DeviceIdentity.generate(commonName: randomCommonName());
     first = _iface('127.0.0.1');
     second = _iface('127.0.0.2');
   });
@@ -1375,9 +1394,9 @@ void main() {
       setUpAll(() {
         crowd = [
           for (var i = 0; i < 65; i++)
-            DeviceIdentity.generate(commonName: 'NexusBridges-crowd-$i'),
+            DeviceIdentity.generate(commonName: randomCommonName()),
         ];
-        newcomer = DeviceIdentity.generate(commonName: 'NexusBridges-newcomer');
+        newcomer = DeviceIdentity.generate(commonName: randomCommonName());
       });
 
       test('the list stops at 64 unpaired devices, ignores new ones without '

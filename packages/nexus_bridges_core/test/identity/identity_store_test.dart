@@ -123,7 +123,8 @@ Future<Object?> _serverOutcome({
       InternetAddress.loopbackIPv4,
       listener.port,
       context: client,
-      onBadCertificate: (c) => fingerprintOf(c.der) == server.fingerprint,
+      onBadCertificate: (c) =>
+          fingerprintOfCertificate(c.der) == server.fingerprint,
     );
   } on IOException {
     socket = null;
@@ -403,7 +404,7 @@ void main() {
       final other = await otherDataDir();
       final first = await createIn(dataDir);
       final second = await createIn(other);
-      final server = DeviceIdentity.generate(commonName: 'NexusBridges-server');
+      final server = DeviceIdentity.generate(commonName: randomCommonName());
       final trusted = [first.certificatePem, second.certificatePem];
 
       final fromFirst = await _serverOutcome(
@@ -426,11 +427,11 @@ void main() {
       expect(fromFirst, isA<X509Certificate>(), reason: '$fromFirst');
       expect(fromSecond, isA<X509Certificate>(), reason: '$fromSecond');
       expect(
-        fingerprintOf((fromFirst as X509Certificate).der),
+        fingerprintOfCertificate((fromFirst as X509Certificate).der),
         first.fingerprint,
       );
       expect(
-        fingerprintOf((fromSecond as X509Certificate).der),
+        fingerprintOfCertificate((fromSecond as X509Certificate).der),
         second.fingerprint,
       );
     });

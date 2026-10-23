@@ -4,9 +4,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
-import 'package:crypto/crypto.dart';
+import 'package:nexus_bridges_core/src/identity/der.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:test/test.dart';
+
+const String _aliceCommonName = 'NexusBridges-a11ce0000000000a';
+
+const String _twinCommonName = 'NexusBridges-7e57000000000000';
 
 final class _ReversingProtector implements SecretProtector {
   final List<Uint8List> received = [];
@@ -65,7 +69,7 @@ List<String> _privateScalarForms(String privateKeyPem) {
   final privateKey = pair.privateKey as ECPrivateKey;
   final publicKey = pair.publicKey as ECPublicKey;
   final csr = X509Utils.generateEccCsrPem(
-    {'CN': 'NexusBridges-expired'},
+    {'CN': randomCommonName()},
     privateKey,
     publicKey,
   );
@@ -132,7 +136,8 @@ Future<Object?> _serverOutcome({
       InternetAddress.loopbackIPv4,
       listener.port,
       context: client,
-      onBadCertificate: (c) => fingerprintOf(c.der) == server.fingerprint,
+      onBadCertificate: (c) =>
+          fingerprintOfCertificate(c.der) == server.fingerprint,
     );
   } on IOException {
     socket = null;
@@ -278,40 +283,22 @@ void main() {
   late String carolPrivateKeyPem;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: 'NexusBridges-alice');
-    bob = DeviceIdentity.generate(commonName: 'NexusBridges-bob');
-    carol = DeviceIdentity.generate(commonName: 'NexusBridges-carol');
+    alice = DeviceIdentity.generate(commonName: _aliceCommonName);
+    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    carol = DeviceIdentity.generate(commonName: randomCommonName());
     alicePrivateKeyPem = _privateKeyPemOf(alice);
     bobPrivateKeyPem = _privateKeyPemOf(bob);
     carolPrivateKeyPem = _privateKeyPemOf(carol);
   });
 
-  group('fingerprintOf', () {
-    test('matches the known SHA-256 vector of empty input', () {
-      expect(
-        fingerprintOf(const []),
-        'E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855',
-      );
-    });
-
-    test('is uppercase hex of the SHA-256 digest', () {
-      final bytes = utf8.encode('abc');
-
-      expect(
-        fingerprintOf(bytes),
-        sha256.convert(bytes).toString().toUpperCase(),
-      );
-    });
-  });
-
   group('generate', () {
     test(
-      'fingerprint is 64 uppercase hex chars equal to SHA-256 of the DER',
+      'fingerprint is 64 uppercase hex chars given by fingerprintOfCertificate',
       () {
         expect(alice.fingerprint, matches(RegExp(r'^[0-9A-F]{64}$')));
         expect(
           alice.fingerprint,
-          sha256.convert(alice.certificateDer).toString().toUpperCase(),
+          fingerprintOfCertificate(alice.certificateDer),
         );
       },
     );
@@ -327,7 +314,7 @@ void main() {
     test('puts the given common name in the subject', () {
       final data = X509Utils.x509CertificateFromPem(alice.certificatePem);
 
-      expect(data.tbsCertificate!.subject['2.5.4.3'], 'NexusBridges-alice');
+      expect(data.tbsCertificate!.subject['2.5.4.3'], _aliceCommonName);
     });
 
     test('uses an EC P-256 key', () {
@@ -349,53 +336,35 @@ void main() {
   });
 
   group('validity (RF-9)', () {
-    test('is 2000-01-01 to 2049-12-31 according to basic_utils', () {
-      final validity = X509Utils.x509CertificateFromPem(alice.certificatePem)
-          .tbsCertificate!
-          .validity;
+    List<DerElement> validityOf(DeviceIdentity identity) {
+      final der = identity.certificateDer;
+      final root = readDerElement(der, 0, der.length);
+      final tbs = readDerChildren(der, readDerChildren(der, root).first);
+      return readDerChildren(der, tbs[4]);
+    }
 
-      expect(validity.notBefore, DateTime.utc(2000));
-      expect(validity.notAfter, DateTime.utc(2049, 12, 31));
+    test('starts on 2000-01-01 as a UTCTime, read with the own reader', () {
+      final validity = validityOf(alice);
+
+      expect(validity, hasLength(2));
+      expect(validity[0].tag, 0x17);
+      expect(
+        ascii.decode(derValue(alice.certificateDer, validity[0])),
+        '000101000000Z',
+      );
     });
 
-    final openssl = _findOpenssl();
-    test(
-      'is 2000-01-01 to 2049-12-31 according to openssl, which verifies it',
-      () async {
-        final dir = await Directory.systemTemp.createTemp('nexus_identity_');
-        addTearDown(() => dir.delete(recursive: true));
-        final pem = File('${dir.path}${Platform.pathSeparator}cert.pem');
-        await pem.writeAsString(alice.certificatePem);
+    test('never expires: 9999-12-31 23:59:59 as a GeneralizedTime, read with '
+        'the own reader', () {
+      final validity = validityOf(alice);
 
-        final dates = await Process.run(openssl!, [
-          'x509',
-          '-in',
-          pem.path,
-          '-noout',
-          '-dates',
-        ]);
-        expect(dates.exitCode, 0, reason: '${dates.stderr}');
-        expect(
-          LineSplitter.split(dates.stdout as String).map((l) => l.trim()),
-          [
-            'notBefore=Jan  1 00:00:00 2000 GMT',
-            'notAfter=Dec 31 00:00:00 2049 GMT',
-          ],
-        );
-
-        final verify = await Process.run(openssl, [
-          'verify',
-          '-CAfile',
-          pem.path,
-          pem.path,
-        ]);
-        expect(verify.exitCode, 0, reason: '${verify.stdout}${verify.stderr}');
-      },
-      skip: openssl == null
-          ? 'openssl is not on PATH nor in Git for Windows; '
-                'the basic_utils and TLS tests still cover the dates'
-          : false,
-    );
+      expect(validity[1].tag, 0x18);
+      expect(
+        ascii.decode(derValue(alice.certificateDer, validity[1])),
+        '99991231235959Z',
+      );
+      expect(validityOf(bob)[1].tag, 0x18);
+    });
 
     test('a TLS handshake that validates dates accepts it', () async {
       final outcome = await _serverOutcome(
@@ -405,7 +374,10 @@ void main() {
       );
 
       expect(outcome, isA<X509Certificate>());
-      expect(fingerprintOf((outcome as X509Certificate).der), bob.fingerprint);
+      expect(
+        fingerprintOfCertificate((outcome as X509Certificate).der),
+        bob.fingerprint,
+      );
     });
 
     test(
@@ -573,7 +545,11 @@ void main() {
         handled++;
         final certificate = request.certificate;
         request.response
-          ..write(certificate == null ? 'none' : fingerprintOf(certificate.der))
+          ..write(
+            certificate == null
+                ? 'none'
+                : fingerprintOfCertificate(certificate.der),
+          )
           ..close();
       });
       addTearDown(() => server.close(force: true));
@@ -582,7 +558,7 @@ void main() {
     HttpClient pinnedClient(SecurityContext context, String fingerprint) {
       client = HttpClient(context: context)
         ..badCertificateCallback = (certificate, host, port) =>
-            fingerprintOf(certificate.der) == fingerprint;
+            fingerprintOfCertificate(certificate.der) == fingerprint;
       addTearDown(() => client.close(force: true));
       return client;
     }
@@ -699,19 +675,19 @@ void main() {
         expect(fromBob, isA<X509Certificate>(), reason: '$fromBob');
         expect(fromCarol, isA<X509Certificate>(), reason: '$fromCarol');
         expect(
-          fingerprintOf((fromBob as X509Certificate).der),
+          fingerprintOfCertificate((fromBob as X509Certificate).der),
           bob.fingerprint,
         );
         expect(
-          fingerprintOf((fromCarol as X509Certificate).der),
+          fingerprintOfCertificate((fromCarol as X509Certificate).der),
           carol.fingerprint,
         );
       },
     );
 
     test('with two subjects alike only the first is trusted', () async {
-      final first = DeviceIdentity.generate(commonName: 'NexusBridges-twin');
-      final second = DeviceIdentity.generate(commonName: 'NexusBridges-twin');
+      final first = DeviceIdentity.generate(commonName: _twinCommonName);
+      final second = DeviceIdentity.generate(commonName: _twinCommonName);
       final trusted = [first.certificatePem, second.certificatePem];
 
       final fromFirst = await _serverOutcome(
@@ -751,7 +727,7 @@ void main() {
     late String davePrivateKeyPem;
 
     setUpAll(() {
-      dave = DeviceIdentity.generate(commonName: 'NexusBridges-dave');
+      dave = DeviceIdentity.generate(commonName: randomCommonName());
       davePrivateKeyPem = _privateKeyPemOf(dave);
     });
 
@@ -800,9 +776,12 @@ void main() {
 
       expect(fromBob, isA<X509Certificate>(), reason: '$fromBob');
       expect(fromCarol, isA<X509Certificate>(), reason: '$fromCarol');
-      expect(fingerprintOf((fromBob as X509Certificate).der), bob.fingerprint);
       expect(
-        fingerprintOf((fromCarol as X509Certificate).der),
+        fingerprintOfCertificate((fromBob as X509Certificate).der),
+        bob.fingerprint,
+      );
+      expect(
+        fingerprintOfCertificate((fromCarol as X509Certificate).der),
         carol.fingerprint,
       );
     });
@@ -815,7 +794,10 @@ void main() {
       );
 
       expect(outcome, isA<X509Certificate>(), reason: '$outcome');
-      expect(fingerprintOf((outcome as X509Certificate).der), bob.fingerprint);
+      expect(
+        fingerprintOfCertificate((outcome as X509Certificate).der),
+        bob.fingerprint,
+      );
     });
 
     test('a certificate outside the list is still rejected', () async {
