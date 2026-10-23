@@ -87,7 +87,7 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
 
   final ServerSocket _server;
 
-  final SecurityContext _context;
+  SecurityContext _context;
 
   final bool Function(InternetAddress remote) _allowOrigin;
 
@@ -110,6 +110,39 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
 
   @override
   int get port => _server.port;
+
+  set context(SecurityContext value) {
+    _context = value;
+  }
+
+  int dropConnections(bool Function(X509Certificate peer) shouldDrop) {
+    final candidates = [
+      for (final entry in _connections.entries)
+        if (entry.value.socket is SecureSocket) (entry.key, entry.value),
+    ];
+    var dropped = 0;
+    for (final (key, connection) in candidates) {
+      final X509Certificate? peer;
+      try {
+        peer = (connection.socket as SecureSocket).peerCertificate;
+      } catch (_) {
+        _discard(key, connection);
+        dropped++;
+        continue;
+      }
+      if (peer == null) continue;
+      bool drop;
+      try {
+        drop = shouldDrop(peer);
+      } catch (_) {
+        drop = true;
+      }
+      if (!drop) continue;
+      _discard(key, connection);
+      dropped++;
+    }
+    return dropped;
+  }
 
   void requestFinished(String connectionKey) {
     _connections.remove(connectionKey)?.timer?.cancel();

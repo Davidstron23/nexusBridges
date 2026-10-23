@@ -16,23 +16,101 @@ const Duration _registerWindow = Duration(minutes: 1);
 
 const Duration _bodyGrace = Duration(milliseconds: 500);
 
-enum RouteDecision { register, unauthorized, notFound, methodNotAllowed }
+enum RouteAccess { anonymous, paired }
+
+final class RouteLimit {
+  const RouteLimit({
+    required this.maxPerWindow,
+    required this.window,
+    required this.block,
+  });
+
+  final int maxPerWindow;
+
+  final Duration window;
+
+  final Duration block;
+}
+
+final class ApiCall {
+  const ApiCall({
+    required this.path,
+    required this.clientFingerprint,
+    required this.remoteAddress,
+    required this.via,
+    required this.json,
+  });
+
+  final String path;
+
+  final String? clientFingerprint;
+
+  final InternetAddress remoteAddress;
+
+  final ActiveInterface via;
+
+  final Object? json;
+}
+
+final class ApiReply {
+  const ApiReply(this.status, this.json, {this.afterResponse});
+
+  final int status;
+
+  final Map<String, Object?> json;
+
+  final FutureOr<void> Function()? afterResponse;
+}
+
+final class ApiRoute {
+  const ApiRoute({
+    required this.path,
+    required this.access,
+    required this.handle,
+    this.maxBodyBytes = Limits.maxPairingBodyBytes,
+    this.limit,
+  });
+
+  final String path;
+
+  final RouteAccess access;
+
+  final Future<ApiReply> Function(ApiCall call) handle;
+
+  final int maxBodyBytes;
+
+  final RouteLimit? limit;
+}
+
+enum RouteDecision { register, route, unauthorized, notFound, methodNotAllowed }
 
 RouteDecision decideRoute({
   required String method,
   required String path,
   required String? clientFingerprint,
   required bool Function(String) isPaired,
+  Map<String, RouteAccess> routes = const {},
 }) {
   if (clientFingerprint != null && !isPaired(clientFingerprint)) {
     return RouteDecision.unauthorized;
   }
-  if (path == '$apiPrefix/register') {
+  if (path == ApiPaths.register) {
     return method == 'POST'
         ? RouteDecision.register
         : RouteDecision.methodNotAllowed;
   }
+  final access = routes[path];
+  if (access == RouteAccess.anonymous) {
+    return method == 'POST'
+        ? RouteDecision.route
+        : RouteDecision.methodNotAllowed;
+  }
   if (clientFingerprint == null) return RouteDecision.unauthorized;
+  if (access == RouteAccess.paired) {
+    return method == 'POST'
+        ? RouteDecision.route
+        : RouteDecision.methodNotAllowed;
+  }
   return RouteDecision.notFound;
 }
 
@@ -43,7 +121,8 @@ enum _Failure {
   methodNotAllowed(HttpStatus.methodNotAllowed, 'method_not_allowed'),
   payloadTooLarge(HttpStatus.requestEntityTooLarge, 'payload_too_large'),
   rateLimited(429, 'rate_limited'),
-  headersTooLarge(431, 'headers_too_large');
+  headersTooLarge(431, 'headers_too_large'),
+  internal(HttpStatus.internalServerError, 'internal');
 
   const _Failure(this.status, this.code);
 
@@ -71,13 +150,13 @@ final class _RequestBody {
     if (!_finished.isCompleted) _finished.complete();
   }
 
-  Future<Uint8List?> read() {
+  Future<Uint8List?> read({required int max}) {
     final builder = BytesBuilder(copy: false);
     final result = Completer<Uint8List?>();
     _subscription
       ..onData((chunk) {
         if (result.isCompleted) return;
-        if (builder.length + chunk.length > Limits.maxBodyBytes) {
+        if (builder.length + chunk.length > max) {
           result.complete(null);
           return;
         }
@@ -116,12 +195,15 @@ final class ApiServer {
     required this.paired,
     required this._selfInfo,
     required this._onRegistered,
+    List<ApiRoute> routes = const [],
     this._port = defaultPort,
     this._now = DateTime.now,
     this._log = _noLog,
-  });
+  }) : routes = _checkedRoutes(routes);
 
   final DeviceIdentity identity;
+
+  final List<ApiRoute> routes;
 
   final PairedDevicesStore paired;
 
@@ -146,6 +228,25 @@ final class ApiServer {
     block: Limits.registerBlock,
     now: _now,
   );
+
+  late final Map<String, ApiRoute> _routesByPath = {
+    for (final route in routes) route.path: route,
+  };
+
+  late final Map<String, RouteAccess> _routeAccess = {
+    for (final route in routes) route.path: route.access,
+  };
+
+  late final Map<String, RateLimiter> _routeLimiters = {
+    for (final route in routes)
+      if (route.limit case final limit?)
+        route.path: RateLimiter(
+          maxPerWindow: limit.maxPerWindow,
+          window: limit.window,
+          block: limit.block,
+          now: _now,
+        ),
+  };
 
   final Map<String, _Listener> _listeners = {};
 
@@ -190,10 +291,6 @@ final class ApiServer {
   Future<void> rebuildTrust() {
     return _exclusive(() async {
       if (_closed) return;
-      final targets = [
-        for (final listener in _listeners.values)
-          (listener.iface, listener.socket.port),
-      ];
       final SecurityContext context;
       try {
         context = _buildContext();
@@ -203,9 +300,11 @@ final class ApiServer {
         _context = null;
         rethrow;
       }
-      await _closeAll();
       _context = context;
-      await _openAll(targets, context);
+      for (final listener in _listeners.values) {
+        listener.socket.context = context;
+        listener.socket.dropConnections(_isUntrusted);
+      }
     });
   }
 
@@ -240,9 +339,41 @@ final class ApiServer {
     return run;
   }
 
+  bool _isUntrusted(X509Certificate peer) {
+    try {
+      return !paired.isPaired(fingerprintOfCertificate(peer.der));
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static List<ApiRoute> _checkedRoutes(List<ApiRoute> routes) {
+    final seen = <String>{};
+    for (final route in routes) {
+      final path = route.path;
+      if (!path.startsWith('$apiPrefix/')) {
+        throw ArgumentError.value(path, 'routes', 'outside the API prefix');
+      }
+      if (path == ApiPaths.register) {
+        throw ArgumentError.value(path, 'routes', 'reserved path');
+      }
+      if (!seen.add(path)) {
+        throw ArgumentError.value(path, 'routes', 'duplicate path');
+      }
+      if (route.access == RouteAccess.anonymous &&
+          !ApiPaths.anonymous.contains(path)) {
+        throw ArgumentError.value(path, 'routes', 'not an anonymous path');
+      }
+    }
+    return List.unmodifiable(routes);
+  }
+
   SecurityContext _buildContext() {
     return identity.serverContext(
-      trustedCertificatesPem: paired.devices.map((d) => d.certificatePem),
+      trustedCertificatesPem:
+          ([...paired.devices]
+                ..sort((a, b) => a.pairedAt.compareTo(b.pairedAt)))
+              .map((d) => d.certificatePem),
     );
   }
 
@@ -296,10 +427,16 @@ final class ApiServer {
         await _fail(request, body, _Failure.badRequest);
         return;
       }
-      await _serve(request, body, listener, info);
-      listener.socket.requestFinished(
-        '${info.remoteAddress.address}:${info.remotePort}',
-      );
+      final key = '${info.remoteAddress.address}:${info.remotePort}';
+      var released = false;
+      void release() {
+        if (released) return;
+        released = true;
+        listener.socket.requestFinished(key);
+      }
+
+      await _serve(request, body, listener, info, release);
+      release();
     } catch (e) {
       _log('request failed: ${e.runtimeType}');
     }
@@ -310,6 +447,7 @@ final class ApiServer {
     _RequestBody body,
     _Listener listener,
     HttpConnectionInfo info,
+    void Function() release,
   ) async {
     if (_headerBytes(request) > Limits.maxHeaderBytes) {
       await _fail(request, body, _Failure.headersTooLarge);
@@ -330,6 +468,7 @@ final class ApiServer {
       path: request.uri.path,
       clientFingerprint: fingerprint,
       isPaired: paired.isPaired,
+      routes: _routeAccess,
     );
     switch (decision) {
       case RouteDecision.unauthorized:
@@ -340,6 +479,8 @@ final class ApiServer {
         await _fail(request, body, _Failure.methodNotAllowed);
       case RouteDecision.register:
         await _register(request, body, listener, info.remoteAddress);
+      case RouteDecision.route:
+        await _route(request, body, listener, info, fingerprint, release);
     }
   }
 
@@ -357,7 +498,7 @@ final class ApiServer {
       await _fail(request, body, _Failure.payloadTooLarge);
       return;
     }
-    final bytes = await body.read();
+    final bytes = await body.read(max: Limits.maxBodyBytes);
     if (bytes == null) {
       await _fail(request, body, _Failure.payloadTooLarge);
       return;
@@ -378,6 +519,62 @@ final class ApiServer {
       _onRegistered(caller, remote, listener.iface);
     } catch (e) {
       _log('registration callback failed: ${e.runtimeType}');
+    }
+  }
+
+  Future<void> _route(
+    HttpRequest request,
+    _RequestBody body,
+    _Listener listener,
+    HttpConnectionInfo info,
+    String? fingerprint,
+    void Function() release,
+  ) async {
+    final route = _routesByPath[request.uri.path]!;
+    final remote = info.remoteAddress;
+    final limiter = _routeLimiters[route.path];
+    if (limiter != null && !limiter.allow(remote.address)) {
+      await _fail(request, body, _Failure.rateLimited);
+      return;
+    }
+    if (request.contentLength > route.maxBodyBytes) {
+      await _fail(request, body, _Failure.payloadTooLarge);
+      return;
+    }
+    final bytes = await body.read(max: route.maxBodyBytes);
+    if (bytes == null) {
+      await _fail(request, body, _Failure.payloadTooLarge);
+      return;
+    }
+    final Object? json;
+    try {
+      json = bytes.isEmpty ? null : jsonDecode(utf8.decode(bytes));
+    } on FormatException {
+      await _fail(request, body, _Failure.badRequest);
+      return;
+    }
+    final ApiReply reply;
+    try {
+      reply = await route.handle(
+        ApiCall(
+          path: route.path,
+          clientFingerprint: fingerprint,
+          remoteAddress: remote,
+          via: listener.iface,
+          json: json,
+        ),
+      );
+    } catch (e) {
+      _log('route failed: ${e.runtimeType}');
+      await _fail(request, body, _Failure.internal);
+      return;
+    }
+    await _respond(request, body, reply.status, reply.json);
+    release();
+    try {
+      await reply.afterResponse?.call();
+    } catch (e) {
+      _log('after response failed: ${e.runtimeType}');
     }
   }
 
