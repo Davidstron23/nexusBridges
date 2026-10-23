@@ -12,6 +12,26 @@ final InternetAddress multicastGroup = InternetAddress('224.0.0.169');
 
 const String apiPrefix = '/api/nexusbridges/v1';
 
+abstract final class ApiPaths {
+  static const String register = '$apiPrefix/register';
+  static const String pairStart = '$apiPrefix/pair/start';
+  static const String pairReveal = '$apiPrefix/pair/reveal';
+  static const String pairWait = '$apiPrefix/pair/wait';
+  static const String pairConfirm = '$apiPrefix/pair/confirm';
+  static const String pairCancel = '$apiPrefix/pair/cancel';
+  static const String pairStatus = '$apiPrefix/pair/status';
+  static const String unpair = '$apiPrefix/unpair';
+  static const Set<String> anonymous = {
+    register,
+    pairStart,
+    pairReveal,
+    pairWait,
+    pairConfirm,
+    pairCancel,
+    pairStatus,
+  };
+}
+
 const int maxDatagramBytes = 1024;
 
 abstract final class Limits {
@@ -29,6 +49,24 @@ abstract final class Limits {
   static const Duration scanConnectTimeout = Duration(milliseconds: 1500);
   static const int maxPendingHandshakesPerIp = 8;
   static const int maxPendingHandshakes = 128;
+  static const int maxPairingBodyBytes = 8192;
+  static const int maxRequestNameLength = 256;
+  static const Duration pairingTimeout = Duration(seconds: 60);
+  static const Duration pairingMessageTimeout = Duration(seconds: 10);
+  static const Duration pairingPollHold = Duration(seconds: 7);
+  static const Duration pairingConfirmRetry = Duration(seconds: 1);
+  static const Duration pairingRecordTtl = Duration(seconds: 30);
+  static const int pairingRequestsPerOrigin = 5;
+  static const Duration pairingRequestWindow = Duration(minutes: 10);
+  static const int pairingMismatchLimit = 3;
+  static const Duration pairingBlock = Duration(minutes: 10);
+  static const Duration unpairNoticeTimeout = Duration(seconds: 5);
+  static const Duration peerCheckInterval = Duration(minutes: 5);
+  static const Duration peerCheckRetry = Duration(seconds: 30);
+  static const int pairSessionRequestsPerMinute = 120;
+  static const int pairStatusPerMinute = 12;
+  static const int unpairPerMinute = 12;
+  static const Duration routeBlock = Duration(minutes: 1);
 }
 
 final class PortInUseException implements Exception {
