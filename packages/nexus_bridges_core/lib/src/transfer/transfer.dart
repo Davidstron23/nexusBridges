@@ -1,4 +1,18 @@
+import 'dart:async';
 import 'dart:io';
+
+import '../identity/identity.dart' show DeviceIdentity;
+import '../pairing/pairing.dart' show PairedDevicesStore;
+import '../protocol/protocol.dart' show Limits, monotonicClock;
+import '../server/server.dart' show ApiRoute;
+import 'journal.dart' show TempJournal;
+import 'pickers.dart' show PickerTracker;
+import 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
+import 'receiver.dart' show TransferReceiver;
+import 'windows_file_system.dart' show WindowsFileSystemPlatform;
+import 'writer.dart' show writeAllBytes;
+
+void _noLog(String message) {}
 
 enum TransferDirection { outgoing, incoming }
 
@@ -195,6 +209,7 @@ final class FolderQuestionView {
 
 final class IncomingTransferView {
   const IncomingTransferView({
+    required this.sessionId,
     required this.peerFingerprint,
     required this.peerName,
     required this.fileName,
@@ -206,6 +221,7 @@ final class IncomingTransferView {
     this.receivedBytes = 0,
   });
 
+  final String sessionId;
   final String peerFingerprint;
   final String? peerName;
   final String fileName;
@@ -219,6 +235,7 @@ final class IncomingTransferView {
   @override
   bool operator ==(Object other) =>
       other is IncomingTransferView &&
+      other.sessionId == sessionId &&
       other.peerFingerprint == peerFingerprint &&
       other.peerName == peerName &&
       other.fileName == fileName &&
@@ -231,6 +248,7 @@ final class IncomingTransferView {
 
   @override
   int get hashCode => Object.hash(
+    sessionId,
     peerFingerprint,
     peerName,
     fileName,
@@ -345,4 +363,150 @@ final class PeerCancelledTransfer extends TransferEvent {
 
   final String peerFingerprint;
   final String? peerName;
+}
+
+final class TransferCoordinator {
+  TransferCoordinator({
+    required DeviceIdentity identity,
+    required PairedDevicesStore paired,
+    required ReceiveFolderStore folders,
+    required TempJournal journal,
+    required String dataDirPath,
+    required FilePicker picker,
+    FileSystemPlatform fileSystem = const WindowsFileSystemPlatform(),
+    FolderRevealer? revealer,
+    Duration Function() clock = monotonicClock,
+    this._tickInterval = const Duration(milliseconds: 250),
+    Duration pollHold = Limits.transferPollHold,
+    Duration idleTimeout = Limits.transferIdleTimeout,
+    Duration confirmTimeout = Limits.transferConfirmTimeout,
+    Future<void> Function(RandomAccessFile file, List<int> bytes) writeBytes =
+        writeAllBytes,
+    this._log = _noLog,
+  }) {
+    _pickers = PickerTracker(
+      clock: clock,
+      onChanged: (open, since) => _receiver.pickersChanged(open, since),
+    );
+    _receiver = TransferReceiver(
+      paired: paired,
+      folders: folders,
+      journal: journal,
+      fs: fileSystem,
+      dataDirPath: dataDirPath,
+      clock: clock,
+      pollHold: pollHold,
+      picker: picker,
+      pickers: _pickers,
+      onChanged: _notify,
+      emit: _emit,
+      log: _log,
+    );
+  }
+
+  final Duration _tickInterval;
+
+  final void Function(String) _log;
+
+  late final TransferReceiver _receiver;
+
+  late final PickerTracker _pickers;
+
+  final StreamController<void> _changes = StreamController<void>.broadcast();
+
+  final StreamController<TransferEvent> _events =
+      StreamController<TransferEvent>.broadcast();
+
+  Timer? _timer;
+
+  Future<void>? _closing;
+
+  bool _closed = false;
+
+  (IncomingTransferView?, TransferResultView?, bool, bool)? _lastNotified = (
+    null,
+    null,
+    false,
+    false,
+  );
+
+  List<ApiRoute> get routes => _receiver.routes;
+
+  IncomingTransferView? get incoming => _receiver.incoming;
+
+  TransferResultView? get lastReceived => _receiver.lastReceived;
+
+  bool get busy => _receiver.busy;
+
+  bool get pickerOpen => _pickers.isOpen;
+
+  Stream<void> get changes => _changes.stream;
+
+  Stream<TransferEvent> get events => _events.stream;
+
+  void start() {
+    if (_closed || _timer != null) return;
+    _timer = Timer.periodic(_tickInterval, (_) => _tick());
+    _receiver.start();
+  }
+
+  Future<void> cleanupAtStart() => _receiver.cleanupAtStart();
+
+  void answerWarning(String sessionId, {required bool accept}) {
+    _receiver.answerWarning(sessionId, accept: accept);
+  }
+
+  void cancelIncoming(String sessionId) => _receiver.cancelIncoming(sessionId);
+
+  Future<void> useProposedFolder(String sessionId) =>
+      _receiver.useProposedFolder(sessionId);
+
+  Future<void> chooseOtherFolder(String sessionId) =>
+      _receiver.chooseOtherFolder(sessionId);
+
+  void useFolderAnyway(String sessionId) =>
+      _receiver.useFolderAnyway(sessionId);
+
+  void cancelFolderQuestion(String sessionId) =>
+      _receiver.cancelFolderQuestion(sessionId);
+
+  Future<void> rememberFolderAfterEnd(
+    String sessionId, {
+    required bool remember,
+  }) => _receiver.rememberFolderAfterEnd(sessionId, remember: remember);
+
+  void dismissFolderPanel(String sessionId) =>
+      _receiver.dismissFolderPanel(sessionId);
+
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
+    _timer?.cancel();
+    _timer = null;
+    await _receiver.close();
+    _closed = true;
+    await _changes.close();
+    await _events.close();
+  }
+
+  void _tick() {
+    try {
+      _receiver.tick();
+    } catch (e) {
+      _log('transfer tick failed: ${e.runtimeType}');
+    }
+  }
+
+  void _notify() {
+    if (_closed) return;
+    final current = (incoming, lastReceived, busy, pickerOpen);
+    if (current == _lastNotified) return;
+    _lastNotified = current;
+    _changes.add(null);
+  }
+
+  void _emit(TransferEvent event) {
+    if (_closed) return;
+    _events.add(event);
+  }
 }

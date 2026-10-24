@@ -25,6 +25,15 @@ String fingerprintOfCertificate(List<int> certificateDer) {
   }
 }
 
+bool certificateMatches(X509Certificate certificate, String fingerprint) {
+  try {
+    return fingerprintOfCertificate(certificate.der) == fingerprint &&
+        PeerCertificate.fromDer(certificate.der) != null;
+  } catch (_) {
+    return false;
+  }
+}
+
 const int _shortFingerprintLength = 8;
 
 String shortFingerprint(String fingerprint) =>

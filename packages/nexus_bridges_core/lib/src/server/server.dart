@@ -53,13 +53,85 @@ final class ApiCall {
 }
 
 final class ApiReply {
-  const ApiReply(this.status, this.json, {this.afterResponse});
+  const ApiReply(
+    this.status,
+    this.json, {
+    this.afterResponse,
+    this.onUndelivered,
+  });
 
   final int status;
 
   final Map<String, Object?> json;
 
   final FutureOr<void> Function()? afterResponse;
+
+  final void Function()? onUndelivered;
+}
+
+final class UploadBody {
+  UploadBody._(this._body);
+
+  final _RequestBody _body;
+
+  bool _listening = false;
+
+  void listen({
+    required void Function(Uint8List chunk) onData,
+    required void Function() onDone,
+    required void Function(Object error) onError,
+  }) {
+    _listening = true;
+    _body.stream(onData: onData, onDone: onDone, onError: onError);
+  }
+
+  void pause() => _body.pause();
+
+  void resume() {
+    if (_listening) _body.resume();
+  }
+}
+
+final class ApiUpload {
+  const ApiUpload({
+    required this.path,
+    required this.clientFingerprint,
+    required this.remoteAddress,
+    required this.via,
+    required this.headers,
+    required this.contentLength,
+    required this.body,
+    required this.keepAlive,
+    required this.cut,
+  });
+
+  final String path;
+
+  final String clientFingerprint;
+
+  final InternetAddress remoteAddress;
+
+  final ActiveInterface via;
+
+  final Map<String, String> headers;
+
+  final int contentLength;
+
+  final UploadBody body;
+
+  final bool Function() keepAlive;
+
+  final void Function() cut;
+}
+
+final class ApiUploadRoute {
+  const ApiUploadRoute({required this.path, required this.handle, this.limit});
+
+  final String path;
+
+  final Future<ApiReply> Function(ApiUpload upload) handle;
+
+  final RouteLimit? limit;
 }
 
 final class ApiRoute {
@@ -132,22 +204,106 @@ enum _Failure {
 }
 
 final class _RequestBody {
-  _RequestBody(HttpRequest request) {
+  _RequestBody(HttpRequest request, {bool paused = false}) : held = paused {
     _subscription = request.listen(
       (_) {},
       onError: (Object _) => _finish(),
       onDone: _finish,
     );
+    if (paused) pause();
   }
+
+  final bool held;
 
   late final StreamSubscription<Uint8List> _subscription;
 
   final Completer<void> _finished = Completer<void>();
 
+  int _pauses = 0;
+
   Future<void> get finished => _finished.future;
 
   void _finish() {
     if (!_finished.isCompleted) _finished.complete();
+  }
+
+  void pause() {
+    _pauses++;
+    _subscription.pause();
+  }
+
+  void resume() {
+    if (_pauses == 0) return;
+    _pauses--;
+    _subscription.resume();
+  }
+
+  void _resumeAll() {
+    while (_pauses > 0) {
+      resume();
+    }
+  }
+
+  void stream({
+    required void Function(Uint8List chunk) onData,
+    required void Function() onDone,
+    required void Function(Object error) onError,
+  }) {
+    var ended = false;
+    _subscription
+      ..onData(onData)
+      ..onDone(() {
+        _finish();
+        if (ended) return;
+        ended = true;
+        onDone();
+      })
+      ..onError((Object e) {
+        _finish();
+        if (ended) return;
+        ended = true;
+        onError(e);
+      });
+    _resumeAll();
+  }
+
+  Future<bool> discard({required int announced}) async {
+    if (_finished.isCompleted) return true;
+    final settled = Completer<bool>();
+    var discarded = 0;
+    _subscription
+      ..onData((chunk) {
+        discarded += chunk.length;
+        if (discarded > Limits.maxDiscardedUploadBytes &&
+            !settled.isCompleted) {
+          settled.complete(false);
+        }
+      })
+      ..onDone(() {
+        _finish();
+        if (!settled.isCompleted) settled.complete(true);
+      })
+      ..onError((Object _) {
+        _finish();
+        if (!settled.isCompleted) settled.complete(true);
+      });
+    if (announced > Limits.maxDiscardedUploadBytes) {
+      if (_pauses == 0) pause();
+      return false;
+    }
+    _resumeAll();
+    final complete = await settled.future.timeout(
+      _bodyGrace,
+      onTimeout: () => false,
+    );
+    if (!complete && _pauses == 0) pause();
+    return complete;
+  }
+
+  Future<void> waitForClose() async {
+    if (_finished.isCompleted) return;
+    _resumeAll();
+    await _finished.future.timeout(_bodyGrace, onTimeout: () {});
   }
 
   Future<Uint8List?> read({required int max}) {
@@ -203,14 +359,18 @@ final class ApiServer {
     required this._selfInfo,
     required this._onRegistered,
     List<ApiRoute> routes = const [],
+    List<ApiUploadRoute> uploadRoutes = const [],
     this._port = defaultPort,
     this._now = DateTime.now,
     this._log = _noLog,
-  }) : routes = _checkedRoutes(routes);
+  }) : routes = _checkedRoutes(routes),
+       uploadRoutes = _checkedUploadRoutes(uploadRoutes, routes);
 
   final DeviceIdentity identity;
 
   final List<ApiRoute> routes;
+
+  final List<ApiUploadRoute> uploadRoutes;
 
   final PairedDevicesStore paired;
 
@@ -240,12 +400,25 @@ final class ApiServer {
     for (final route in routes) route.path: route,
   };
 
+  late final Map<String, ApiUploadRoute> _uploadRoutesByPath = {
+    for (final route in uploadRoutes) route.path: route,
+  };
+
   late final Map<String, RouteAccess> _routeAccess = {
     for (final route in routes) route.path: route.access,
+    for (final route in uploadRoutes) route.path: RouteAccess.paired,
   };
 
   late final Map<String, RateLimiter> _routeLimiters = {
     for (final route in routes)
+      if (route.limit case final limit?)
+        route.path: RateLimiter(
+          maxPerWindow: limit.maxPerWindow,
+          window: limit.window,
+          block: limit.block,
+          now: _now,
+        ),
+    for (final route in uploadRoutes)
       if (route.limit case final limit?)
         route.path: RateLimiter(
           maxPerWindow: limit.maxPerWindow,
@@ -373,6 +546,33 @@ final class ApiServer {
     return List.unmodifiable(routes);
   }
 
+  static List<ApiUploadRoute> _checkedUploadRoutes(
+    List<ApiUploadRoute> uploadRoutes,
+    List<ApiRoute> routes,
+  ) {
+    final seen = {for (final route in routes) route.path};
+    for (final route in uploadRoutes) {
+      final path = route.path;
+      if (!path.startsWith('$apiPrefix/')) {
+        throw ArgumentError.value(
+          path,
+          'uploadRoutes',
+          'outside the API prefix',
+        );
+      }
+      if (path == ApiPaths.register) {
+        throw ArgumentError.value(path, 'uploadRoutes', 'reserved path');
+      }
+      if (ApiPaths.anonymous.contains(path)) {
+        throw ArgumentError.value(path, 'uploadRoutes', 'anonymous path');
+      }
+      if (!seen.add(path)) {
+        throw ArgumentError.value(path, 'uploadRoutes', 'duplicate path');
+      }
+    }
+    return List.unmodifiable(uploadRoutes);
+  }
+
   SecurityContext _buildContext() {
     return identity.serverContext(
       trustedCertificatesPem:
@@ -426,13 +626,16 @@ final class ApiServer {
 
   Future<void> _handle(HttpRequest request, _Listener listener) async {
     final info = request.connectionInfo;
-    final body = _RequestBody(request);
+    final isUpload =
+        request.method == 'POST' &&
+        _uploadRoutesByPath.containsKey(request.uri.path);
+    final body = _RequestBody(request, paused: isUpload);
     try {
       if (info == null) {
         await _fail(request, body, _Failure.badRequest);
         return;
       }
-      final key = '${info.remoteAddress.address}:${info.remotePort}';
+      final key = _connectionKey(info);
       var released = false;
       void release() {
         if (released) return;
@@ -485,9 +688,16 @@ final class ApiServer {
       case RouteDecision.register:
         await _register(request, body, listener, info.remoteAddress);
       case RouteDecision.route:
-        await _route(request, body, listener, info, fingerprint, release);
+        if (_uploadRoutesByPath.containsKey(request.uri.path)) {
+          await _upload(request, body, listener, info, fingerprint!, release);
+        } else {
+          await _route(request, body, listener, info, fingerprint, release);
+        }
     }
   }
+
+  static String _connectionKey(HttpConnectionInfo info) =>
+      '${info.remoteAddress.address}:${info.remotePort}';
 
   Future<void> _register(
     HttpRequest request,
@@ -574,13 +784,82 @@ final class ApiServer {
       await _fail(request, body, _Failure.internal);
       return;
     }
-    await _respond(request, body, reply.status, reply.json);
+    await _respond(
+      request,
+      body,
+      reply.status,
+      reply.json,
+      onUndelivered: reply.onUndelivered,
+      connectionGone: () => listener.socket.isGone(_connectionKey(info)),
+    );
     release();
     try {
       await reply.afterResponse?.call();
     } catch (e) {
       _log('after response failed: ${e.runtimeType}');
     }
+  }
+
+  Future<void> _upload(
+    HttpRequest request,
+    _RequestBody body,
+    _Listener listener,
+    HttpConnectionInfo info,
+    String fingerprint,
+    void Function() release,
+  ) async {
+    final route = _uploadRoutesByPath[request.uri.path]!;
+    final remote = info.remoteAddress;
+    final limiter = _routeLimiters[route.path];
+    if (limiter != null && !limiter.allow(remote.address)) {
+      await _fail(request, body, _Failure.rateLimited);
+      return;
+    }
+    final key = _connectionKey(info);
+    final upload = ApiUpload(
+      path: route.path,
+      clientFingerprint: fingerprint,
+      remoteAddress: remote,
+      via: listener.iface,
+      headers: _transferHeaders(request),
+      contentLength: request.contentLength,
+      body: UploadBody._(body),
+      keepAlive: () => listener.socket.relaxDeadline(key),
+      cut: () => listener.socket.dropConnection(key),
+    );
+    final ApiReply reply;
+    try {
+      reply = await route.handle(upload);
+    } catch (e) {
+      _log('upload route failed: ${e.runtimeType}');
+      upload.cut();
+      return;
+    }
+    await _respond(
+      request,
+      body,
+      reply.status,
+      reply.json,
+      onUndelivered: reply.onUndelivered,
+      connectionGone: () => listener.socket.isGone(_connectionKey(info)),
+    );
+    release();
+    try {
+      await reply.afterResponse?.call();
+    } catch (e) {
+      _log('after response failed: ${e.runtimeType}');
+    }
+  }
+
+  Map<String, String> _transferHeaders(HttpRequest request) {
+    final headers = <String, String>{};
+    request.headers.forEach((name, values) {
+      final lower = name.toLowerCase();
+      if (lower.startsWith(TransferHeaders.prefix) && values.length == 1) {
+        headers[lower] = values.first;
+      }
+    });
+    return headers;
   }
 
   int _headerBytes(HttpRequest request) {
@@ -601,10 +880,28 @@ final class ApiServer {
     HttpRequest request,
     _RequestBody body,
     int status,
-    Map<String, Object?> payload,
-  ) async {
+    Map<String, Object?> payload, {
+    void Function()? onUndelivered,
+    bool Function()? connectionGone,
+  }) async {
+    var told = false;
+    void tell() {
+      if (told) return;
+      told = true;
+      try {
+        onUndelivered?.call();
+      } catch (callbackError) {
+        _log('undelivered callback failed: ${callbackError.runtimeType}');
+      }
+    }
+
     final bytes = utf8.encode(jsonEncode(payload));
+    final bodySettled = body.held
+        ? await body.discard(announced: request.contentLength)
+        : true;
+    if (onUndelivered != null && (connectionGone?.call() ?? false)) tell();
     final response = request.response
+      ..bufferOutput = bodySettled
       ..persistentConnection = false
       ..statusCode = status
       ..headers.set(
@@ -613,12 +910,19 @@ final class ApiServer {
       )
       ..contentLength = bytes.length
       ..add(bytes);
+    var flushed = false;
     try {
       await response.flush();
-      await body.finished.timeout(_bodyGrace, onTimeout: () {});
+      flushed = true;
+      if (bodySettled) {
+        await body.finished.timeout(_bodyGrace, onTimeout: () {});
+      } else {
+        await body.waitForClose();
+      }
       await response.close();
     } catch (e) {
       _log('response failed: ${e.runtimeType}');
+      if (!flushed || bodySettled) tell();
     }
   }
 }

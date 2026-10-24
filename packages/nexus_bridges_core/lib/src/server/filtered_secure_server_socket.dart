@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -42,6 +43,10 @@ final class _Connection {
   bool counted = true;
 
   bool detached = false;
+
+  bool relaxed = false;
+
+  bool peerClosed = false;
 }
 
 final class FilteredSecureServerSocket extends StreamView<Socket>
@@ -144,6 +149,30 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
       dropped++;
     }
     return dropped;
+  }
+
+  bool relaxDeadline(String connectionKey) {
+    final connection = _connections[connectionKey];
+    if (connection == null || connection.relaxed) return false;
+    var relaxed = 0;
+    for (final other in _connections.values) {
+      if (other.relaxed) relaxed++;
+    }
+    if (relaxed >= Limits.maxRelaxedConnections) return false;
+    connection.timer?.cancel();
+    connection.timer = null;
+    connection.relaxed = true;
+    return true;
+  }
+
+  bool isGone(String connectionKey) {
+    final connection = _connections[connectionKey];
+    return connection == null || connection.peerClosed;
+  }
+
+  void dropConnection(String connectionKey) {
+    final connection = _connections[connectionKey];
+    if (connection != null) _discard(connectionKey, connection);
   }
 
   Future<void> stopAccepting() {
@@ -315,7 +344,7 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
       return;
     }
     connection.socket = secure;
-    _controller.add(secure);
+    _controller.add(_WatchedSocket(secure, () => connection.peerClosed = true));
   }
 
   void _uncount(_Connection connection) {
@@ -344,4 +373,149 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
     connection.socket.destroy();
     if (subscription != null) unawaited(subscription.cancel());
   }
+}
+
+const int _pausedReadCap = 65536;
+
+final class _WatchedSocket extends Stream<Uint8List> implements SecureSocket {
+  _WatchedSocket(this._inner, this._onPeerGone);
+
+  final SecureSocket _inner;
+
+  final void Function() _onPeerGone;
+
+  StreamController<Uint8List>? _controller;
+
+  StreamSubscription<Uint8List>? _subscription;
+
+  bool _consumerPaused = false;
+
+  bool _innerPaused = false;
+
+  int _buffered = 0;
+
+  @override
+  StreamSubscription<Uint8List> listen(
+    void Function(Uint8List event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    if (_controller != null) throw StateError('already listened');
+    final controller = StreamController<Uint8List>(
+      onPause: () => _consumerPaused = true,
+      onResume: () {
+        _consumerPaused = false;
+        _buffered = 0;
+        if (_innerPaused) {
+          _innerPaused = false;
+          _subscription?.resume();
+        }
+      },
+      onCancel: () => _subscription?.cancel(),
+    );
+    _controller = controller;
+    _subscription = _inner.listen(
+      (chunk) {
+        controller.add(chunk);
+        if (!_consumerPaused) return;
+        _buffered += chunk.length;
+        if (_buffered > _pausedReadCap && !_innerPaused) {
+          _innerPaused = true;
+          _subscription?.pause();
+        }
+      },
+      onError: (Object error, StackTrace stack) {
+        _onPeerGone();
+        controller.addError(error, stack);
+      },
+      onDone: () {
+        _onPeerGone();
+        controller.close();
+      },
+    );
+    return controller.stream.listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  Encoding get encoding => _inner.encoding;
+
+  @override
+  set encoding(Encoding value) => _inner.encoding = value;
+
+  @override
+  void add(List<int> data) => _inner.add(data);
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) =>
+      _inner.addError(error, stackTrace);
+
+  @override
+  Future<dynamic> addStream(Stream<List<int>> stream) =>
+      _inner.addStream(stream);
+
+  @override
+  InternetAddress get address => _inner.address;
+
+  @override
+  Future<dynamic> close() => _inner.close();
+
+  @override
+  Future<dynamic> get done => _inner.done;
+
+  @override
+  void destroy() => _inner.destroy();
+
+  @override
+  Future<dynamic> flush() => _inner.flush();
+
+  @override
+  Uint8List getRawOption(RawSocketOption option) => _inner.getRawOption(option);
+
+  @override
+  X509Certificate? get peerCertificate => _inner.peerCertificate;
+
+  @override
+  int get port => _inner.port;
+
+  @override
+  InternetAddress get remoteAddress => _inner.remoteAddress;
+
+  @override
+  int get remotePort => _inner.remotePort;
+
+  @override
+  void renegotiate({
+    bool useSessionCache = true,
+    bool requestClientCertificate = false,
+    bool requireClientCertificate = false,
+  }) {}
+
+  @override
+  String? get selectedProtocol => _inner.selectedProtocol;
+
+  @override
+  void setRawOption(RawSocketOption option) => _inner.setRawOption(option);
+
+  @override
+  bool setOption(SocketOption option, bool enabled) =>
+      _inner.setOption(option, enabled);
+
+  @override
+  void write(Object? object) => _inner.write(object);
+
+  @override
+  void writeAll(Iterable<dynamic> objects, [String separator = '']) =>
+      _inner.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _inner.writeCharCode(charCode);
+
+  @override
+  void writeln([Object? object = '']) => _inner.writeln(object);
 }
