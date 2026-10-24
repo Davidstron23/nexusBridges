@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_builder.dart';
 import 'package:nexus_bridges_core/src/identity/certificate_parser.dart';
 import 'package:nexus_bridges_core/src/identity/der.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
@@ -112,6 +113,8 @@ _Legacy _legacyIdentity({_KeyPair? keys, String? commonName}) {
     privateKeyPem: CryptoUtils.encodeEcPrivateKeyToPem(pair.privateKey),
   );
 }
+
+String _boundName(_KeyPair keys) => commonNameForSpki(spkiOf(keys.publicKey));
 
 Uint8List _derOf(String pem) => Uint8List.fromList(
   base64.decode(
@@ -239,8 +242,8 @@ void main() {
   late String bobPrivateKeyPem;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
     alicePrivateKeyPem = _privateKeyPemOf(alice);
     bobPrivateKeyPem = _privateKeyPemOf(bob);
   });
@@ -315,15 +318,15 @@ void main() {
   });
 
   group('C2 same key, another certificate (RF-65)', () {
-    test('a different serial and common name keep the fingerprint', () {
+    test('a different serial keeps the fingerprint and the name', () {
       final keys = _keyPair();
       final first = _derOf(
-        _basicUtilsCertificate(keys, subject: {'CN': randomCommonName()}),
+        _basicUtilsCertificate(keys, subject: {'CN': _boundName(keys)}),
       );
       final second = _derOf(
         _basicUtilsCertificate(
           keys,
-          subject: {'CN': randomCommonName()},
+          subject: {'CN': _boundName(keys)},
           serialNumber: '987654321987654321',
         ),
       );
@@ -337,7 +340,7 @@ void main() {
       );
       expect(
         PeerCertificate.fromDer(first)!.commonName,
-        isNot(PeerCertificate.fromDer(second)!.commonName),
+        PeerCertificate.fromDer(second)!.commonName,
       );
       expect(
         PeerCertificate.fromDer(first)!.fingerprint,
@@ -345,42 +348,53 @@ void main() {
       );
     });
 
-    test('other dates and extensions keep the fingerprint too', () {
+    test('other dates keep the fingerprint too', () {
       final keys = _keyPair();
       final plain = _derOf(
-        _basicUtilsCertificate(keys, subject: {'CN': randomCommonName()}),
+        _basicUtilsCertificate(keys, subject: {'CN': _boundName(keys)}),
       );
       final other = _derOf(
         _basicUtilsCertificate(
           keys,
-          subject: {'CN': randomCommonName()},
+          subject: {'CN': _boundName(keys)},
           serialNumber: '2',
           days: 30,
           notBefore: DateTime.utc(2020, 6, 15),
+        ),
+      );
+
+      expect(plain, isNot(other));
+      expect(fingerprintOfCertificate(plain), fingerprintOfCertificate(other));
+    });
+
+    test('the same key with extensions is not readable (Q-4)', () {
+      final keys = _keyPair();
+      final withExtensions = _derOf(
+        _basicUtilsCertificate(
+          keys,
+          subject: {'CN': _boundName(keys)},
           keyUsage: [KeyUsage.DIGITAL_SIGNATURE],
         ),
       );
 
-      expect(fingerprintOfCertificate(plain), fingerprintOfCertificate(other));
+      expect(() => fingerprintOfCertificate(withExtensions), _notReadable());
+      expect(PeerCertificate.fromDer(withExtensions), isNull);
     });
 
-    test('control: another key with the same name and serial changes it', () {
-      final commonName = randomCommonName();
+    test('control: another key with the same name and serial is not '
+        'readable, because the name belongs to the first key', () {
+      final firstKeys = _keyPair();
+      final commonName = _boundName(firstKeys);
       final first = _derOf(
-        _basicUtilsCertificate(_keyPair(), subject: {'CN': commonName}),
+        _basicUtilsCertificate(firstKeys, subject: {'CN': commonName}),
       );
       final second = _derOf(
         _basicUtilsCertificate(_keyPair(), subject: {'CN': commonName}),
       );
 
-      expect(
-        fingerprintOfCertificate(first),
-        isNot(fingerprintOfCertificate(second)),
-      );
-      expect(
-        PeerCertificate.fromDer(first)!.canonicalName,
-        PeerCertificate.fromDer(second)!.canonicalName,
-      );
+      expect(PeerCertificate.fromDer(first)?.commonName, commonName);
+      expect(() => fingerprintOfCertificate(second), _notReadable());
+      expect(PeerCertificate.fromDer(second), isNull);
     });
   });
 
@@ -414,34 +428,43 @@ void main() {
       expect(_containsBytes(legacyDer, [0x18, 0x0F]), isFalse);
     });
 
-    test('parseCertificate accepts it with its name and SPKI', () {
-      final parsed = parseCertificate(legacyDer);
+    test('parseLegacyCertificate accepts it with its name and SPKI, and '
+        'parseCertificate does not, because the name is not bound to the '
+        'key', () {
+      final parsed = parseLegacyCertificate(legacyDer);
 
       expect(parsed.commonName, commonName);
       expect(parsed.spki, _expectedSpki(keys.publicKey));
+      expect(() => parseCertificate(legacyDer), _invalidDer());
     });
 
-    test('fromPem loads it and the fingerprint is over the SPKI', () {
-      final loaded = DeviceIdentity.fromPem(
+    test('fromPem refuses it and migrateLegacy keeps the key and the '
+        'fingerprint over the SPKI', () {
+      expect(
+        DeviceIdentity.fromPem(
+          certificatePem: legacy.certificatePem,
+          privateKeyPem: legacy.privateKeyPem,
+        ),
+        isNull,
+      );
+
+      final migrated = DeviceIdentity.migrateLegacy(
         certificatePem: legacy.certificatePem,
         privateKeyPem: legacy.privateKeyPem,
       );
 
-      expect(loaded, isNotNull);
-      expect(loaded!.fingerprint, _sha256Upper(_expectedSpki(keys.publicKey)));
-      expect(loaded.fingerprint, isNot(_sha256Upper(legacyDer)));
-      expect(loaded.certificatePem, legacy.certificatePem);
-      expect(loaded.certificateDer, legacyDer);
+      expect(migrated, isNotNull);
+      expect(
+        migrated!.fingerprint,
+        _sha256Upper(_expectedSpki(keys.publicKey)),
+      );
+      expect(migrated.fingerprint, isNot(_sha256Upper(legacyDer)));
+      expect(migrated.certificate.commonName, _boundName(keys));
     });
 
-    test('PeerCertificate reads it with the same fingerprint and name', () {
-      final peer = PeerCertificate.tryParse(legacy.certificatePem);
-
-      expect(peer, isNotNull);
-      expect(peer!.commonName, commonName);
-      expect(peer.canonicalName, commonName.toLowerCase());
-      expect(peer.fingerprint, _sha256Upper(_expectedSpki(keys.publicKey)));
-      expect(peer.der, legacyDer);
+    test('PeerCertificate does not read it', () {
+      expect(PeerCertificate.tryParse(legacy.certificatePem), isNull);
+      expect(PeerCertificate.fromDer(legacyDer), isNull);
     });
 
     test('IdentityStore loads the stored files without resetting', () async {
@@ -478,7 +501,7 @@ void main() {
     });
 
     test('mutual TLS with a pinned fingerprint works as server', () async {
-      final server = DeviceIdentity.fromPem(
+      final server = DeviceIdentity.migrateLegacy(
         certificatePem: legacy.certificatePem,
         privateKeyPem: legacy.privateKeyPem,
       )!;
@@ -501,16 +524,16 @@ void main() {
     });
 
     test('mutual TLS with a pinned fingerprint works as client', () async {
-      final client = DeviceIdentity.fromPem(
+      final client = DeviceIdentity.migrateLegacy(
         certificatePem: legacy.certificatePem,
         privateKeyPem: legacy.privateKeyPem,
       )!;
 
       final outcome = await _exchange(
         serverContext: alice.serverContext(
-          trustedCertificatesPem: [legacy.certificatePem],
+          trustedCertificatesPem: [client.certificatePem],
         ),
-        clientContext: _presenting(legacy.certificatePem, legacy.privateKeyPem),
+        clientContext: _presenting(client.certificatePem, legacy.privateKeyPem),
         pinnedFingerprint: alice.fingerprint,
       );
 
@@ -655,7 +678,7 @@ void main() {
 
     setUpAll(() {
       keys = _keyPair();
-      commonName = randomCommonName();
+      commonName = _boundName(keys);
       validPem = _basicUtilsCertificate(keys, subject: {'CN': commonName});
       validDer = _derOf(validPem);
     });
@@ -735,12 +758,25 @@ void main() {
       expect(fromDer.commonName, fromPem.commonName);
     });
 
-    test('a certificate with extensions ([3]) is accepted', () {
+    test('a certificate with extensions ([3]) gives null (Q-4)', () {
       final pem = _basicUtilsCertificate(
         keys,
         subject: {'CN': commonName},
         keyUsage: [KeyUsage.DIGITAL_SIGNATURE, KeyUsage.KEY_AGREEMENT],
       );
+      final tbs = X509Utils.x509CertificateFromPem(pem).tbsCertificate!;
+      expect(tbs.extensions, isNotNull);
+
+      expectRejected(pem, 'keyUsage extension');
+      expect(
+        () => parseCertificate(_derOf(pem)),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('control: the same key and name without extensions is read (Q-4, '
+        'R35)', () {
+      final pem = _basicUtilsCertificate(keys, subject: {'CN': commonName});
 
       expect(
         PeerCertificate.tryParse(pem)?.fingerprint,
@@ -860,10 +896,8 @@ void main() {
 
       expectRejected(withName('NexusBridges-${hex.substring(0, 15)}'), '15');
       expectRejected(withName('NexusBridges-${hex}0'), '17');
-      expect(
-        PeerCertificate.tryParse(withName('NexusBridges-$hex'))?.commonName,
-        'NexusBridges-$hex',
-      );
+      expectRejected(withName('NexusBridges-$hex'), '16 of another key');
+      expect(PeerCertificate.tryParse(validPem)?.commonName, commonName);
     });
 
     test('a CN with other characters gives null', () {
@@ -881,7 +915,7 @@ void main() {
     });
 
     test('an issuer different from the subject gives null', () {
-      final name = randomCommonName();
+      final name = commonName;
       final other = _withIssuer(keys, name, {'CN': randomCommonName()});
       final withO = _withIssuer(keys, name, {'CN': name, 'O': 'NexusBridges'});
 
@@ -953,34 +987,30 @@ void main() {
     });
   });
 
-  group('DeviceIdentity.generate checks the common name', () {
-    test('rejects a name outside the pattern with ArgumentError', () {
-      final hex = randomCommonName().substring('NexusBridges-'.length);
-      for (final name in [
-        '',
-        'NexusBridges-alice',
-        'NexusBridges-0123456789ABCDEF',
-        'NexusBridges-${hex.substring(1)}',
-        'NexusBridges-${hex}0',
-        'NexusBridges-$hex ',
-        ' NexusBridges-$hex',
-        'NexusBridges-$hex\u200B',
-      ]) {
-        expect(
-          () => DeviceIdentity.generate(commonName: name),
-          throwsArgumentError,
-          reason: name,
-        );
-      }
-    });
+  group('DeviceIdentity.generate binds the common name to the key', () {
+    test('the name is NexusBridges- and the first 16 hex of its own '
+        'fingerprint, in lowercase', () {
+      final identity = DeviceIdentity.generate();
+      final name = identity.certificate.commonName;
 
-    test('accepts a valid name and puts it in the certificate', () {
-      final name = randomCommonName();
-      final identity = DeviceIdentity.generate(commonName: name);
-
+      expect(name, matches(_commonNamePattern));
+      expect(
+        name,
+        'NexusBridges-${identity.fingerprint.substring(0, 16).toLowerCase()}',
+      );
       expect(
         PeerCertificate.tryParse(identity.certificatePem)?.commonName,
         name,
+      );
+    });
+
+    test('two identities get two different names', () {
+      final first = DeviceIdentity.generate();
+      final second = DeviceIdentity.generate();
+
+      expect(
+        first.certificate.commonName,
+        isNot(second.certificate.commonName),
       );
     });
   });

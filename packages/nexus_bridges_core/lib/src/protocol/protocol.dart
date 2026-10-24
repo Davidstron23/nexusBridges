@@ -49,6 +49,9 @@ abstract final class Limits {
   static const Duration scanConnectTimeout = Duration(milliseconds: 1500);
   static const int maxPendingHandshakesPerIp = 8;
   static const int maxPendingHandshakes = 128;
+  static const int maxConnectionsPerIp = 16;
+  static const int maxConnections = 256;
+  static const int maxTrackedOrigins = 4096;
   static const int maxPairingBodyBytes = 8192;
   static const int maxRequestNameLength = 256;
   static const Duration pairingTimeout = Duration(seconds: 60);
@@ -60,13 +63,18 @@ abstract final class Limits {
   static const Duration pairingRequestWindow = Duration(minutes: 10);
   static const int pairingMismatchLimit = 3;
   static const Duration pairingBlock = Duration(minutes: 10);
+  static const int pairingGlobalFailures = 3;
+  static const Duration pairingGlobalWindow = Duration(minutes: 10);
+  static const int signatureChecksPerSecond = 20;
   static const Duration unpairNoticeTimeout = Duration(seconds: 5);
   static const Duration peerCheckInterval = Duration(minutes: 5);
   static const Duration peerCheckRetry = Duration(seconds: 30);
+  static const Duration peerCheckAfterPairing = Duration(seconds: 30);
   static const int pairSessionRequestsPerMinute = 120;
   static const int pairStatusPerMinute = 12;
   static const int unpairPerMinute = 12;
   static const Duration routeBlock = Duration(minutes: 1);
+  static const Duration listenerCloseGrace = Duration(milliseconds: 300);
 }
 
 final class PortInUseException implements Exception {

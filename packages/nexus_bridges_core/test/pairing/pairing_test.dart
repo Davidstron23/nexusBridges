@@ -15,12 +15,8 @@ final class _PassThroughProtector implements SecretProtector {
   Uint8List? unprotect(Uint8List data) => Uint8List.fromList(data);
 }
 
-final DeviceIdentity _identityA = DeviceIdentity.generate(
-  commonName: randomCommonName(),
-);
-final DeviceIdentity _identityB = DeviceIdentity.generate(
-  commonName: randomCommonName(),
-);
+final DeviceIdentity _identityA = DeviceIdentity.generate();
+final DeviceIdentity _identityB = DeviceIdentity.generate();
 
 final String _fingerprintA = _identityA.fingerprint;
 final String _fingerprintB = _identityB.fingerprint;

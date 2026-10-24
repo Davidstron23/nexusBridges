@@ -204,4 +204,92 @@ void main() {
       }
     });
   });
+
+  group('hard cap on tracked keys (V8)', () {
+    RateLimiter small({int maxPerWindow = 3}) => RateLimiter(
+      maxPerWindow: maxPerWindow,
+      window: const Duration(minutes: 1),
+      block: const Duration(minutes: 1),
+      now: () => now,
+      maxKeys: 4,
+    );
+
+    List<String> manyKeys(int count) => [
+      for (var i = 0; i < count; i++)
+        '10.${i >> 16}.${(i >> 8) & 255}.${i & 255}',
+    ];
+
+    test('the default cap is Limits.maxTrackedOrigins', () {
+      expect(limiter.maxKeys, Limits.maxTrackedOrigins);
+      expect(Limits.maxTrackedOrigins, 4096);
+    });
+
+    test('with 4096 blocked keys a new key is refused (fails closed) and the '
+        'blocked ones stay blocked', () {
+      final full = RateLimiter(
+        maxPerWindow: 1,
+        window: const Duration(minutes: 1),
+        block: const Duration(minutes: 1),
+        now: () => now,
+      );
+      for (final key in manyKeys(4096)) {
+        full.allow(key);
+        expect(full.allow(key), isFalse, reason: key);
+      }
+
+      expect(full.allow('192.168.1.99'), isFalse);
+      expect(full.allow(manyKeys(1).single), isFalse);
+      at(const Duration(minutes: 1));
+      expect(full.allow('192.168.1.99'), isTrue);
+    });
+
+    test('a new key over the cap evicts the least recently seen one, which '
+        'then starts clean', () {
+      final limited = small();
+      for (final key in ['k0', 'k1']) {
+        expect([
+          for (var i = 0; i < 3; i++) limited.allow(key),
+        ], everyElement(isTrue));
+      }
+      limited.allow('k2');
+      limited.allow('k3');
+      expect(limited.allow('k0'), isFalse);
+
+      expect(limited.allow('k4'), isTrue);
+
+      expect(limited.allow('k1'), isTrue);
+    });
+
+    test('a blocked key is never evicted while new keys come and go', () {
+      final limited = small();
+      for (var i = 0; i < 4; i++) {
+        limited.allow('k0');
+      }
+
+      for (var i = 1; i <= 20; i++) {
+        expect(limited.allow('n$i'), isTrue, reason: 'n$i');
+      }
+
+      at(const Duration(seconds: 59));
+      expect(limited.allow('k0'), isFalse);
+    });
+
+    test('with every slot blocked a new key is refused until a block ends', () {
+      final limited = small();
+      for (final key in ['k0', 'k1', 'k2', 'k3']) {
+        for (var i = 0; i < 4; i++) {
+          limited.allow(key);
+        }
+      }
+
+      expect(limited.allow('k4'), isFalse);
+      at(const Duration(seconds: 59, milliseconds: 999));
+      expect(limited.allow('k4'), isFalse);
+      at(const Duration(minutes: 1));
+      expect(limited.allow('k4'), isTrue);
+      for (final key in ['k0', 'k1', 'k2', 'k3']) {
+        expect(limited.allow(key), isTrue, reason: key);
+      }
+    });
+  });
 }

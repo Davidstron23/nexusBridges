@@ -9,26 +9,29 @@ import 'api_server_harness.dart';
 
 final InternetAddress _thirdLoopback = InternetAddress('127.0.0.3');
 final InternetAddress _unassignable = InternetAddress('203.0.113.9');
+const Duration _patient = Duration(seconds: 40);
 
 void main() {
   late DeviceIdentity alice;
   late DeviceIdentity bob;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
   });
 
   Future<Reply?> present(
     int port, {
     InternetAddress? from,
     InternetAddress? to,
+    Duration limit = waitLimit,
   }) => sendOrCut(
     port,
     registerRequest(callerInfoOf(bob)),
     serverFingerprint: alice.fingerprint,
     from: from,
     to: to,
+    limit: limit,
   );
 
   group('listeners follow the active interfaces (RF-17, RF-26)', () {
@@ -232,6 +235,7 @@ void main() {
         port,
         to: _thirdLoopback,
         from: _thirdLoopback,
+        limit: _patient,
       );
       expect(reply!.status, 200);
       expect(harness.registrations.single.via, same(earlier));

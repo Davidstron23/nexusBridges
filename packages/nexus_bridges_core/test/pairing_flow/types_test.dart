@@ -1,0 +1,157 @@
+import 'dart:io';
+
+import 'package:nexus_bridges_core/src/pairing_flow/pairing_flow.dart';
+import 'package:test/test.dart';
+
+final String fp = 'A' * 64;
+
+PairingTarget target({
+  String? fingerprint,
+  String? name = 'PC-DAVID',
+  String address = '192.168.1.30',
+  int port = 53530,
+  String interfaceId = 'eth0',
+  String localAddress = '192.168.1.10',
+}) => PairingTarget(
+  fingerprint: fingerprint ?? fp,
+  name: name,
+  address: InternetAddress(address),
+  port: port,
+  interfaceId: interfaceId,
+  localAddress: InternetAddress(localAddress),
+);
+
+PairingView view({
+  PairingRole role = PairingRole.receiver,
+  PairingPhase phase = PairingPhase.comparing,
+  String? peerFingerprint,
+  String? peerName = 'PC-DAVID',
+  String? code = '012345',
+  bool alreadyPaired = false,
+  PairingOutcome? outcome,
+}) => PairingView(
+  role: role,
+  phase: phase,
+  peerFingerprint: peerFingerprint ?? fp,
+  peerName: peerName,
+  code: code,
+  alreadyPaired: alreadyPaired,
+  outcome: outcome,
+);
+
+String describe(PairingEvent event) => switch (event) {
+  PairingCompleted() => 'completed',
+  UnpairedByPeer() => 'unpaired',
+  PairingAttemptRejected() => 'rejected',
+  PairingNotSaved() => 'notSaved',
+  PairingFailed() => 'failed',
+  IgnoreNotSaved() => 'ignore',
+};
+
+void main() {
+  test('the enums have exactly the values of the plan', () {
+    expect(PairingRole.values.map((v) => v.name), ['initiator', 'receiver']);
+    expect(PairingPhase.values.map((v) => v.name), [
+      'connecting',
+      'comparing',
+      'waitingPeer',
+      'finished',
+    ]);
+    expect(PairingOutcome.values.map((v) => v.name), [
+      'paired',
+      'rejected',
+      'busy',
+      'cancelledByPeer',
+      'expired',
+      'lost',
+      'networkChanged',
+      'failed',
+      'notSaved',
+    ]);
+    expect(ReceiverAnswer.values.map((v) => v.name), [
+      'matches',
+      'mismatch',
+      'ignore',
+    ]);
+    expect(PeerStatus.values.map((v) => v.name), [
+      'paired',
+      'notPaired',
+      'unknown',
+    ]);
+    expect(PairStart.values.map((v) => v.name), ['started', 'busy']);
+  });
+
+  test('PairingTarget compares by value', () {
+    expect(target(), target());
+    expect(target().hashCode, target().hashCode);
+    for (final other in [
+      target(fingerprint: 'B' * 64),
+      target(name: null),
+      target(name: 'otro'),
+      target(address: '192.168.1.31'),
+      target(port: 53531),
+      target(interfaceId: 'wlan0'),
+      target(localAddress: '192.168.1.11'),
+    ]) {
+      expect(other, isNot(target()));
+    }
+  });
+
+  test('PairingView compares by value and alreadyPaired defaults to false', () {
+    expect(view(), view());
+    expect(view().hashCode, view().hashCode);
+    expect(
+      const PairingView(
+        role: PairingRole.initiator,
+        phase: PairingPhase.connecting,
+        peerFingerprint: 'x',
+        peerName: null,
+      ).alreadyPaired,
+      isFalse,
+    );
+    for (final other in [
+      view(role: PairingRole.initiator),
+      view(phase: PairingPhase.waitingPeer),
+      view(peerFingerprint: 'B' * 64),
+      view(peerName: null),
+      view(code: null),
+      view(code: '012346'),
+      view(alreadyPaired: true),
+      view(phase: PairingPhase.finished, outcome: PairingOutcome.paired),
+    ]) {
+      expect(other, isNot(view()));
+    }
+    expect(
+      view(phase: PairingPhase.finished, outcome: PairingOutcome.expired),
+      isNot(view(phase: PairingPhase.finished, outcome: PairingOutcome.lost)),
+    );
+  });
+
+  test('the events are a closed family of six', () {
+    expect(
+      [
+        PairingCompleted(fingerprint: fp, name: null, isNew: true),
+        UnpairedByPeer(fingerprint: fp, name: 'PC', saved: false),
+        PairingAttemptRejected(fingerprint: fp),
+        PairingNotSaved(fingerprint: fp),
+        PairingFailed(fingerprint: fp),
+        IgnoreNotSaved(fingerprint: fp, name: null),
+      ].map(describe),
+      ['completed', 'unpaired', 'rejected', 'notSaved', 'failed', 'ignore'],
+    );
+  });
+
+  test('a rejected attempt, a save that failed and one that was not written '
+      'carry only the fingerprint (V5, Q-9)', () {
+    final rejected = PairingAttemptRejected(fingerprint: fp);
+    final notSaved = PairingNotSaved(fingerprint: fp);
+    final failed = PairingFailed(fingerprint: fp);
+
+    expect(rejected.fingerprint, fp);
+    expect(notSaved.fingerprint, fp);
+    expect(failed.fingerprint, fp);
+    for (final event in <Object>[rejected, notSaved, failed]) {
+      expect(() => (event as dynamic).name, throwsNoSuchMethodError);
+    }
+  });
+}

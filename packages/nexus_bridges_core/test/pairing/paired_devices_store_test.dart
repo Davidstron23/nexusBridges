@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:basic_utils/basic_utils.dart';
 import 'package:crypto/crypto.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_builder.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
@@ -12,20 +15,32 @@ const String _owner =
     'C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00C0FFEE00';
 const String _otherOwner =
     'BADA5500BADA5500BADA5500BADA5500BADA5500BADA5500BADA5500BADA55AA';
-const String _sharedCommonName = 'NexusBridges-0123456789abcdef';
 const String _smile = '\u{1F600}';
 
 final List<DeviceIdentity> _identities = [
-  for (var i = 0; i < 34; i++)
-    DeviceIdentity.generate(commonName: randomCommonName()),
+  for (var i = 0; i < 34; i++) DeviceIdentity.generate(),
 ];
 
-final DeviceIdentity _twinOne = DeviceIdentity.generate(
-  commonName: _sharedCommonName,
-);
-final DeviceIdentity _twinTwo = DeviceIdentity.generate(
-  commonName: _sharedCommonName,
-);
+final DeviceIdentity _twinOne = DeviceIdentity.generate();
+
+final PairedDevice _twinTwo = _sameNameOtherKey(_twinOne);
+
+PairedDevice _sameNameOtherKey(DeviceIdentity original) {
+  final pair = CryptoUtils.generateEcKeyPair();
+  final publicKey = pair.publicKey as ECPublicKey;
+  return PairedDevice(
+    fingerprint: sha256.convert(spkiOf(publicKey)).toString().toUpperCase(),
+    name: 'twin',
+    certificatePem: buildSelfSignedCertificatePem(
+      privateKey: pair.privateKey as ECPrivateKey,
+      publicKey: publicKey,
+      commonName: original.certificate.commonName,
+      serialNumber: Uint8List.fromList(List<int>.generate(16, (i) => i + 1)),
+    ),
+    relation: PeerRelation.foreign,
+    pairedAt: DateTime.utc(2026, 10, 23, 18),
+  );
+}
 
 PairedDevice _deviceOf(
   DeviceIdentity identity, {
@@ -421,7 +436,7 @@ void main() {
         {..._device(0).toJson(), 'fingerprint': _fp(1)},
       ]),
       'two entries with the same canonicalName and different keys': () =>
-          v2([_deviceOf(_twinOne).toJson(), _deviceOf(_twinTwo).toJson()]),
+          v2([_deviceOf(_twinOne).toJson(), _twinTwo.toJson()]),
       'the same entry twice': () =>
           v2([_device(0).toJson(), _device(0).toJson()]),
       'a name of 65 runes': () => v2([
@@ -435,9 +450,13 @@ void main() {
     test('the fixtures are what the cases say', () {
       expect(wholeDerFingerprint, isNot(_fp(0)));
       expect(_twinOne.fingerprint, isNot(_twinTwo.fingerprint));
-      final one = PeerCertificate.tryParse(_twinOne.certificatePem)!;
-      final two = PeerCertificate.tryParse(_twinTwo.certificatePem)!;
-      expect(one.canonicalName, two.canonicalName);
+      expect(
+        X509Utils.x509CertificateFromPem(_twinTwo.certificatePem)
+            .tbsCertificate!
+            .subject['2.5.4.3'],
+        _twinOne.certificate.commonName,
+      );
+      expect(PeerCertificate.tryParse(_twinTwo.certificatePem), isNull);
     });
 
     for (final MapEntry(key: label, value: build) in cases.entries) {
@@ -599,16 +618,15 @@ void main() {
       expect(pairedFile.readAsStringSync(), before);
     });
 
-    test('duplicateSubject: another key with the same canonical name is '
-        'refused and the paired one stays (RF-93)', () async {
+    test('another key with the same name is not a valid paired device: add '
+        'throws and the paired one stays (RF-93)', () async {
       final store = await storeWith([_deviceOf(_twinOne)]);
       final before = pairedFile.readAsStringSync();
       final changes = recordChanges(store);
 
-      final result = await store.add(_deviceOf(_twinTwo));
+      expect(() => store.add(_twinTwo), throwsArgumentError);
       await pumpEventQueue();
 
-      expect(result, AddResult.duplicateSubject);
       expect(_fingerprints(store.devices), {_twinOne.fingerprint});
       expect(store.isPaired(_twinTwo.fingerprint), isFalse);
       expect(changes, isEmpty);
@@ -700,16 +718,14 @@ void main() {
       expect(entriesOf(pairedFile), hasLength(1));
     });
 
-    test('two keys with the same subject at once: added and '
-        'duplicateSubject', () async {
+    test('two keys with the same subject at once: the real one is added and '
+        'the other one is refused before the queue', () async {
       final store = storeOn(pairedFile);
 
-      final results = await Future.wait([
-        store.add(_deviceOf(_twinOne)),
-        store.add(_deviceOf(_twinTwo)),
-      ]);
+      final adding = store.add(_deviceOf(_twinOne));
+      expect(() => store.add(_twinTwo), throwsArgumentError);
 
-      expect(results, [AddResult.added, AddResult.duplicateSubject]);
+      expect(await adding, AddResult.added);
       expect(_fingerprints(store.devices), {_twinOne.fingerprint});
       expect(fingerprintsIn(pairedFile), {_twinOne.fingerprint});
     });

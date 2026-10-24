@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import 'der.dart';
 
 const int _tagInteger = 0x02;
@@ -11,7 +13,6 @@ const int _tagPrintableString = 0x13;
 const int _tagSequence = 0x30;
 const int _tagSet = 0x31;
 const int _tagVersion = 0xA0;
-const int _tagExtensions = 0xA3;
 
 const List<int> _oidCommonName = [0x55, 0x04, 0x03];
 const List<int> _oidEcPublicKey = [0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01];
@@ -27,8 +28,21 @@ const List<int> _oidPrime256v1 = [
 ];
 
 const int _publicKeyBitStringLength = 66;
+const int _coordinateLength = 32;
+
+final BigInt _fieldPrime = BigInt.parse(
+  'FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF',
+  radix: 16,
+);
+final BigInt _curveB = BigInt.parse(
+  '5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B',
+  radix: 16,
+);
 
 final RegExp commonNamePattern = RegExp(r'^NexusBridges-[0-9a-f]{16}$');
+
+String commonNameForSpki(List<int> spki) =>
+    'NexusBridges-${sha256.convert(spki).toString().substring(0, 16)}';
 
 FormatException _invalid() => const FormatException('invalid DER');
 
@@ -40,9 +54,15 @@ final class ParsedCertificate {
   final String commonName;
 }
 
-ParsedCertificate parseCertificate(Uint8List der) {
+ParsedCertificate parseCertificate(Uint8List der) =>
+    _guarded(der, bindCommonName: true);
+
+ParsedCertificate parseLegacyCertificate(Uint8List der) =>
+    _guarded(der, bindCommonName: false);
+
+ParsedCertificate _guarded(Uint8List der, {required bool bindCommonName}) {
   try {
-    return _parse(der);
+    return _parse(der, bindCommonName: bindCommonName);
   } on FormatException {
     rethrow;
   } catch (_) {
@@ -50,7 +70,7 @@ ParsedCertificate parseCertificate(Uint8List der) {
   }
 }
 
-ParsedCertificate _parse(Uint8List der) {
+ParsedCertificate _parse(Uint8List der, {required bool bindCommonName}) {
   final root = readDerElement(der, 0, der.length);
   if (root.tag != _tagSequence || root.end != der.length) throw _invalid();
   final parts = readDerChildren(der, root);
@@ -80,17 +100,18 @@ ParsedCertificate _parse(Uint8List der) {
   final subject = tbs[index + 4];
   final spki = tbs[index + 5];
   index += expected.length;
-  if (index < tbs.length && tbs[index].tag == _tagExtensions) index++;
   if (index != tbs.length) throw _invalid();
 
   final subjectBytes = derBytes(der, subject);
   final issuerBytes = derBytes(der, issuer);
   if (!_sameBytes(subjectBytes, issuerBytes)) throw _invalid();
 
-  return ParsedCertificate(
-    spki: _checkedSpki(der, spki),
-    commonName: _commonNameOf(der, subject),
-  );
+  final checkedSpki = _checkedSpki(der, spki);
+  final commonName = _commonNameOf(der, subject);
+  if (bindCommonName && commonName != commonNameForSpki(checkedSpki)) {
+    throw _invalid();
+  }
+  return ParsedCertificate(spki: checkedSpki, commonName: commonName);
 }
 
 String _commonNameOf(Uint8List der, DerElement subject) {
@@ -141,7 +162,25 @@ Uint8List _checkedSpki(Uint8List der, DerElement spki) {
       key[1] != 0x04) {
     throw _invalid();
   }
+  _checkOnCurve(key);
   return derBytes(der, spki);
+}
+
+void _checkOnCurve(Uint8List key) {
+  final x = _bigIntOf(key, 2);
+  final y = _bigIntOf(key, 2 + _coordinateLength);
+  if (x >= _fieldPrime || y >= _fieldPrime) throw _invalid();
+  final left = (y * y) % _fieldPrime;
+  final right = (x * x * x - BigInt.from(3) * x + _curveB) % _fieldPrime;
+  if (left != right) throw _invalid();
+}
+
+BigInt _bigIntOf(Uint8List bytes, int offset) {
+  var value = BigInt.zero;
+  for (var i = 0; i < _coordinateLength; i++) {
+    value = (value << 8) | BigInt.from(bytes[offset + i]);
+  }
+  return value;
 }
 
 bool _sameBytes(List<int> a, List<int> b) {

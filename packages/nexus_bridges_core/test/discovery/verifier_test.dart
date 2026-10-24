@@ -139,9 +139,7 @@ Future<void> main(List<String> args) async {
   );
   const long = Duration(seconds: 10);
   const settle = Duration(milliseconds: 300);
-  final identity = DeviceIdentity.generate(
-    commonName: randomCommonName(),
-  );
+  final identity = DeviceIdentity.generate();
   final verifier = DeviceVerifier(identity: identity);
   final self = DeviceInfo(
     name: 'Child',
@@ -346,9 +344,9 @@ void main() {
   late DeviceInfo self;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
     verifier = DeviceVerifier(identity: bob);
     self = callerInfoOf(bob);
   });

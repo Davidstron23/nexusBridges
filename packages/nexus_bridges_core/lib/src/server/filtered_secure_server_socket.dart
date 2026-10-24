@@ -105,6 +105,8 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
 
   bool _closed = false;
 
+  bool _stopped = false;
+
   @override
   InternetAddress get address => _server.address;
 
@@ -144,6 +146,11 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
     return dropped;
   }
 
+  Future<void> stopAccepting() {
+    _stopped = true;
+    return _stopAccepting();
+  }
+
   void requestFinished(String connectionKey) {
     _connections.remove(connectionKey)?.timer?.cancel();
   }
@@ -169,7 +176,7 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
   }
 
   void _startAccepting() {
-    if (_closed || _subscription != null) return;
+    if (_closed || _stopped || _subscription != null) return;
     _subscription = _server.listen(_accept, onError: (Object _) {});
   }
 
@@ -195,7 +202,9 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
       return;
     }
     if (_pendingTotal >= Limits.maxPendingHandshakes ||
-        (_pendingByIp[ip] ?? 0) >= Limits.maxPendingHandshakesPerIp) {
+        (_pendingByIp[ip] ?? 0) >= Limits.maxPendingHandshakesPerIp ||
+        _connections.length >= Limits.maxConnections ||
+        _liveFrom(ip) >= Limits.maxConnectionsPerIp) {
       socket.destroy();
       return;
     }
@@ -212,6 +221,14 @@ final class FilteredSecureServerSocket extends StreamView<Socket>
       onDone: () => _discard(key, connection),
       cancelOnError: true,
     );
+  }
+
+  int _liveFrom(String ip) {
+    var live = 0;
+    for (final connection in _connections.values) {
+      if (connection.ip == ip) live++;
+    }
+    return live;
   }
 
   void _onData(String key, _Connection connection, Uint8List block) {

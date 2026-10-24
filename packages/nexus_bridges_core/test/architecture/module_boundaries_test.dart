@@ -12,6 +12,14 @@ const Map<String, Set<String>> allowedImports = {
   'transport': {'protocol'},
   'server': {'identity', 'network', 'pairing', 'protocol'},
   'discovery': {'identity', 'network', 'pairing', 'protocol', 'transport'},
+  'pairing_flow': {
+    'identity',
+    'network',
+    'pairing',
+    'protocol',
+    'server',
+    'transport',
+  },
   'transfer': {
     'identity',
     'network',
@@ -38,6 +46,7 @@ const Map<String, Set<String>> allowedImports = {
     'server',
     'discovery',
     'transport',
+    'pairing_flow',
     'transfer',
     'browse',
   },

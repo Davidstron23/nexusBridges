@@ -1,3 +1,5 @@
+import '../protocol/protocol.dart' show Limits;
+
 const int _pruneThreshold = 1024;
 
 final class RateLimiter {
@@ -6,6 +8,7 @@ final class RateLimiter {
     required this.window,
     required this.block,
     required this._now,
+    this.maxKeys = Limits.maxTrackedOrigins,
   });
 
   final int maxPerWindow;
@@ -13,6 +16,8 @@ final class RateLimiter {
   final Duration window;
 
   final Duration block;
+
+  final int maxKeys;
 
   final DateTime Function() _now;
 
@@ -31,7 +36,12 @@ final class RateLimiter {
       _blockedUntil.remove(key);
       _hits.remove(key);
     }
-    final hits = _hits.putIfAbsent(key, () => <DateTime>[]);
+    var hits = _hits.remove(key);
+    if (hits == null) {
+      if (!_makeRoom(now)) return false;
+      hits = <DateTime>[];
+    }
+    _hits[key] = hits;
     hits.removeWhere((instant) => now.difference(instant) >= window);
     hits.add(now);
     if (hits.length > maxPerWindow) {
@@ -40,6 +50,19 @@ final class RateLimiter {
       return false;
     }
     return true;
+  }
+
+  bool _makeRoom(DateTime now) {
+    if (_hits.length < maxKeys) return true;
+    _prune(now);
+    if (_hits.length < maxKeys) return true;
+    for (final key in _hits.keys) {
+      if (!_blockedUntil.containsKey(key)) {
+        _hits.remove(key);
+        return true;
+      }
+    }
+    return false;
   }
 
   bool _pruneDue(DateTime now) {

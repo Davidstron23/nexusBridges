@@ -685,12 +685,12 @@ void main() {
     _loopbackName = all
         .firstWhere((i) => i.addresses.any((a) => a.address == '127.0.0.1'))
         .name;
-    self = DeviceIdentity.generate(commonName: randomCommonName());
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
-    dave = DeviceIdentity.generate(commonName: randomCommonName());
-    erin = DeviceIdentity.generate(commonName: randomCommonName());
+    self = DeviceIdentity.generate();
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
+    dave = DeviceIdentity.generate();
+    erin = DeviceIdentity.generate();
     first = _iface('127.0.0.1');
     second = _iface('127.0.0.2');
   });
@@ -1392,11 +1392,8 @@ void main() {
       late DeviceIdentity newcomer;
 
       setUpAll(() {
-        crowd = [
-          for (var i = 0; i < 65; i++)
-            DeviceIdentity.generate(commonName: randomCommonName()),
-        ];
-        newcomer = DeviceIdentity.generate(commonName: randomCommonName());
+        crowd = [for (var i = 0; i < 65; i++) DeviceIdentity.generate()];
+        newcomer = DeviceIdentity.generate();
       });
 
       test('the list stops at 64 unpaired devices, ignores new ones without '

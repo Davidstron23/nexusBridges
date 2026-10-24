@@ -55,9 +55,9 @@ void main() {
   late DeviceIdentity carol;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
   });
 
   SecurityContext trusting(List<DeviceIdentity> peers) => alice.serverContext(

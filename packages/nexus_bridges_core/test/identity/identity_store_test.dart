@@ -404,7 +404,7 @@ void main() {
       final other = await otherDataDir();
       final first = await createIn(dataDir);
       final second = await createIn(other);
-      final server = DeviceIdentity.generate(commonName: randomCommonName());
+      final server = DeviceIdentity.generate();
       final trusted = [first.certificatePem, second.certificatePem];
 
       final fromFirst = await _serverOutcome(

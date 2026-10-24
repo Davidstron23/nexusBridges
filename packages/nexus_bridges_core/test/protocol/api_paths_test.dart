@@ -78,6 +78,17 @@ void main() {
       expect(Limits.routeBlock, const Duration(minutes: 1));
     });
 
+    test('the global cap and the signature budget have the values of the '
+        'correction v6', () {
+      expect(Limits.pairingGlobalFailures, 3);
+      expect(Limits.pairingGlobalWindow, const Duration(minutes: 10));
+      expect(Limits.signatureChecksPerSecond, 20);
+      expect(
+        Limits.pairingGlobalFailures,
+        lessThanOrEqualTo(Limits.pairingMismatchLimit),
+      );
+    });
+
     test('the long poll hold fits inside the request deadline of the '
         'server', () {
       expect(Limits.pairingPollHold, lessThan(Limits.requestTimeout));
