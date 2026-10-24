@@ -21,6 +21,10 @@ abstract final class ApiPaths {
   static const String pairCancel = '$apiPrefix/pair/cancel';
   static const String pairStatus = '$apiPrefix/pair/status';
   static const String unpair = '$apiPrefix/unpair';
+  static const String transferOffer = '$apiPrefix/transfer/offer';
+  static const String transferWait = '$apiPrefix/transfer/wait';
+  static const String transferCancel = '$apiPrefix/transfer/cancel';
+  static const String transferUpload = '$apiPrefix/transfer/upload';
   static const Set<String> anonymous = {
     register,
     pairStart,
@@ -30,6 +34,12 @@ abstract final class ApiPaths {
     pairCancel,
     pairStatus,
   };
+}
+
+abstract final class TransferHeaders {
+  static const String prefix = 'x-nexusbridges-';
+  static const String transfer = 'x-nexusbridges-transfer';
+  static const String permit = 'x-nexusbridges-permit';
 }
 
 const int maxDatagramBytes = 1024;
@@ -75,6 +85,43 @@ abstract final class Limits {
   static const int unpairPerMinute = 12;
   static const Duration routeBlock = Duration(minutes: 1);
   static const Duration listenerCloseGrace = Duration(milliseconds: 300);
+  static const int maxTransferBodyBytes = 8192;
+  static const int maxTransferSize = 9007199254740991;
+  static const int maxFileNameUnits = 255;
+  static const int transferSpaceMargin = 1073741824;
+  static const Duration transferPollHold = Duration(seconds: 7);
+  static const Duration transferMessageTimeout = Duration(seconds: 10);
+  static const Duration transferDecisionTimeout = Duration(seconds: 150);
+  static const Duration transferPromptTimeout = Duration(seconds: 60);
+  static const Duration transferUploadStartTimeout = Duration(seconds: 30);
+  static const Duration transferIdleTimeout = Duration(seconds: 30);
+  static const Duration transferConfirmTimeout = Duration(seconds: 30);
+  static const Duration transferRecentRejection = Duration(minutes: 1);
+  static const Duration transferRecordTtl = Duration(seconds: 30);
+  static const int transferMaxRecordsPerPeer = 16;
+  static const int transferMaxRecordsTotal = 256;
+  static const Duration transferCancelTimeout = Duration(seconds: 2);
+  static const Duration transferCloseCancelTimeout = Duration(seconds: 1);
+  static const Duration transferFolderCheckTimeout = Duration(
+    milliseconds: 1500,
+  );
+  static const Duration transferFolderChoiceTimeout = Duration(seconds: 10);
+  static const Duration transferCleanupCheckTimeout = Duration(seconds: 4);
+  static const Duration transferCleanupWait = Duration(milliseconds: 500);
+  static const Duration transferTypeCheckTimeout = Duration(seconds: 1);
+  static const Duration transferPollGap = Duration(seconds: 20);
+  static const Duration transferConfirmCap = Duration(minutes: 10);
+  static const Duration transferDecisionCap = Duration(minutes: 10);
+  static const Duration transferCloseBudget = Duration(seconds: 4);
+  static const int maxDiscardedUploadBytes = 65536;
+  static const int maxFinalPathChars = 259;
+  static const int maxExtensionRunes = 16;
+  static const Duration transferProgressInterval = Duration(milliseconds: 250);
+  static const int transferOffersPerMinute = 30;
+  static const int transferPollsPerMinute = 120;
+  static const int transferCancelsPerMinute = 30;
+  static const int transferUploadsPerMinute = 12;
+  static const int maxRelaxedConnections = 2;
 }
 
 final Stopwatch _monotonicWatch = Stopwatch()..start();

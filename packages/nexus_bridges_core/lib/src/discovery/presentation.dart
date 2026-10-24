@@ -1,12 +1,6 @@
+import '../identity/identity.dart' show shortFingerprint;
 import '../protocol/protocol.dart';
 import 'registry.dart';
-
-const int _shortFingerprintLength = 8;
-
-String shortFingerprint(String fingerprint) =>
-    fingerprint.length > _shortFingerprintLength
-    ? fingerprint.substring(0, _shortFingerprintLength)
-    : fingerprint;
 
 final RegExp _unicodeSpaces = RegExp(
   r'[\u0009-\u000D\u0020\u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+',
