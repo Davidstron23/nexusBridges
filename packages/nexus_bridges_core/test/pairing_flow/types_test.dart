@@ -84,6 +84,7 @@ void main() {
     expect(AttemptCause.values.map((v) => v.name), [
       'commitmentMismatch',
       'cancelledAfterReveal',
+      'lostAfterReveal',
     ]);
   });
 

@@ -46,6 +46,16 @@ final class Verify extends RegistryAction {
   final String interfaceId;
 }
 
+final class VerifyGoodbye extends RegistryAction {
+  const VerifyGoodbye(this.info, this.address, this.interfaceId);
+
+  final DeviceInfo info;
+
+  final InternetAddress address;
+
+  final String interfaceId;
+}
+
 final class _Entry {
   _Entry(
     this.info,
@@ -120,6 +130,9 @@ final class DiscoveryRegistry {
     final known = _entries[fingerprint];
     if (a.kind == AnnouncementKind.bye) {
       if (known != null && known.address.address == from.address) {
+        if (_isPaired(fingerprint)) {
+          return VerifyGoodbye(known.info, known.address, known.interfaceId);
+        }
         _entries.remove(fingerprint);
         _heardAt.remove(fingerprint);
         return const Refreshed();
@@ -172,6 +185,16 @@ final class DiscoveryRegistry {
       ..lastSeen = _now()
       ..seenAt = _clock();
     if (fromScan) known.fromScan = true;
+    return true;
+  }
+
+  bool onGoodbyeFailed(String fingerprint, InternetAddress address) {
+    final known = _entries[fingerprint];
+    if (known == null || known.address.address != address.address) {
+      return false;
+    }
+    _entries.remove(fingerprint);
+    _heardAt.remove(fingerprint);
     return true;
   }
 

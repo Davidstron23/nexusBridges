@@ -567,6 +567,24 @@ void main() {
           strings.noticePairingFailed(who),
           false,
         ),
+        (
+          const Notice(
+            id: 14,
+            kind: NoticeKind.attemptLost,
+            deviceName: peerShort,
+          ),
+          strings.noticeAttemptLost(peerShort),
+          false,
+        ),
+        (
+          const Notice(
+            id: 15,
+            kind: NoticeKind.replaceWithdrawn,
+            deviceName: who,
+          ),
+          strings.noticeReplaceWithdrawn(who),
+          false,
+        ),
       ];
 
       for (final (notice, message, canRetry) in cases) {
@@ -731,6 +749,69 @@ void main() {
           expect(controller.calls, ['dismissNotice 10']);
         });
       }
+
+      testWidgets('C136: a lost attempt names the short fingerprint and is '
+          'neither the cancelled nor the data mismatch notice', (tester) async {
+        await _pumpRows(
+          tester,
+          code,
+          entries: const [],
+          notices: const [
+            Notice(id: 16, kind: NoticeKind.attemptLost, deviceName: peerShort),
+          ],
+        );
+
+        final lost = strings.noticeAttemptLost(peerShort);
+        expect(find.text(lost), findsOneWidget);
+        expect(lost, contains(peerShort));
+        expect(
+          find.text(strings.noticeAttemptPeerCancelled(peerShort)),
+          findsNothing,
+        );
+        expect(
+          find.text(strings.noticeAttemptCancelled(peerShort)),
+          findsNothing,
+        );
+        expect(find.text(strings.outcomeLost(peerShort)), findsNothing);
+        expect(buttonLabelsIn(tester, _noticeCard(lost)), [
+          strings.closeButton,
+        ]);
+        expect(find.text(strings.retryButton), findsNothing);
+      });
+
+      testWidgets('C136: a withdrawn replacement names the old device and '
+          'offers only Close', (tester) async {
+        final controller = await _pumpRows(
+          tester,
+          code,
+          entries: const [],
+          notices: const [
+            Notice(
+              id: 17,
+              kind: NoticeKind.replaceWithdrawn,
+              deviceName: _oldName,
+            ),
+          ],
+        );
+
+        final withdrawn = strings.noticeReplaceWithdrawn(_oldName);
+        expect(find.text(withdrawn), findsOneWidget);
+        expect(withdrawn, contains(_oldName));
+        expect(find.text(strings.replaceTitle(_oldName)), findsNothing);
+        expect(buttonLabelsIn(tester, _noticeCard(withdrawn)), [
+          strings.closeButton,
+        ]);
+        expect(find.text(strings.retryButton), findsNothing);
+
+        await tester.tap(
+          find.descendant(
+            of: _noticeCard(withdrawn),
+            matching: find.text(strings.closeButton),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(controller.calls, ['dismissNotice 17']);
+      });
 
       testWidgets('a cumulative notice that grows repaints its count', (
         tester,
@@ -1076,7 +1157,8 @@ void main() {
                 kind: kind,
                 deviceName:
                     kind == NoticeKind.attemptCancelled ||
-                        kind == NoticeKind.attemptDataMismatch
+                        kind == NoticeKind.attemptDataMismatch ||
+                        kind == NoticeKind.attemptLost
                     ? peerShort
                     : _mineName,
                 count: kind == NoticeKind.attemptCancelled ? 3 : 1,

@@ -1197,9 +1197,10 @@ void main() {
       );
     });
 
-    test('cancels before the reveal and cancels with reason expired neither '
-        'count nor reset the streak (RF-106)', () async {
-      final fixture = await receiver();
+    test('C122: cancels before the reveal and genuine expiries (50 s or more '
+        'after the presentation) neither count nor reset the streak '
+        '(RF-106)', () async {
+      final fixture = await receiver(ticking: false);
       final first = fixture.now;
       await finishWithMismatch(fixture, a);
       await finishWithMismatch(fixture, a);
@@ -1208,6 +1209,7 @@ void main() {
       expectState(await early.cancel(CancelReason.cancelled), 'cancelled');
       final expired = fixture.initiator(a);
       await expired.begin();
+      fixture.advance(Limits.pairingPeerExpiryAfter);
       expectState(await expired.cancel(CancelReason.expired), 'expired');
 
       fixture.now = first.add(const Duration(minutes: 6));
@@ -1318,15 +1320,129 @@ void main() {
       expect(fixture.views.length, changes + 1);
     });
 
-    test('pair/cancel with reason expired ends in expired (RF-90)', () async {
+    test('pair/cancel with reason expired, sent between 50 and 60 s after the '
+        'presentation, ends in expired (RF-90)', () async {
       final fixture = await receiver();
       final initiator = fixture.initiator(a);
       await initiator.begin();
+      for (var i = 0; i < 5; i++) {
+        fixture.advance(const Duration(seconds: 9));
+        expectState(await initiator.wait(), 'pending');
+      }
+      fixture.advance(const Duration(seconds: 7));
+      expect(fixture.view!.phase, PairingPhase.comparing);
 
       expectState(await initiator.cancel(CancelReason.expired), 'expired');
 
       expect(fixture.view!.outcome, PairingOutcome.expired);
       expectState(await initiator.wait(), 'expired');
+      await settle();
+      expect(fixture.events, isEmpty);
+    });
+
+    group('C122: the 50 s threshold of a declared expiry (RF-106, RF-90, '
+        'N1)', () {
+      Future<void> twoMismatchesTenMinutesApart(ReceiverFixture fixture) async {
+        fixture.advance(Limits.pairingGlobalWindow);
+        await finishWithMismatch(fixture, a);
+        fixture.advance(Limits.pairingGlobalWindow);
+        await finishWithMismatch(fixture, a);
+      }
+
+      Future<RawInitiator> revealedAt(
+        ReceiverFixture fixture,
+        Duration age,
+      ) async {
+        final initiator = fixture.initiator(a);
+        await initiator.begin(name: 'Laptop');
+        fixture.advance(age);
+        return initiator;
+      }
+
+      test('at 49.999 s it counts as a cancel after the reveal: event, '
+          'cancelledByPeer on screen and the streak goes up', () async {
+        final fixture = await receiver(ticking: false);
+        final initiator = await revealedAt(
+          fixture,
+          Limits.pairingPeerExpiryAfter - const Duration(milliseconds: 1),
+        );
+
+        expectState(await initiator.cancel(CancelReason.expired), 'cancelled');
+
+        expect(fixture.view!.phase, PairingPhase.finished);
+        expect(fixture.view!.outcome, PairingOutcome.cancelledByPeer);
+        await eventually(() => fixture.events.isNotEmpty);
+        expect(
+          fixture.events.single,
+          isA<PairingAttemptRejected>()
+              .having((e) => e.fingerprint, 'fingerprint', a.fingerprint)
+              .having(
+                (e) => e.cause,
+                'cause',
+                AttemptCause.cancelledAfterReveal,
+              ),
+        );
+        await twoMismatchesTenMinutesApart(fixture);
+        expectRejected(await fixture.initiator(a).start());
+      });
+
+      for (final age in [
+        Limits.pairingPeerExpiryAfter,
+        const Duration(seconds: 55),
+      ]) {
+        test('at ${age.inMilliseconds} ms it is a genuine expiry: expired, '
+            'no event and no count', () async {
+          final fixture = await receiver(ticking: false);
+          final initiator = await revealedAt(fixture, age);
+
+          expectState(await initiator.cancel(CancelReason.expired), 'expired');
+
+          expect(fixture.view!.outcome, PairingOutcome.expired);
+          await settle();
+          expect(fixture.events, isEmpty);
+          await twoMismatchesTenMinutesApart(fixture);
+          expect((await fixture.initiator(a).start())!.status, 200);
+        });
+      }
+
+      test('before the reveal, an expired cancel at 1 s ends in '
+          'cancelledByPeer without a view, an event or a count', () async {
+        final fixture = await receiver(ticking: false);
+        final initiator = fixture.initiator(a);
+        expect((await initiator.start())!.status, 200);
+        fixture.advance(const Duration(seconds: 1));
+
+        expectState(await initiator.cancel(CancelReason.expired), 'cancelled');
+
+        expect(fixture.coordinator.busy, isFalse);
+        expect(fixture.view, isNull);
+        await settle();
+        expect(fixture.events, isEmpty);
+        await twoMismatchesTenMinutesApart(fixture);
+        expect((await fixture.initiator(a).start())!.status, 200);
+      });
+
+      test(
+        'a clock that goes back between start and cancel counts it',
+        () async {
+          final fixture = await receiver(ticking: false);
+          final initiator = await revealedAt(
+            fixture,
+            const Duration(seconds: -5),
+          );
+
+          expectState(
+            await initiator.cancel(CancelReason.expired),
+            'cancelled',
+          );
+
+          await eventually(() => fixture.events.isNotEmpty);
+          expect(
+            (fixture.events.single as PairingAttemptRejected).cause,
+            AttemptCause.cancelledAfterReveal,
+          );
+        },
+      );
     });
 
     test('pair/cancel before the reveal frees the receiver and shows '
@@ -1645,6 +1761,13 @@ void main() {
       expect(fixture.view!.outcome, PairingOutcome.lost);
       expect(fixture.coordinator.busy, isFalse);
       expectState(await initiator.wait(), 'cancelled');
+      await eventually(() => fixture.events.isNotEmpty);
+      expect(
+        fixture.events.single,
+        isA<PairingAttemptRejected>()
+            .having((e) => e.fingerprint, 'fingerprint', a.fingerprint)
+            .having((e) => e.cause, 'cause', AttemptCause.lostAfterReveal),
+      );
     });
 
     test('a session lost before its reveal disappears silently', () async {
@@ -1658,6 +1781,62 @@ void main() {
       expect(fixture.view, isNull);
       expect(fixture.views.where((v) => v != null), isEmpty);
       expectNotFound(await initiator.reveal());
+      await settle();
+      expect(fixture.events, isEmpty);
+    });
+
+    group('C123: silence after the reveal counts (RF-106, RF-91, N1)', () {
+      test('a raw client that reveals and stops polling ends in lost at '
+          '10.001 s, with lostAfterReveal and one more failure for its '
+          'origin', () async {
+        final fixture = await receiver();
+        final first = fixture.now;
+        await finishWithMismatch(fixture, a);
+        fixture.now = first.add(Limits.pairingGlobalWindow);
+        await finishWithMismatch(fixture, a);
+        fixture.now = first.add(Limits.pairingGlobalWindow * 2);
+        final silent = fixture.initiator(a);
+        await silent.begin();
+
+        fixture.advance(const Duration(seconds: 10, milliseconds: 1));
+
+        await eventually(() => fixture.view?.outcome == PairingOutcome.lost);
+        await eventually(() => fixture.events.isNotEmpty);
+        expect(fixture.events.map((e) => e.runtimeType), [
+          PairingAttemptRejected,
+        ]);
+        final event = fixture.events.single as PairingAttemptRejected;
+        expect(event.fingerprint, a.fingerprint);
+        expect(event.cause, AttemptCause.lostAfterReveal);
+        expect(fixture.coordinator.busy, isFalse);
+        expectRejected(await fixture.initiator(a).start());
+        expect(
+          (await fixture.initiator(b, from: otherLoopback).start())!.status,
+          200,
+        );
+      });
+
+      test('a raw client that stops before revealing ends silently and its '
+          'origin keeps its streak as it was', () async {
+        final fixture = await receiver();
+        final first = fixture.now;
+        await finishWithMismatch(fixture, a);
+        fixture.now = first.add(Limits.pairingGlobalWindow);
+        await finishWithMismatch(fixture, a);
+        fixture.now = first.add(Limits.pairingGlobalWindow * 2);
+        final silent = fixture.initiator(a);
+        expect((await silent.start())!.status, 200);
+
+        fixture.advance(const Duration(seconds: 10, milliseconds: 1));
+
+        await eventually(() => !fixture.coordinator.busy);
+        await settle();
+        expect(fixture.events, isEmpty);
+        expect(fixture.view, isNull);
+        final again = fixture.initiator(a);
+        expect((await again.start())!.status, 200);
+        expectState(await again.cancel(CancelReason.cancelled), 'cancelled');
+      });
     });
 
     test('a held wait keeps the session alive and its answer refreshes the '

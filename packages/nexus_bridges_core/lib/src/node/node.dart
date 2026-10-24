@@ -109,6 +109,7 @@ final class NexusNode {
       if (node._closing) return;
       node._runDueChecks();
       node._expirePause();
+      if (node._updateAbsences()) node._refresh();
       if (node._refreshSuggest()) node._emit();
     });
     return node;
@@ -165,6 +166,9 @@ final class NexusNode {
   int _nextNoticeId = 1;
   DateTime? _pauseUntil;
   DateTime? _attemptsAt;
+  DateTime? _discoveringSince;
+  final Map<String, DateTime> _seenAt = {};
+  Set<String> _longAbsent = const {};
   final Map<String, int> _pairingRounds = {};
 
   NetworkTrustStore? _trust;
@@ -296,21 +300,44 @@ final class NexusNode {
   Future<void> answerReplace(String fingerprint, {required bool replace}) {
     return _run('answer replace', () async {
       String? oldFingerprint;
+      String? oldName;
       final remaining = <PairingQuestion>[];
       for (final question in _questions) {
         if (question is ReplaceQuestion &&
             question.fingerprint == fingerprint) {
           oldFingerprint = question.oldFingerprint;
+          oldName = question.oldName;
         } else {
           remaining.add(question);
         }
       }
       _questions = List.unmodifiable(remaining);
       if (replace && oldFingerprint != null) {
-        await _unpairLocked(oldFingerprint);
+        if (_seenRecently(oldFingerprint)) {
+          _addNotice(NoticeKind.replaceWithdrawn, deviceName: oldName);
+        } else {
+          await _unpairLocked(oldFingerprint);
+        }
       }
       _refresh();
     });
+  }
+
+  Future<void> _withdrawReappeared() async {
+    final remaining = <PairingQuestion>[];
+    var removed = false;
+    for (final question in _questions) {
+      if (question is ReplaceQuestion &&
+          _seenRecently(question.oldFingerprint)) {
+        _addNotice(NoticeKind.replaceWithdrawn, deviceName: question.oldName);
+        removed = true;
+      } else {
+        remaining.add(question);
+      }
+    }
+    if (!removed) return;
+    _questions = List.unmodifiable(remaining);
+    _refresh();
   }
 
   Future<void> unignore(String fingerprint) {
@@ -427,6 +454,9 @@ final class NexusNode {
     _fingerprint = '';
     _portInUse = null;
     _devices = const [];
+    _discoveringSince = null;
+    _seenAt.clear();
+    _longAbsent = const {};
     _displayNames = const {};
     _prompts = const [];
     _pausedNetworks = const [];
@@ -608,6 +638,11 @@ final class NexusNode {
   }
 
   Future<void> _onPairedChanged() async {
+    final current = _paired;
+    if (current != null) {
+      _seenAt.removeWhere((fingerprint, _) => !current.isPaired(fingerprint));
+    }
+    _updateAbsences();
     _rebuildEntries();
     final server = _server;
     if (server == null) return;
@@ -741,6 +776,9 @@ final class NexusNode {
         if (open.contains(iface.id)) iface,
     ];
     _listening = listening;
+    _discoveringSince = listening.isEmpty
+        ? null
+        : (_discoveringSince ?? _now());
     await channel.syncInterfaces(listening);
     await discovery.syncInterfaces(listening);
     final bound = {for (final iface in listening) iface.id};
@@ -761,6 +799,7 @@ final class NexusNode {
     DiscoveryService discovery,
   ) async {
     _portInUse = port;
+    _discoveringSince = null;
     _activeNetworks = {};
     _listening = const [];
     _notifyInterfaces(const {});
@@ -794,6 +833,9 @@ final class NexusNode {
     _notices = const [];
     _pauseUntil = null;
     _attemptsAt = null;
+    _discoveringSince = null;
+    _seenAt.clear();
+    _longAbsent = const {};
     _monitor = null;
     _discovery = null;
     _server = null;
@@ -838,13 +880,56 @@ final class NexusNode {
 
   void _onDevices(List<DiscoveredDevice> devices) {
     if (_closing) return;
+    final now = _now();
+    final paired = _paired;
+    if (paired != null) {
+      for (final device in [..._devices, ...devices]) {
+        final fingerprint = device.info.fingerprint;
+        if (paired.isPaired(fingerprint)) _seenAt[fingerprint] = now;
+      }
+    }
     _devices = devices;
     _displayNames = displayNames(devices);
     _renameVisiblePaired(devices);
+    _updateAbsences();
     _rebuildEntries();
+    if (_questions.any(
+      (question) =>
+          question is ReplaceQuestion && _isVisible(question.oldFingerprint),
+    )) {
+      _enqueue('replace withdrawn', _withdrawReappeared);
+    }
     _runDueChecks();
     _refreshSuggest();
     _emit();
+  }
+
+  bool _seenRecently(String fingerprint) {
+    if (_isVisible(fingerprint)) return true;
+    final seen = _seenAt[fingerprint];
+    return seen != null && _now().difference(seen) < Limits.replaceAfterAbsence;
+  }
+
+  bool _absentLongEnough(String fingerprint) {
+    final since = _discoveringSince;
+    return !_seenRecently(fingerprint) &&
+        since != null &&
+        _now().difference(since) >= Limits.replaceAfterAbsence;
+  }
+
+  bool _updateAbsences() {
+    final paired = _paired;
+    final next = paired == null
+        ? const <String>{}
+        : {
+            for (final device in paired.devices)
+              if (_absentLongEnough(device.fingerprint)) device.fingerprint,
+          };
+    if (next.length == _longAbsent.length && _longAbsent.containsAll(next)) {
+      return false;
+    }
+    _longAbsent = next;
+    return true;
   }
 
   void _rebuildEntries() {
@@ -859,6 +944,7 @@ final class NexusNode {
       paired: paired.devices,
       isIgnored: ignored.isIgnored,
       mismatched: _scheduler?.mismatched ?? const {},
+      isReplaceable: _longAbsent.contains,
     );
   }
 
@@ -1085,7 +1171,7 @@ final class NexusNode {
       name: device.name,
       excluding: fingerprint,
       paired: paired.devices,
-      isVisible: _isVisible,
+      isReplaceable: _absentLongEnough,
     );
     _questions = List.unmodifiable([
       for (final question in _questions)
@@ -1137,7 +1223,8 @@ final class NexusNode {
     final index = _notices.indexWhere(
       (notice) =>
           notice.kind == NoticeKind.attemptCancelled ||
-          notice.kind == NoticeKind.attemptDataMismatch,
+          notice.kind == NoticeKind.attemptDataMismatch ||
+          notice.kind == NoticeKind.attemptLost,
     );
     if (index >= 0 && fresh) {
       final current = _notices[index];
@@ -1161,12 +1248,11 @@ final class NexusNode {
           if (i != index) _notices[i],
       ]);
     }
-    _addNotice(
-      cause == AttemptCause.commitmentMismatch
-          ? NoticeKind.attemptDataMismatch
-          : NoticeKind.attemptCancelled,
-      deviceName: short,
-    );
+    _addNotice(switch (cause) {
+      AttemptCause.commitmentMismatch => NoticeKind.attemptDataMismatch,
+      AttemptCause.cancelledAfterReveal => NoticeKind.attemptCancelled,
+      AttemptCause.lostAfterReveal => NoticeKind.attemptLost,
+    }, deviceName: short);
   }
 
   void _showPause(DateTime until) {
@@ -1226,6 +1312,8 @@ final class NexusNode {
 
   void _emit() {
     if (_closing) return;
+    final view = _coordinator?.view;
+    final paired = _paired;
     final next = NodeState(
       identityStatus: _identityStatus,
       identityError: _identityError,
@@ -1240,7 +1328,14 @@ final class NexusNode {
       deviceName: _deviceName,
       fingerprint: _fingerprint,
       entries: _entries,
-      pairing: _coordinator?.view,
+      pairing: view,
+      pairingNamesake: view == null || paired == null
+          ? null
+          : namesakeOf(
+              name: view.peerName,
+              excluding: view.peerFingerprint,
+              paired: paired.devices,
+            ),
       questions: _questions,
       notices: _notices,
       unsavedChanges:
@@ -1268,6 +1363,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.unsavedChanges == b.unsavedChanges &&
       a.scanning == b.scanning &&
       a.pairing == b.pairing &&
+      a.pairingNamesake == b.pairingNamesake &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&
       _sameList(a.questions, b.questions, (x, y) => x == y) &&
       _sameList(a.notices, b.notices, (x, y) => x == y) &&

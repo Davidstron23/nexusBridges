@@ -291,7 +291,22 @@ final class PairingReceiver {
             session.held == 0 &&
             now.difference(session.lastContact) >
                 Limits.pairingMessageTimeout) {
+          final revealed =
+              session.status == _ReceiverStatus.comparing ||
+              session.status == _ReceiverStatus.waitingPeer;
+          final until = revealed
+              ? _countFailureAfterReveal(session.origin)
+              : null;
           _finish(session, _ReceiverStatus.lost);
+          if (revealed) {
+            _emit(
+              PairingAttemptRejected(
+                fingerprint: session.peer.fingerprint,
+                cause: AttemptCause.lostAfterReveal,
+              ),
+            );
+            if (until != null) _emit(PairingPaused(until: until));
+          }
         }
         continue;
       }
@@ -488,14 +503,16 @@ final class PairingReceiver {
       final revealed =
           session.status == _ReceiverStatus.comparing ||
           session.status == _ReceiverStatus.waitingPeer;
-      final cancelledAfterReveal =
-          revealed && request.reason == CancelReason.cancelled;
+      final genuineExpiry =
+          request.reason == CancelReason.expired &&
+          _now().difference(session.startedAt) >= Limits.pairingPeerExpiryAfter;
+      final cancelledAfterReveal = revealed && !genuineExpiry;
       final until = cancelledAfterReveal
           ? _countFailureAfterReveal(session.origin)
           : null;
       _finish(
         session,
-        request.reason == CancelReason.expired
+        genuineExpiry
             ? _ReceiverStatus.expired
             : _ReceiverStatus.cancelledByPeer,
       );

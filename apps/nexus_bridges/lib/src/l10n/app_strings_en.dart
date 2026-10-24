@@ -160,6 +160,11 @@ final class AppStringsEn implements AppStrings {
       'This device is already paired. If you confirm, it stays as it is.';
 
   @override
+  String namesakeWarning(String name) =>
+      'You already have a paired device called $name with a different '
+      'fingerprint.';
+
+  @override
   String get ignoreDeviceButton => 'Ignore this device';
 
   @override
@@ -257,6 +262,15 @@ final class AppStringsEn implements AppStrings {
   String noticeAttemptsCancelled(int count) =>
       "$count pairing attempts were cancelled in the last few minutes. If it "
       "wasn't you, check your network.";
+
+  @override
+  String noticeAttemptLost(String short) =>
+      'The device with fingerprint $short stopped responding after seeing the '
+      'pairing code.';
+
+  @override
+  String noticeReplaceWithdrawn(String name) =>
+      '$name showed up again, so it was not replaced.';
 
   @override
   String get noticePairingPaused =>
