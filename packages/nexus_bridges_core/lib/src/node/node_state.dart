@@ -195,6 +195,7 @@ final class NodeState {
     this.questions = const [],
     this.notices = const [],
     this.unsavedChanges = false,
+    this.scanning = false,
   });
 
   final IdentityStatus identityStatus;
@@ -214,4 +215,5 @@ final class NodeState {
   final List<PairingQuestion> questions;
   final List<Notice> notices;
   final bool unsavedChanges;
+  final bool scanning;
 }

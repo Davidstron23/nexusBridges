@@ -25,6 +25,7 @@ const String testAdapter = '{TEST-ADAPTER}';
 const Duration waitLimit = Duration(seconds: 10);
 const Duration slowPoll = Duration(minutes: 1);
 const Duration fastPoll = Duration(milliseconds: 50);
+const Duration rarePresent = Duration(hours: 1);
 const Timeout twoNodesTimeout = Timeout(Duration(minutes: 2));
 
 final String sep = Platform.pathSeparator;
@@ -207,6 +208,8 @@ final class TestNode {
   late final Zone zone = Zone.current.fork(specification: timers.specification);
   List<AdapterInfo> adapters = [adapterOn(homeNetwork)];
   DateTime clock = DateTime(2026, 10, 24, 12);
+  Duration elapsed = Duration.zero;
+  Duration presentInterval = rarePresent;
   Duration pollInterval = slowPoll;
   Duration pollHold = const Duration(milliseconds: 300);
   SecretProtector protector = XorProtector();
@@ -241,7 +244,12 @@ final class TestNode {
 
   DateTime now() => clock;
 
-  void advance(Duration span) => clock = clock.add(span);
+  Duration monotonic() => elapsed;
+
+  void advance(Duration span) {
+    clock = clock.add(span);
+    elapsed += span;
+  }
 
   Future<T> inZone<T>(Future<T> Function() action) => zone.run(action);
 
@@ -256,6 +264,8 @@ final class TestNode {
         port: port,
         deviceName: deviceName,
         now: now,
+        monotonic: monotonic,
+        presentInterval: presentInterval,
         log: logs.add,
         activeOf: (states) => [
           for (final state in states)
@@ -379,6 +389,7 @@ Future<(TestNode, TestNode)> twoNodes({
   Duration pollA = slowPoll,
   Duration pollB = slowPoll,
   Duration holdB = const Duration(milliseconds: 300),
+  Duration present = rarePresent,
 }) async {
   for (var attempt = 0; attempt < 5; attempt++) {
     final port = await freePort();
@@ -386,10 +397,12 @@ Future<(TestNode, TestNode)> twoNodes({
     final b = await TestNode.create(nameB, hostB);
     a
       ..port = port
-      ..pollInterval = pollA;
+      ..pollInterval = pollA
+      ..presentInterval = present;
     b
       ..port = port
       ..pollInterval = pollB
+      ..presentInterval = present
       ..pollHold = holdB;
     final aUp = await a.launch();
     final bUp = aUp && await b.launch();
