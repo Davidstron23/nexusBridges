@@ -22,6 +22,26 @@ List<String> _tileTexts(WidgetTester tester, String name) {
   ];
 }
 
+DeviceEntry _entryWith({
+  required String fingerprint,
+  required String name,
+  DeviceType type = DeviceType.desktop,
+  bool paired = false,
+  bool mine = false,
+}) {
+  return DeviceEntry(
+    fingerprint: fingerprint,
+    displayName: name,
+    deviceType: type,
+    visible: true,
+    paired: paired,
+    mine: mine,
+    ignored: false,
+    mismatch: false,
+    possiblyReplaces: null,
+  );
+}
+
 Set<String> _allowedTexts(
   AppStrings strings, {
   List<String> networks = const [],
@@ -38,8 +58,9 @@ Set<String> _allowedTexts(
     for (final network in networks) strings.networkPromptBody(network),
     strings.yes,
     strings.no,
-    strings.pairedLabel,
+    strings.pairedMineLabel,
     strings.notPairedLabel,
+    strings.pairButton,
     strings.deviceTypeDesktop,
     strings.deviceTypeMobile,
     strings.identityResetWarning,
@@ -133,8 +154,7 @@ void main() {
             pausedNetworks: const [_home],
             decisionNotSaved: true,
             suggestRescan: true,
-            devices: [deviceWith(fingerprint: fingerprintOf('A1'), name: 'PC')],
-            displayNames: {fingerprintOf('A1'): 'PC'},
+            entries: [_entryWith(fingerprint: fingerprintOf('A1'), name: 'PC')],
           ),
         );
         await pumpHome(tester, controller, code);
@@ -195,8 +215,7 @@ void main() {
             pausedNetworks: const [_home],
             decisionNotSaved: true,
             identityStatus: IdentityStatus.reset,
-            devices: [deviceWith(fingerprint: fingerprintOf('A1'), name: 'PC')],
-            displayNames: {fingerprintOf('A1'): 'PC'},
+            entries: [_entryWith(fingerprint: fingerprintOf('A1'), name: 'PC')],
           ),
         );
         await pumpHome(tester, controller, code);
@@ -381,19 +400,19 @@ void main() {
         final mobile = fingerprintOf('C3D4');
         final controller = FakeAppController(
           state: NodeState(
-            devices: [
-              deviceWith(
+            entries: [
+              _entryWith(
                 fingerprint: desktop,
                 name: 'PC principal',
                 paired: true,
+                mine: true,
               ),
-              deviceWith(
+              _entryWith(
                 fingerprint: mobile,
                 name: 'Movil',
                 type: DeviceType.mobile,
               ),
             ],
-            displayNames: {desktop: 'PC principal', mobile: 'Movil'},
           ),
         );
         await pumpHome(tester, controller, code);
@@ -403,7 +422,7 @@ void main() {
           unorderedEquals([
             'PC principal',
             strings.deviceTypeDesktop,
-            strings.pairedLabel,
+            strings.pairedMineLabel,
           ]),
         );
         expect(
@@ -425,14 +444,15 @@ void main() {
           final second = fingerprintOf('9F8E7D6C');
           final controller = FakeAppController(
             state: NodeState(
-              devices: [
-                deviceWith(fingerprint: first, name: 'Laptop'),
-                deviceWith(fingerprint: second, name: 'Laptop', paired: true),
+              entries: [
+                _entryWith(fingerprint: first, name: 'Laptop \u00B7 A1B2C3D4'),
+                _entryWith(
+                  fingerprint: second,
+                  name: 'Laptop \u00B7 9F8E7D6C',
+                  paired: true,
+                  mine: true,
+                ),
               ],
-              displayNames: {
-                first: 'Laptop \u00B7 A1B2C3D4',
-                second: 'Laptop \u00B7 9F8E7D6C',
-              },
             ),
           );
           await pumpHome(tester, controller, code);
@@ -444,26 +464,24 @@ void main() {
           );
           expect(
             _tileTexts(tester, 'Laptop \u00B7 9F8E7D6C'),
-            contains(strings.pairedLabel),
+            contains(strings.pairedMineLabel),
           );
         },
       );
 
-      testWidgets(
-        'a device missing from displayNames shows its short fingerprint',
-        (tester) async {
-          final fingerprint = fingerprintOf('0A1B2C3D4E');
-          final controller = FakeAppController(
-            state: NodeState(
-              devices: [deviceWith(fingerprint: fingerprint, name: 'Hidden')],
-            ),
-          );
-          await pumpHome(tester, controller, code);
+      testWidgets('an entry named by its short fingerprint shows that name', (
+        tester,
+      ) async {
+        final fingerprint = fingerprintOf('0A1B2C3D4E');
+        final controller = FakeAppController(
+          state: NodeState(
+            entries: [_entryWith(fingerprint: fingerprint, name: '0A1B2C3D')],
+          ),
+        );
+        await pumpHome(tester, controller, code);
 
-          expect(find.text('0A1B2C3D'), findsOneWidget);
-          expect(find.text('Hidden'), findsNothing);
-        },
-      );
+        expect(find.text('0A1B2C3D'), findsOneWidget);
+      });
 
       testWidgets('the list follows new states', (tester) async {
         final fingerprint = fingerprintOf('A1');
@@ -473,8 +491,7 @@ void main() {
 
         controller.emit(
           NodeState(
-            devices: [deviceWith(fingerprint: fingerprint, name: 'PC')],
-            displayNames: {fingerprint: 'PC'},
+            entries: [_entryWith(fingerprint: fingerprint, name: 'PC')],
           ),
         );
         await tester.pumpAndSettle();
@@ -528,8 +545,7 @@ void main() {
         final controller = FakeAppController(
           state: NodeState(
             suggestRescan: true,
-            devices: [deviceWith(fingerprint: fingerprint, name: 'PC')],
-            displayNames: {fingerprint: 'PC'},
+            entries: [_entryWith(fingerprint: fingerprint, name: 'PC')],
           ),
         );
         await pumpHome(tester, controller, code);
@@ -565,15 +581,19 @@ void main() {
       'empty list': (const NodeState(), false),
       'devices': (
         NodeState(
-          devices: [
-            deviceWith(fingerprint: fingerprint, name: 'PC', paired: true),
-            deviceWith(
+          entries: [
+            _entryWith(
+              fingerprint: fingerprint,
+              name: 'PC',
+              paired: true,
+              mine: true,
+            ),
+            _entryWith(
               fingerprint: fingerprintOf('B2'),
               name: 'Movil',
               type: DeviceType.mobile,
             ),
           ],
-          displayNames: {fingerprint: 'PC', fingerprintOf('B2'): 'Movil'},
         ),
         false,
       ),

@@ -7,6 +7,7 @@ import 'package:nexus_bridges/src/app_controller.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/network_prompt_dialog.dart';
+import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 const List<String> languageCodes = ['es', 'en'];
@@ -66,13 +67,80 @@ class FakeAppController extends AppController {
   Future<void> retry() async {
     calls.add('retry');
   }
+
+  PairRequestResult pairResult = PairRequestResult.started;
+
+  @override
+  Future<PairRequestResult> pair(String fingerprint) async {
+    calls.add('pair $fingerprint');
+    return pairResult;
+  }
+
+  @override
+  void answerCode({required bool matches}) {
+    calls.add('answerCode $matches');
+  }
+
+  @override
+  void cancelPairing() {
+    calls.add('cancelPairing');
+  }
+
+  @override
+  void answerRequest(ReceiverAnswer answer) {
+    calls.add('answerRequest ${answer.name}');
+  }
+
+  @override
+  void dismissPairing() {
+    calls.add('dismissPairing');
+  }
+
+  @override
+  Future<void> answerReplace(
+    String fingerprint, {
+    required bool replace,
+  }) async {
+    calls.add('answerReplace $fingerprint $replace');
+  }
+
+  @override
+  Future<void> answerMine(String fingerprint, {required bool mine}) async {
+    calls.add('answerMine $fingerprint $mine');
+  }
+
+  @override
+  Future<void> setMine(String fingerprint, {required bool mine}) async {
+    calls.add('setMine $fingerprint $mine');
+  }
+
+  @override
+  Future<void> unpair(String fingerprint) async {
+    calls.add('unpair $fingerprint');
+  }
+
+  @override
+  Future<void> unignore(String fingerprint) async {
+    calls.add('unignore $fingerprint');
+  }
+
+  @override
+  Future<void> retrySave() async {
+    calls.add('retrySave');
+  }
+
+  @override
+  void dismissNotice(int id) {
+    calls.add('dismissNotice $id');
+  }
 }
 
 Future<void> pumpHome(
   WidgetTester tester,
   AppController controller,
-  String languageCode,
-) async {
+  String languageCode, {
+  bool settle = true,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       locale: Locale(languageCode),
@@ -85,11 +153,24 @@ Future<void> pumpHome(
       ],
       home: NetworkPromptHost(
         controller: controller,
-        child: HomeScreen(controller),
+        child: PairingHost(
+          controller: controller,
+          child: HomeScreen(controller),
+        ),
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await pumpFrames(tester);
+  }
+}
+
+Future<void> pumpFrames(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
 }
 
 String fingerprintOf(String prefix) => (prefix * 64).substring(0, 64);

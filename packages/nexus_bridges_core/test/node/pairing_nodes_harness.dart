@@ -1,0 +1,419 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:nexus_bridges_core/src/discovery/discovery.dart'
+    show MulticastChannel;
+import 'package:nexus_bridges_core/src/identity/identity.dart';
+import 'package:nexus_bridges_core/src/network/network.dart';
+import 'package:nexus_bridges_core/src/node/node.dart';
+import 'package:nexus_bridges_core/src/pairing/pairing.dart';
+import 'package:nexus_bridges_core/src/protocol/protocol.dart'
+    show Announcement, AnnouncementKind, ApiPaths, protocolVersion;
+import 'package:nexus_bridges_core/src/storage/storage.dart';
+import 'package:nexus_bridges_core/src/transport/transport.dart';
+import 'package:test/test.dart';
+
+const String dot = '\u00B7';
+const String homeNetwork = '{NETWORK-HOME}';
+const String _adapterId = '{WIFI-ADAPTER}';
+const Duration waitLimit = Duration(seconds: 5);
+const Duration shortHold = Duration(milliseconds: 300);
+const int _prefixLength = 30;
+
+final String _sep = Platform.pathSeparator;
+
+String? _loopbackName;
+
+final class XorProtector implements SecretProtector {
+  static Uint8List _xor(Uint8List data) =>
+      Uint8List.fromList([for (final b in data) b ^ 0x5A]);
+
+  @override
+  Uint8List protect(Uint8List data) => _xor(data);
+
+  @override
+  Uint8List? unprotect(Uint8List data) => _xor(data);
+}
+
+Future<String> _systemLoopbackName() async {
+  final cached = _loopbackName;
+  if (cached != null) return cached;
+  final all = await NetworkInterface.list(includeLoopback: true);
+  final name = all
+      .firstWhere((i) => i.addresses.any((a) => a.address == '127.0.0.1'))
+      .name;
+  _loopbackName = name;
+  return name;
+}
+
+Future<bool> _tcpFree(String address, int port) async {
+  try {
+    final socket = await ServerSocket.bind(InternetAddress(address), port);
+    await socket.close();
+    return true;
+  } on SocketException {
+    return false;
+  }
+}
+
+Future<int> freeTcpPort() async {
+  for (var attempt = 0; attempt < 100; attempt++) {
+    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    final port = probe.port;
+    await probe.close();
+    if (await _tcpFree('127.0.0.1', port) &&
+        await _tcpFree('127.0.0.2', port)) {
+      return port;
+    }
+  }
+  throw StateError('no free port');
+}
+
+Future<int> _freeUdpPort() async {
+  final socket = await RawDatagramSocket.bind(
+    InternetAddress.anyIPv4,
+    0,
+    reuseAddress: false,
+  );
+  final port = socket.port;
+  socket.close();
+  return port;
+}
+
+Future<void> eventually(
+  FutureOr<bool> Function() condition, {
+  Duration limit = waitLimit,
+  String reason = 'condition',
+}) async {
+  final watch = Stopwatch()..start();
+  while (!await condition()) {
+    if (watch.elapsed > limit) {
+      fail('$reason not met within $limit');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
+String shortOf(String fingerprint) => fingerprint.substring(0, 8);
+
+String labelOf(String name, String fingerprint) =>
+    '$name $dot ${shortOf(fingerprint)}';
+
+AdapterInfo _wifi() => AdapterInfo(
+  id: _adapterId,
+  friendlyName: 'Wi-Fi',
+  description: 'Test wireless adapter',
+  ifType: 71,
+  isUp: true,
+  ipv4: [Ipv4Subnet(InternetAddress('192.168.50.21'), 24)],
+  hasGateway: true,
+  networkId: homeNetwork,
+  networkName: 'Home',
+);
+
+PairedDevice pairedEntryFor(
+  DeviceIdentity identity, {
+  required String name,
+  PeerRelation relation = PeerRelation.foreign,
+  DateTime? pairedAt,
+}) => PairedDevice(
+  fingerprint: identity.fingerprint,
+  name: name,
+  certificatePem: identity.certificate.pem,
+  relation: relation,
+  pairedAt: pairedAt ?? DateTime.utc(2026, 10, 1),
+);
+
+void breakFile(File file) {
+  if (file.existsSync()) file.deleteSync();
+  Directory(file.path).createSync(recursive: true);
+}
+
+void repairFile(File file) {
+  final dir = Directory(file.path);
+  if (dir.existsSync()) dir.deleteSync(recursive: true);
+}
+
+final class PairingNode {
+  PairingNode._(
+    this.name,
+    this.address,
+    this.root,
+    this.port,
+    this.channelPort,
+  );
+
+  final String name;
+  final String address;
+  final Directory root;
+  final int port;
+  final int channelPort;
+  final List<String> logs = [];
+  final List<NodeState> states = [];
+  DateTime clock = DateTime.utc(2026, 10, 24, 12);
+  NexusNode? _node;
+
+  static Future<PairingNode> create(
+    String name,
+    String address, {
+    required int port,
+  }) async {
+    final root = await Directory.systemTemp.createTemp('nexus_node_pairing_');
+    addTearDown(() async {
+      for (var attempt = 0; attempt < 40; attempt++) {
+        try {
+          if (root.existsSync()) await root.delete(recursive: true);
+          return;
+        } on FileSystemException {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      }
+    });
+    return PairingNode._(name, address, root, port, await _freeUdpPort());
+  }
+
+  NexusNode get node => _node!;
+
+  NodeState get state => node.state;
+
+  String get fingerprint => node.state.fingerprint;
+
+  DateTime now() => clock;
+
+  Directory get dataDir => Directory('${root.path}${_sep}data');
+
+  Directory get identityDir => Directory('${dataDir.path}${_sep}identity');
+
+  File get pairedFile => File('${dataDir.path}${_sep}paired.json');
+
+  File get ignoredFile => File('${dataDir.path}${_sep}ignored.json');
+
+  InternetAddress get internetAddress => InternetAddress(address);
+
+  Future<DeviceIdentity> loadIdentity() async {
+    final loaded = await IdentityStore(
+      dataDir: dataDir,
+      protector: XorProtector(),
+      now: now,
+    ).loadOrCreate();
+    return loaded.identity;
+  }
+
+  Future<void> writePaired(String owner, List<PairedDevice> devices) async {
+    final store = PairedDevicesStore(
+      JsonFileStore(pairedFile),
+      ownerFingerprint: owner,
+      now: now,
+    );
+    await store.replaceAll(devices);
+  }
+
+  Future<NexusNode> start({
+    Duration pollHold = shortHold,
+    Duration tick = const Duration(milliseconds: 50),
+  }) async {
+    final loopback = await _systemLoopbackName();
+    final channel = MulticastChannel(port: channelPort, log: logs.add);
+    addTearDown(channel.close);
+    final started = await NexusNode.start(
+      dataDir: dataDir,
+      protector: XorProtector(),
+      readNetworks: () async => [_wifi()],
+      port: port,
+      deviceName: name,
+      now: now,
+      log: logs.add,
+      activeOf: (states) => [
+        for (final state in states)
+          if (state.status == InterfaceStatus.active)
+            ActiveInterface(
+              id: '${state.adapter.id}#$address',
+              adapterId: state.adapter.id,
+              friendlyName: loopback,
+              subnet: Ipv4Subnet(InternetAddress(address), _prefixLength),
+            ),
+      ],
+      pollInterval: const Duration(minutes: 1),
+      channel: channel,
+      pairingTickInterval: tick,
+      pairingPollHold: pollHold,
+    );
+    _node = started;
+    addTearDown(started.shutdown);
+    final subscription = started.states.listen(states.add);
+    addTearDown(subscription.cancel);
+    await eventually(
+      () => started.state.prompts.isNotEmpty || !started.state.paused,
+      reason: '$name network read',
+    );
+    if (started.state.prompts.isNotEmpty) {
+      await started.decideNetwork(homeNetwork, NetworkDecision.trusted);
+    }
+    await eventually(() => !started.state.paused, reason: '$name active');
+    return started;
+  }
+
+  Future<NexusNode> restart() async {
+    await node.shutdown();
+    return start();
+  }
+
+  Future<NodeState> until(
+    bool Function(NodeState s) condition, {
+    Duration limit = waitLimit,
+    String? reason,
+  }) async {
+    await eventually(
+      () => condition(node.state),
+      limit: limit,
+      reason: reason ?? '$name state',
+    );
+    return node.state;
+  }
+
+  DeviceEntry? entryOf(String fingerprint) {
+    for (final entry in state.entries) {
+      if (entry.fingerprint == fingerprint) return entry;
+    }
+    return null;
+  }
+
+  bool sees(PairingNode other) =>
+      state.devices.any((d) => d.info.fingerprint == other.fingerprint);
+
+  bool hasPaired(PairingNode other) =>
+      entryOf(other.fingerprint)?.paired ?? false;
+}
+
+Future<(PairingNode, PairingNode)> twoPairingNodes({
+  Duration pollHoldA = shortHold,
+  Duration pollHoldB = shortHold,
+  Future<void> Function(PairingNode a, PairingNode b)? before,
+}) async {
+  final port = await freeTcpPort();
+  final a = await PairingNode.create('Node A', '127.0.0.1', port: port);
+  final b = await PairingNode.create('Node B', '127.0.0.2', port: port);
+  if (before != null) await before(a, b);
+  await a.start(pollHold: pollHoldA);
+  await b.start(pollHold: pollHoldB);
+  await meet(a, b);
+  return (a, b);
+}
+
+Future<void> meet(PairingNode a, PairingNode b) async {
+  await a.node.rescan();
+  await b.node.rescan();
+  await eventually(
+    () => a.sees(b) && b.sees(a),
+    reason: 'nodes see each other',
+  );
+  await eventually(
+    () =>
+        a.entryOf(b.fingerprint)?.visible == true &&
+        b.entryOf(a.fingerprint)?.visible == true,
+    reason: 'rows of each other',
+  );
+}
+
+Future<void> bothComparing(PairingNode initiator, PairingNode receiver) async {
+  await receiver.until(
+    (s) => s.pairing?.phase == PairingPhase.comparing,
+    reason: '${receiver.name} comparing',
+  );
+  await initiator.until(
+    (s) => s.pairing?.phase == PairingPhase.comparing,
+    reason: '${initiator.name} comparing',
+  );
+}
+
+Future<void> pairUp(PairingNode initiator, PairingNode receiver) async {
+  expect(
+    await initiator.node.pair(receiver.fingerprint),
+    PairRequestResult.started,
+  );
+  await bothComparing(initiator, receiver);
+  initiator.node.answerCode(matches: true);
+  receiver.node.answerRequest(ReceiverAnswer.matches);
+  await eventually(
+    () => initiator.hasPaired(receiver) && receiver.hasPaired(initiator),
+    reason: 'both paired',
+  );
+  await eventually(
+    () => initiator.state.pairing == null && receiver.state.pairing == null,
+    reason: 'views closed',
+  );
+}
+
+Future<void> sayBye(PairingNode from, PairingNode to) async {
+  final socket = await RawDatagramSocket.bind(
+    from.internetAddress,
+    0,
+    reuseAddress: false,
+  );
+  addTearDown(socket.close);
+  final bytes = Announcement(
+    AnnouncementKind.bye,
+    DeviceInfo(
+      name: from.name,
+      fingerprint: from.fingerprint,
+      port: from.port,
+      protocol: protocolVersion,
+      deviceType: DeviceType.desktop,
+    ),
+  ).encode();
+  final watch = Stopwatch()..start();
+  while (socket.send(bytes, to.internetAddress, to.channelPort) !=
+      bytes.length) {
+    if (watch.elapsed > waitLimit) fail('bye not sent');
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+}
+
+Future<int?> unpairAs(
+  DeviceIdentity caller, {
+  required InternetAddress from,
+  required PairingNode target,
+}) async {
+  final reply = await postJson(
+    address: target.internetAddress,
+    port: target.port,
+    path: ApiPaths.unpair,
+    json: const <String, Object?>{},
+    context: caller.clientContext(presentCertificate: true),
+    acceptServer: (certificate) {
+      try {
+        return fingerprintOfCertificate(certificate.der) == target.fingerprint;
+      } on FormatException {
+        return false;
+      }
+    },
+    sourceAddress: from,
+  );
+  return reply?.status;
+}
+
+final class CoreTimers {
+  final List<(Timer, String)> _timers = [];
+
+  ZoneSpecification get specification => ZoneSpecification(
+    createTimer: (self, parent, zone, duration, callback) {
+      final timer = parent.createTimer(zone, duration, callback);
+      _timers.add((timer, StackTrace.current.toString()));
+      return timer;
+    },
+    createPeriodicTimer: (self, parent, zone, period, callback) {
+      final timer = parent.createPeriodicTimer(zone, period, callback);
+      _timers.add((timer, StackTrace.current.toString()));
+      return timer;
+    },
+  );
+
+  int createdBy(String path) =>
+      _timers.where((entry) => entry.$2.contains(path)).length;
+
+  List<String> activeBy(String path) => [
+    for (final (timer, trace) in _timers)
+      if (timer.isActive && trace.contains(path)) trace,
+  ];
+}

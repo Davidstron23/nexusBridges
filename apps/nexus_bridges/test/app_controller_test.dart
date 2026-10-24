@@ -18,11 +18,19 @@ final class _XorProtector implements SecretProtector {
 }
 
 Future<int> _freePort() async {
-  for (var attempt = 0; attempt < 20; attempt++) {
-    final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = probe.port;
-    await probe.close();
-    if (await _udpPortFree(port)) return port;
+  for (var attempt = 0; attempt < 600; attempt++) {
+    try {
+      final udp = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0,
+        reuseAddress: false,
+      );
+      final port = udp.port;
+      udp.close();
+      if (await _tcpPortFree(port)) return port;
+    } on SocketException {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
   }
   throw StateError('no free port');
 }
@@ -35,6 +43,16 @@ Future<bool> _udpPortFree(int port) async {
       reuseAddress: false,
     );
     socket.close();
+    return true;
+  } on SocketException {
+    return false;
+  }
+}
+
+Future<bool> _tcpPortFree(int port) async {
+  try {
+    final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    await socket.close();
     return true;
   } on SocketException {
     return false;
@@ -503,6 +521,74 @@ void main() {
         File('${harness.dataDir.path}${Platform.pathSeparator}networks.json')
             .existsSync(),
         isFalse,
+      );
+    });
+  });
+
+  group('pairing methods (T13)', () {
+    final unknown = 'AB' * 32;
+
+    test(
+      'without a node, pair is unavailable and the rest do nothing',
+      () async {
+        final controller = controllerFor();
+
+        expect(await controller.pair(unknown), PairRequestResult.unavailable);
+        controller.answerCode(matches: true);
+        controller.cancelPairing();
+        controller.answerRequest(ReceiverAnswer.matches);
+        controller.dismissPairing();
+        await controller.answerReplace(unknown, replace: true);
+        await controller.answerMine(unknown, mine: true);
+        await controller.setMine(unknown, mine: true);
+        await controller.unpair(unknown);
+        await controller.unignore(unknown);
+        await controller.retrySave();
+        controller.dismissNotice(1);
+
+        expect(harness.startCalls, 0);
+        expect(controller.state, isNull);
+      },
+    );
+
+    test('with a node, pair of a device that is not in the list is '
+        'unavailable (RF-67)', () async {
+      final controller = controllerFor();
+      await controller.init();
+
+      expect(await controller.pair(unknown), PairRequestResult.unavailable);
+      expect(controller.state!.pairing, isNull);
+    });
+
+    test('with a node, the methods on an unknown device go to the node and '
+        'change nothing', () async {
+      final controller = controllerFor();
+      await controller.init();
+      final before = controller.state!;
+
+      controller.answerCode(matches: false);
+      controller.cancelPairing();
+      controller.answerRequest(ReceiverAnswer.mismatch);
+      controller.dismissPairing();
+      await controller.answerReplace(unknown, replace: false);
+      await controller.answerMine(unknown, mine: true);
+      await controller.setMine(unknown, mine: true);
+      await controller.unpair(unknown);
+      await controller.unignore(unknown);
+      await controller.retrySave();
+      controller.dismissNotice(42);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      final after = controller.state!;
+      expect(after.entries, before.entries);
+      expect(after.pairing, isNull);
+      expect(after.questions, isEmpty);
+      expect(after.unsavedChanges, isFalse);
+      expect(
+        after.notices.where(
+          (notice) => notice.kind != NoticeKind.changeNotSaved,
+        ),
+        isEmpty,
       );
     });
   });

@@ -8,6 +8,7 @@ import 'src/app_controller.dart';
 import 'src/l10n/app_strings.dart';
 import 'src/ui/home_screen.dart';
 import 'src/ui/network_prompt_dialog.dart';
+import 'src/ui/pairing_dialogs.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,7 +72,10 @@ class _NexusBridgesAppState extends State<NexusBridgesApp> {
       ),
       home: NetworkPromptHost(
         controller: widget.controller,
-        child: HomeScreen(widget.controller),
+        child: PairingHost(
+          controller: widget.controller,
+          child: HomeScreen(widget.controller),
+        ),
       ),
     );
   }

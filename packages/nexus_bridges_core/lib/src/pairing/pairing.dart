@@ -236,7 +236,7 @@ final class PairedDevicesStore {
 
   Future<bool> rename(String fingerprint, String name) {
     final clipped = _clipName(name);
-    return _update(fingerprint, (d) => d.copyWith(name: clipped));
+    return _update(fingerprint, (d) => d.copyWith(name: clipped), silent: true);
   }
 
   Future<bool> retrySave() => _enqueue(_writeMemory);
@@ -269,8 +269,9 @@ final class PairedDevicesStore {
 
   Future<bool> _update(
     String fingerprint,
-    PairedDevice Function(PairedDevice) change,
-  ) {
+    PairedDevice Function(PairedDevice) change, {
+    bool silent = false,
+  }) {
     final index = _devices.indexWhere((d) => d.fingerprint == fingerprint);
     if (index < 0) return Future<bool>.value(false);
     final current = _devices[index];
@@ -279,7 +280,7 @@ final class PairedDevicesStore {
       _devices = List.unmodifiable([..._devices]..[index] = updated);
       _changes.add(null);
     }
-    return _enqueue(_writeMemory);
+    return _enqueue(() => _persist(_devices, silent: silent));
   }
 
   AddResult? _refusalFor(PairedDevice device, String canonical) {
@@ -299,11 +300,14 @@ final class PairedDevicesStore {
 
   Future<bool> _writeMemory() => _persist(_devices);
 
-  Future<bool> _persist(List<PairedDevice> devices) async {
+  Future<bool> _persist(
+    List<PairedDevice> devices, {
+    bool silent = false,
+  }) async {
     try {
       await _store.write(_jsonOf(devices));
     } on Exception {
-      _setUnsaved(true);
+      if (!silent) _setUnsaved(true);
       return false;
     }
     _setUnsaved(false);

@@ -422,6 +422,63 @@ void main() {
     });
   });
 
+  group('start of the pause (C108, RF-106b)', () {
+    test('the failure that completes three returns when the pause ends, and '
+        'that is when the cap lifts', () {
+      expect(guard.countGlobalFailure(_start), isNull);
+      expect(guard.countGlobalFailure(_start.add(minutes(1))), isNull);
+      expect(
+        guard.countGlobalFailure(_start.add(minutes(2))),
+        _start.add(minutes(10)),
+      );
+
+      expect(guard.globalBlocked(_start.add(minutes(9, 59, 999))), isTrue);
+      expect(guard.globalBlocked(_start.add(minutes(10))), isFalse);
+    });
+
+    test('a failure after the oldest left the window starts a new pause that '
+        'ends 10 minutes after the new oldest one', () {
+      guard.countGlobalFailure(_start);
+      guard.countGlobalFailure(_start.add(minutes(1)));
+      guard.countGlobalFailure(_start.add(minutes(2)));
+
+      expect(
+        guard.countGlobalFailure(_start.add(minutes(10, 30))),
+        _start.add(minutes(11)),
+      );
+      expect(guard.globalBlocked(_start.add(minutes(10, 59, 999))), isTrue);
+      expect(guard.globalBlocked(_start.add(minutes(11))), isFalse);
+    });
+
+    test(
+      'a failure counted while the pause is already active returns null',
+      () {
+        final other = PairingGuard(now: () => now);
+
+        expect(
+          [for (var i = 0; i < 4; i++) other.countGlobalFailure(_start)],
+          [null, null, _start.add(minutes(10)), null],
+        );
+        expect(other.globalBlocked(_start.add(minutes(9, 59, 999))), isTrue);
+        expect(other.globalBlocked(_start.add(minutes(10))), isFalse);
+      },
+    );
+
+    test('with an injected limit and window the end follows them', () {
+      final strict = PairingGuard(
+        now: () => now,
+        globalLimit: 1,
+        globalWindow: const Duration(seconds: 30),
+      );
+
+      expect(
+        strict.countGlobalFailure(_start),
+        _start.add(const Duration(seconds: 30)),
+      );
+      expect(strict.countGlobalFailure(_start), isNull);
+    });
+  });
+
   group('signature budget (Q-7)', () {
     test('20 checks in the same second pass and the 21st does not', () {
       expect(Limits.signatureChecksPerSecond, 20);

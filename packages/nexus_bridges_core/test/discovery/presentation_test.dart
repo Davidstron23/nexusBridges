@@ -234,6 +234,53 @@ void main() {
     });
   });
 
+  group('displayNamesFor (RF-50, T11)', () {
+    test('works on plain fingerprint and name pairs, also without a '
+        'name', () {
+      final names = displayNamesFor([
+        (_fingerprint('1A2B3C4D'), 'PC'),
+        (_fingerprint('9F8E7D6C'), 'pc'),
+        (_fingerprint('ABCDEF12'), null),
+        (_fingerprint('12345678'), 'Laptop'),
+      ]);
+
+      expect(names, {
+        _fingerprint('1A2B3C4D'): 'PC $_dot 1A2B3C4D',
+        _fingerprint('9F8E7D6C'): 'pc $_dot 9F8E7D6C',
+        _fingerprint('ABCDEF12'): 'ABCDEF12',
+        _fingerprint('12345678'): 'Laptop',
+      });
+    });
+
+    test('gives the same result as displayNames for the same devices', () {
+      final devices = [
+        _device('11111111', name: 'My PC'),
+        _device('22222222', name: 'my\u00A0pc'),
+        _device('33333333'),
+        _device('44444444', name: 'Laptop'),
+      ];
+
+      expect(
+        displayNamesFor([
+          for (final d in devices) (d.info.fingerprint, d.info.name),
+        ]),
+        displayNames(devices),
+      );
+    });
+
+    test('an empty list gives an empty map', () {
+      expect(displayNamesFor(const []), isEmpty);
+    });
+  });
+
+  group('shortFingerprint', () {
+    test('the first 8 characters, and a shorter text as it is', () {
+      expect(shortFingerprint(_fingerprint('1A2B3C4D')), '1A2B3C4D');
+      expect(shortFingerprint('ABC'), 'ABC');
+      expect(shortFingerprint('12345678'), '12345678');
+    });
+  });
+
   group('shouldSuggestRescan (RF-55)', () {
     bool suggest({
       bool anyActive = true,

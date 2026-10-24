@@ -89,9 +89,15 @@ final class PairingGuard {
     _origins[origin]?.mismatches = 0;
   }
 
-  void countGlobalFailure(DateTime now) {
+  DateTime? countGlobalFailure(DateTime now) {
+    _trimGlobalFailures(now);
+    final wasBlocked = _globalFailures.length >= _globalLimit;
     _globalFailures.add(now);
     _trimGlobalFailures(now);
+    if (!wasBlocked && _globalFailures.length >= _globalLimit) {
+      return _globalFailures.first.add(_globalWindow);
+    }
+    return null;
   }
 
   bool globalBlocked(DateTime now) {

@@ -82,6 +82,55 @@ class AppController extends ChangeNotifier {
 
   Future<void> rescan() => _node?.rescan() ?? Future<void>.value();
 
+  Future<PairRequestResult> pair(String fingerprint) async {
+    final node = _node;
+    if (node == null) return PairRequestResult.unavailable;
+    return node.pair(fingerprint);
+  }
+
+  void answerCode({required bool matches}) {
+    _node?.answerCode(matches: matches);
+  }
+
+  void cancelPairing() {
+    _node?.cancelPairing();
+  }
+
+  void answerRequest(ReceiverAnswer answer) {
+    _node?.answerRequest(answer);
+  }
+
+  void dismissPairing() {
+    _node?.dismissPairing();
+  }
+
+  Future<void> answerReplace(String fingerprint, {required bool replace}) {
+    return _node?.answerReplace(fingerprint, replace: replace) ??
+        Future<void>.value();
+  }
+
+  Future<void> answerMine(String fingerprint, {required bool mine}) {
+    return _node?.answerMine(fingerprint, mine: mine) ?? Future<void>.value();
+  }
+
+  Future<void> setMine(String fingerprint, {required bool mine}) {
+    return _node?.setMine(fingerprint, mine: mine) ?? Future<void>.value();
+  }
+
+  Future<void> unpair(String fingerprint) {
+    return _node?.unpair(fingerprint) ?? Future<void>.value();
+  }
+
+  Future<void> unignore(String fingerprint) {
+    return _node?.unignore(fingerprint) ?? Future<void>.value();
+  }
+
+  Future<void> retrySave() => _node?.retrySave() ?? Future<void>.value();
+
+  void dismissNotice(int id) {
+    _node?.dismissNotice(id);
+  }
+
   Future<void> retry() {
     if (_initializing != null) return Future<void>.value();
     if (_startFailed) return init();

@@ -43,6 +43,7 @@ String describe(PairingEvent event) => switch (event) {
   PairingCompleted() => 'completed',
   UnpairedByPeer() => 'unpaired',
   PairingAttemptRejected() => 'rejected',
+  PairingPaused() => 'paused',
   PairingNotSaved() => 'notSaved',
   PairingFailed() => 'failed',
   IgnoreNotSaved() => 'ignore',
@@ -61,6 +62,7 @@ void main() {
       'paired',
       'rejected',
       'busy',
+      'paused',
       'cancelledByPeer',
       'expired',
       'lost',
@@ -79,6 +81,10 @@ void main() {
       'unknown',
     ]);
     expect(PairStart.values.map((v) => v.name), ['started', 'busy']);
+    expect(AttemptCause.values.map((v) => v.name), [
+      'commitmentMismatch',
+      'cancelledAfterReveal',
+    ]);
   });
 
   test('PairingTarget compares by value', () {
@@ -127,23 +133,52 @@ void main() {
     );
   });
 
-  test('the events are a closed family of six', () {
+  test('the events are a closed family of seven', () {
     expect(
       [
         PairingCompleted(fingerprint: fp, name: null, isNew: true),
         UnpairedByPeer(fingerprint: fp, name: 'PC', saved: false),
-        PairingAttemptRejected(fingerprint: fp),
+        PairingAttemptRejected(
+          fingerprint: fp,
+          cause: AttemptCause.commitmentMismatch,
+        ),
+        PairingPaused(until: DateTime.utc(2026, 10, 24, 9, 10)),
         PairingNotSaved(fingerprint: fp),
         PairingFailed(fingerprint: fp),
         IgnoreNotSaved(fingerprint: fp, name: null),
       ].map(describe),
-      ['completed', 'unpaired', 'rejected', 'notSaved', 'failed', 'ignore'],
+      [
+        'completed',
+        'unpaired',
+        'rejected',
+        'paused',
+        'notSaved',
+        'failed',
+        'ignore',
+      ],
     );
+  });
+
+  test('a rejected attempt carries its cause and the pause only its end '
+      '(RF-79, RF-106b)', () {
+    for (final cause in AttemptCause.values) {
+      expect(
+        PairingAttemptRejected(fingerprint: fp, cause: cause).cause,
+        cause,
+      );
+    }
+    final until = DateTime.utc(2026, 10, 24, 9, 10);
+    final paused = PairingPaused(until: until);
+    expect(paused.until, until);
+    expect(() => (paused as dynamic).fingerprint, throwsNoSuchMethodError);
   });
 
   test('a rejected attempt, a save that failed and one that was not written '
       'carry only the fingerprint (V5, Q-9)', () {
-    final rejected = PairingAttemptRejected(fingerprint: fp);
+    final rejected = PairingAttemptRejected(
+      fingerprint: fp,
+      cause: AttemptCause.commitmentMismatch,
+    );
     final notSaved = PairingNotSaved(fingerprint: fp);
     final failed = PairingFailed(fingerprint: fp);
 
