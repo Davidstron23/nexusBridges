@@ -96,13 +96,13 @@ Future<HttpsResponse?> _attempt(
     port,
     sourceAddress: sourceAddress,
   );
+  final connecting = task.socket;
+  connecting.ignore();
   link.task = task;
   if (link.closed) {
     link.close();
     return null;
   }
-  final connecting = task.socket;
-  connecting.ignore();
   final raw = await connecting;
   link.raw = raw;
   if (link.closed) {
@@ -118,12 +118,24 @@ Future<HttpsResponse?> _attempt(
   pending.ignore();
   final secure = await pending;
   link.secure = secure;
-  if (link.closed) {
+  if (link.closed || !_pinnedPeer(secure, acceptServer)) {
     link.close();
     return null;
   }
 
   return _converse(secure, request, maxResponseBytes);
+}
+
+bool _pinnedPeer(
+  RawSecureSocket secure,
+  bool Function(X509Certificate certificate) acceptServer,
+) {
+  try {
+    final peer = secure.peerCertificate;
+    return peer != null && acceptServer(peer);
+  } catch (_) {
+    return false;
+  }
 }
 
 Uint8List _requestFor(

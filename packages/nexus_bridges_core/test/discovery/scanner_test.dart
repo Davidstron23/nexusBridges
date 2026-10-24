@@ -167,9 +167,9 @@ void main() {
   late DeviceInfo self;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
     verifier = DeviceVerifier(identity: bob);
     self = callerInfoOf(bob);
   });

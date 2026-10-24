@@ -37,6 +37,17 @@ String randomCommonName() {
   return 'NexusBridges-$suffix';
 }
 
+Uint8List _randomSerial() {
+  final random = Random.secure();
+  final serialNumber = Uint8List.fromList(
+    List<int>.generate(16, (_) => random.nextInt(256)),
+  );
+  serialNumber[0] = 1 + random.nextInt(0x7F);
+  return serialNumber;
+}
+
+void _ignoreLog(String message) {}
+
 const int _maxPemLength = 4096;
 
 final RegExp _whitespace = RegExp(r'\s+');
@@ -172,23 +183,15 @@ final class DeviceIdentity {
   ) : fingerprint = fingerprintOfCertificate(_certificateDer),
       certificate = PeerCertificate.fromDer(_certificateDer)!;
 
-  static DeviceIdentity generate({required String commonName}) {
-    if (!commonNamePattern.hasMatch(commonName)) {
-      throw ArgumentError.value(commonName, 'commonName', 'invalid format');
-    }
+  static DeviceIdentity generate() {
     final keyPair = CryptoUtils.generateEcKeyPair();
     final privateKey = keyPair.privateKey as ECPrivateKey;
     final publicKey = keyPair.publicKey as ECPublicKey;
-    final random = Random.secure();
-    final serialNumber = Uint8List.fromList(
-      List<int>.generate(16, (_) => random.nextInt(256)),
-    );
-    serialNumber[0] = 1 + random.nextInt(0x7F);
     final certificatePem = buildSelfSignedCertificatePem(
       privateKey: privateKey,
       publicKey: publicKey,
-      commonName: commonName,
-      serialNumber: serialNumber,
+      commonName: commonNameForSpki(spkiOf(publicKey)),
+      serialNumber: _randomSerial(),
     );
     return DeviceIdentity._(
       certificatePem,
@@ -228,6 +231,36 @@ final class DeviceIdentity {
         algorithm: _signatureAlgorithm,
       );
       return matches ? identity : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static DeviceIdentity? migrateLegacy({
+    required String certificatePem,
+    required String privateKeyPem,
+  }) {
+    try {
+      final legacy = parseLegacyCertificate(
+        Uint8List.fromList(_certificateDerOf(certificatePem)),
+      );
+      if (legacy.commonName == commonNameForSpki(legacy.spki)) return null;
+      final privateKey = CryptoUtils.ecPrivateKeyFromPem(privateKeyPem);
+      final parameters = privateKey.parameters!;
+      final publicKey = ECPublicKey(parameters.G * privateKey.d, parameters);
+      final spki = spkiOf(publicKey);
+      if (_fingerprintOfSpki(spki) != _fingerprintOfSpki(legacy.spki)) {
+        return null;
+      }
+      return fromPem(
+        certificatePem: buildSelfSignedCertificatePem(
+          privateKey: privateKey,
+          publicKey: publicKey,
+          commonName: commonNameForSpki(spki),
+          serialNumber: _randomSerial(),
+        ),
+        privateKeyPem: privateKeyPem,
+      );
     } catch (_) {
       return null;
     }
@@ -343,6 +376,7 @@ final class IdentityStore {
     required this._dataDir,
     required this._protector,
     this._now = DateTime.now,
+    this._log = _ignoreLog,
   });
 
   final Directory _dataDir;
@@ -350,6 +384,8 @@ final class IdentityStore {
   final SecretProtector _protector;
 
   final DateTime Function() _now;
+
+  final void Function(String) _log;
 
   Directory get _identityDir => Directory('${_dataDir.path}/identity');
 
@@ -384,12 +420,32 @@ final class IdentityStore {
     final key = await _unprotectWithRetry(Uint8List.fromList(encryptedKey));
     if (key == null) return null;
     try {
-      return DeviceIdentity.fromPem(
-        certificatePem: utf8.decode(certificate),
-        privateKeyPem: utf8.decode(key),
+      final certificatePem = utf8.decode(certificate);
+      final privateKeyPem = utf8.decode(key);
+      final identity = DeviceIdentity.fromPem(
+        certificatePem: certificatePem,
+        privateKeyPem: privateKeyPem,
       );
+      if (identity != null) return identity;
+      final migrated = DeviceIdentity.migrateLegacy(
+        certificatePem: certificatePem,
+        privateKeyPem: privateKeyPem,
+      );
+      if (migrated != null) await _saveMigrated(migrated);
+      return migrated;
     } on FormatException {
       return null;
+    }
+  }
+
+  Future<void> _saveMigrated(DeviceIdentity identity) async {
+    try {
+      await writeFileAtomic(
+        _certificateFile,
+        utf8.encode(identity.certificatePem),
+      );
+    } catch (e) {
+      _log('identity certificate migration not saved: ${e.runtimeType}');
     }
   }
 
@@ -406,7 +462,7 @@ final class IdentityStore {
 
   Future<DeviceIdentity> _createAndWrite() async {
     try {
-      final identity = DeviceIdentity.generate(commonName: randomCommonName());
+      final identity = DeviceIdentity.generate();
       await writeFileAtomic(
         _certificateFile,
         utf8.encode(identity.certificatePem),

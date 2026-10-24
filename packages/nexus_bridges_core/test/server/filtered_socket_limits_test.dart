@@ -176,6 +176,48 @@ Future<String?> _tlsGet(
   }
 }
 
+Future<SecureSocket?> _establish(
+  int port, {
+  required SecurityContext context,
+  required String serverFingerprint,
+  InternetAddress? from,
+}) async {
+  try {
+    final raw = await Socket.connect(_loopback, port, sourceAddress: from);
+    addTearDown(raw.destroy);
+    final secure = await SecureSocket.secure(
+      raw,
+      context: context,
+      onBadCertificate: (c) =>
+          fingerprintOfCertificate(c.der) == serverFingerprint,
+    ).timeout(_waitLimit);
+    addTearDown(secure.destroy);
+    secure.done.ignore();
+    return secure;
+  } on IOException {
+    return null;
+  } on TimeoutException {
+    return null;
+  }
+}
+
+Future<String?> _askOn(SecureSocket secure) async {
+  try {
+    secure.add(utf8.encode('GET / HTTP/1.1\r\nhost: 127.0.0.1\r\n\r\n'));
+    final bytes = await secure
+        .fold<List<int>>([], (all, chunk) => all..addAll(chunk))
+        .timeout(_waitLimit);
+    final text = utf8.decode(bytes);
+    final end = text.indexOf('\r\n\r\n');
+    if (!text.startsWith('HTTP/1.1 200') || end < 0) return null;
+    return text.substring(end + 4);
+  } on IOException {
+    return null;
+  } on TimeoutException {
+    return null;
+  }
+}
+
 Future<String?> _servedWithin(
   Duration limit,
   Future<String?> Function() attempt,
@@ -294,8 +336,8 @@ void main() {
   late Uint8List clientHello;
 
   setUpAll(() async {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
     clientHello = await _captureClientHello();
   });
 
@@ -726,5 +768,139 @@ void main() {
         ),
       );
     });
+  });
+
+  group('live connection caps, in handshake or already greeted (V3)', () {
+    Future<SecureSocket?> greet(_Server server, {InternetAddress? from}) =>
+        _establish(
+          server.port,
+          context: bob.clientContext(),
+          serverFingerprint: alice.fingerprint,
+          from: from,
+        );
+
+    test('the limits are 16 per IP and 256 in total', () {
+      expect(Limits.maxConnectionsPerIp, 16);
+      expect(Limits.maxConnections, 256);
+      expect(
+        Limits.maxConnectionsPerIp,
+        greaterThan(Limits.maxPendingHandshakesPerIp),
+      );
+    });
+
+    test('per IP: 16 greeted connections that send nothing keep their slots, '
+        'the 17th from that IP is closed when accepted, another IP is still '
+        'served and the server never holds more than 16 from it', () async {
+      final server = await _Server.start(context: serverTrustingBob());
+
+      final greeted = <SecureSocket?>[];
+      for (var i = 0; i < Limits.maxConnectionsPerIp; i++) {
+        greeted.add(await greet(server));
+      }
+      await _until(
+        () => server.http.connectionsInfo().total == Limits.maxConnectionsPerIp,
+        reason: '16 connections in the HTTP server',
+      );
+      final seventeenth = await _Probe.connect(server.port);
+      final seventeenthClosed = await seventeenth.closedWithin(_atOnce);
+      final greetedAgain = await greet(server);
+      final otherIp = await legitimate(server.port, from: _otherLoopback);
+
+      expect(greeted, everyElement(isNotNull));
+      expect(seventeenthClosed, isTrue);
+      expect(seventeenth.received, isEmpty);
+      expect(greetedAgain, isNull);
+      expect(otherIp, 'none');
+      expect(server.handled, ['none']);
+      expect(
+        server.origins.where((o) => o == _loopback.address).length,
+        Limits.maxConnectionsPerIp + 2,
+      );
+      expect(
+        server.http.connectionsInfo().total,
+        lessThanOrEqualTo(Limits.maxConnectionsPerIp + 1),
+      );
+    });
+
+    test('a slot is freed when a request on a greeted connection finishes, '
+        'without waiting for any deadline', () async {
+      final server = await _Server.start(context: serverTrustingBob());
+      final greeted = <SecureSocket>[];
+      for (var i = 0; i < Limits.maxConnectionsPerIp; i++) {
+        greeted.add((await greet(server))!);
+      }
+      expect(await greet(server), isNull);
+
+      expect(await _askOn(greeted.first), 'none');
+
+      final served = await _servedWithin(
+        _waitLimit,
+        () => legitimate(server.port),
+      );
+      expect(served, 'none');
+      expect(server.handled, ['none', 'none']);
+    });
+
+    test('greeted connections that stay silent are dropped at the deadline '
+        'and the IP is served again', () async {
+      const deadline = Duration(seconds: 2);
+      final server = await _Server.start(
+        context: serverTrustingBob(),
+        deadline: deadline,
+      );
+      for (var i = 0; i < Limits.maxConnectionsPerIp; i++) {
+        expect(await greet(server), isNotNull);
+      }
+      expect(await legitimate(server.port), isNull);
+
+      final served = await _servedWithin(
+        deadline + _lateMargin + _waitLimit,
+        () => legitimate(server.port),
+      );
+
+      expect(served, 'none');
+    }, timeout: const Timeout(Duration(seconds: 40)));
+
+    test('global: 256 greeted connections from 16 IPs fill the total, a 17th '
+        'IP is closed when accepted, and a request that finishes frees a '
+        'slot for it', () async {
+      final server = await _Server.start(context: serverTrustingBob());
+      const ips = 16;
+      expect(ips * Limits.maxConnectionsPerIp, Limits.maxConnections);
+
+      final greeted = <SecureSocket>[];
+      for (var ip = 0; ip < ips; ip++) {
+        final from = _loopbackNumber(60 + ip);
+        for (var i = 0; i < Limits.maxConnectionsPerIp; i++) {
+          final secure = await greet(server, from: from);
+          expect(secure, isNotNull, reason: 'IP ${from.address} #$i');
+          greeted.add(secure!);
+        }
+      }
+      await _until(
+        () => server.http.connectionsInfo().total == Limits.maxConnections,
+        reason: '256 connections in the HTTP server',
+      );
+      final extra = await _Probe.connect(
+        server.port,
+        from: _loopbackNumber(90),
+      );
+      final extraClosed = await extra.closedWithin(_atOnce);
+      final refused = await legitimate(server.port, from: _loopbackNumber(91));
+
+      expect(await _askOn(greeted.first), 'none');
+      final served = await _servedWithin(
+        _waitLimit,
+        () => legitimate(server.port, from: _loopbackNumber(91)),
+      );
+
+      expect(extraClosed, isTrue);
+      expect(refused, isNull);
+      expect(served, 'none');
+      expect(
+        server.http.connectionsInfo().total,
+        lessThanOrEqualTo(Limits.maxConnections),
+      );
+    }, timeout: const Timeout(Duration(seconds: 90)));
   });
 }
