@@ -25,6 +25,13 @@ String fingerprintOfCertificate(List<int> certificateDer) {
   }
 }
 
+const int _shortFingerprintLength = 8;
+
+String shortFingerprint(String fingerprint) =>
+    fingerprint.length > _shortFingerprintLength
+    ? fingerprint.substring(0, _shortFingerprintLength)
+    : fingerprint;
+
 String canonicalSubjectName(String commonName) =>
     commonName.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 

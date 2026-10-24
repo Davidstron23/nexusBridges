@@ -2,6 +2,23 @@ import 'dart:io';
 
 import '../storage/storage.dart';
 
+final RegExp _folderPathStart = RegExp(r'^(?:[A-Za-z]:\\|\\\\)');
+final RegExp _folderVolume = RegExp(r'^[A-Za-z0-9]{1,16}-[0-9a-f]{8}$');
+const int _maxFolderPathUnits = 32767;
+
+bool _isValidSavedFolder(String path, String volume) =>
+    path.isNotEmpty &&
+    path.length <= _maxFolderPathUnits &&
+    _folderPathStart.hasMatch(path) &&
+    _folderVolume.hasMatch(volume);
+
+final class SavedReceiveFolder {
+  const SavedReceiveFolder({required this.path, required this.volumeId});
+
+  final String path;
+  final String volumeId;
+}
+
 final class SettingsStore {
   SettingsStore(this._store);
 
@@ -13,6 +30,45 @@ final class SettingsStore {
       return language == 'es' || language == 'en' ? language as String : null;
     } on Exception {
       return null;
+    }
+  }
+
+  Future<SavedReceiveFolder?> readReceiveFolder() async {
+    try {
+      final raw = (await _store.readVersioned(1))?['receiveFolder'];
+      if (raw is! Map<String, Object?> || raw.length != 2) return null;
+      final path = raw['path'];
+      final volume = raw['volume'];
+      if (path is! String || volume is! String) return null;
+      if (!_isValidSavedFolder(path, volume)) return null;
+      return SavedReceiveFolder(path: path, volumeId: volume);
+    } on Exception {
+      return null;
+    }
+  }
+
+  Future<bool> writeReceiveFolder(SavedReceiveFolder folder) async {
+    if (!_isValidSavedFolder(folder.path, folder.volumeId)) return false;
+    try {
+      Map<String, Object?> json;
+      try {
+        final current = await _store.read();
+        if (current == null) {
+          json = {'version': 1};
+        } else {
+          final version = current['version'];
+          if (version is! int || version != 1) return false;
+          json = {...current};
+        }
+      } on FormatException {
+        await _store.quarantine(DateTime.now());
+        json = {'version': 1};
+      }
+      json['receiveFolder'] = {'path': folder.path, 'volume': folder.volumeId};
+      await _store.write(json);
+      return true;
+    } on Exception {
+      return false;
     }
   }
 }
