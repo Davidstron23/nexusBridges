@@ -46,8 +46,8 @@ void main() {
   late DeviceIdentity bob;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
   });
 
   Future<ServerHarness> start() => ServerHarness.start(identity: alice);

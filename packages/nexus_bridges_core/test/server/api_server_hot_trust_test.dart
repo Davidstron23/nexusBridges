@@ -1,6 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:basic_utils/basic_utils.dart';
+import 'package:crypto/crypto.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_builder.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/network/network.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
@@ -41,10 +46,10 @@ void main() {
   late DeviceIdentity dave;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
-    dave = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
+    dave = DeviceIdentity.generate();
   });
 
   Future<ServerHarness> start(
@@ -183,40 +188,53 @@ void main() {
       expect(harness.server.boundPort, port);
     });
 
-    test('two paired devices with the same subject: the one paired first '
-        'wins, whatever the order of the list (RF-93)', () async {
-      final commonName = randomCommonName();
-      final earlier = DeviceIdentity.generate(commonName: commonName);
-      final later = DeviceIdentity.generate(commonName: commonName);
+    test('a device with the subject of a paired one and another key cannot '
+        'be stored, and it is cut in the handshake while the paired one '
+        'reaches the route (RF-93)', () async {
+      final earlier = DeviceIdentity.generate();
+      final pair = CryptoUtils.generateEcKeyPair();
+      final laterKey = pair.privateKey as ECPrivateKey;
+      final laterPublic = pair.publicKey as ECPublicKey;
+      final laterPem = buildSelfSignedCertificatePem(
+        privateKey: laterKey,
+        publicKey: laterPublic,
+        commonName: earlier.certificate.commonName,
+        serialNumber: Uint8List.fromList(List<int>.generate(16, (i) => i + 1)),
+      );
+      final later = PairedDevice(
+        fingerprint: sha256
+            .convert(spkiOf(laterPublic))
+            .toString()
+            .toUpperCase(),
+        name: 'later',
+        certificatePem: laterPem,
+        relation: PeerRelation.mine,
+        pairedAt: DateTime.utc(2026, 10, 23),
+      );
       final probe = unpairProbe();
       final harness = await start([probe]);
 
-      for (final order in [
-        [later, earlier],
-        [earlier, later],
-      ]) {
-        await harness.paired.replaceAll([
-          for (final who in order)
-            pairedDeviceOf(
-              who,
-              pairedAt: identical(who, earlier)
-                  ? DateTime.utc(2026, 10, 22)
-                  : DateTime.utc(2026, 10, 23),
-            ),
-        ]);
-        await harness.server.rebuildTrust();
-        final fromEarlier = await harness.send(
-          _post(ApiPaths.unpair),
-          context: presenting(earlier),
-        );
-        final fromLater = await harness.send(
-          _post(ApiPaths.unpair),
-          context: presenting(later),
-        );
+      await expectLater(
+        harness.paired.replaceAll([pairedDeviceOf(earlier), later]),
+        throwsArgumentError,
+      );
+      await harness.paired.replaceAll([pairedDeviceOf(earlier)]);
+      await harness.server.rebuildTrust();
+      final fromEarlier = await harness.send(
+        _post(ApiPaths.unpair),
+        context: presenting(earlier),
+      );
+      final fromLater = await harness.send(
+        _post(ApiPaths.unpair),
+        context: SecurityContext(withTrustedRoots: false)
+          ..useCertificateChainBytes(utf8.encode(laterPem))
+          ..usePrivateKeyBytes(
+            utf8.encode(CryptoUtils.encodeEcPrivateKeyToPem(laterKey)),
+          ),
+      );
 
-        expect(fromEarlier?.status, 200);
-        expect(fromLater, isNull);
-      }
+      expect(fromEarlier?.status, 200);
+      expect(fromLater, isNull);
       expect(
         {for (final c in probe.calls) c.clientFingerprint},
         {earlier.fingerprint},
@@ -415,13 +433,14 @@ void main() {
       final probe = unpairProbe();
       final harness = await start([probe], pairedWith: [bob]);
       final fromBob = await open(harness, as: bob);
-      await Future<void>.delayed(_settle);
 
       final removing = harness.paired.remove(bob.fingerprint);
       addTearDown(() => removing);
+      expect(harness.paired.isPaired(bob.fingerprint), isFalse);
       fromBob.write(_post(ApiPaths.unpair));
-      final reply = await fromBob.reply();
+      final reply = await fromBob.reply(limit: const Duration(seconds: 25));
 
+      expect(fromBob.received, isNotEmpty);
       expect(reply!.status, 401);
       expect(reply.json, {'error': 'unauthorized'});
       expect(probe.count, 0);

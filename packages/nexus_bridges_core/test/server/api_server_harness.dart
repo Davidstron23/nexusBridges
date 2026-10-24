@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_builder.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_parser.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/network/network.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
@@ -66,12 +68,12 @@ final SecurityContext anonymousContext = SecurityContext(
   withTrustedRoots: false,
 );
 
-DeviceIdentity expiredIdentity(String commonName) {
+DeviceIdentity expiredIdentity() {
   final pair = CryptoUtils.generateEcKeyPair();
   final privateKey = pair.privateKey as ECPrivateKey;
   final publicKey = pair.publicKey as ECPublicKey;
   final csr = X509Utils.generateEccCsrPem(
-    {'CN': commonName},
+    {'CN': commonNameForSpki(spkiOf(publicKey))},
     privateKey,
     publicKey,
   );
@@ -243,6 +245,7 @@ Future<Reply?> send(
   SecurityContext? context,
   InternetAddress? from,
   InternetAddress? to,
+  Duration limit = waitLimit,
 }) async {
   final client = await TlsClient.connect(
     port,
@@ -252,7 +255,7 @@ Future<Reply?> send(
     to: to,
   );
   client.write(request);
-  return client.reply();
+  return client.reply(limit: limit);
 }
 
 Future<Reply?> sendOrCut(
@@ -262,6 +265,7 @@ Future<Reply?> sendOrCut(
   SecurityContext? context,
   InternetAddress? from,
   InternetAddress? to,
+  Duration limit = waitLimit,
 }) async {
   try {
     return await send(
@@ -271,6 +275,7 @@ Future<Reply?> sendOrCut(
       context: context,
       from: from,
       to: to,
+      limit: limit,
     );
   } on IOException {
     return null;

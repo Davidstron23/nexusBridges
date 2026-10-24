@@ -270,6 +270,9 @@ List<int> _reply(
 String _fingerprintOf(X509Certificate certificate) =>
     fingerprintOfCertificate(certificate.der);
 
+bool _calledByTls() =>
+    StackTrace.current.toString().contains('_onBadCertificateWrapper');
+
 void main() {
   late DeviceIdentity alice;
   late DeviceIdentity bob;
@@ -277,12 +280,10 @@ void main() {
   late DeviceIdentity aliceReinstalled;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
-    aliceReinstalled = DeviceIdentity.generate(
-      commonName: alice.certificate.commonName,
-    );
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
+    aliceReinstalled = DeviceIdentity.generate();
   });
 
   bool Function(X509Certificate) pinnedTo(
@@ -382,11 +383,11 @@ void main() {
       expect(server.handled, 1);
     });
 
-    test('a paired device reinstalled with the same name but another key '
+    test('a paired device reinstalled with another key and so another name '
         'gives null and nothing reaches its handler (RF-122)', () async {
       expect(
         aliceReinstalled.certificate.commonName,
-        alice.certificate.commonName,
+        isNot(alice.certificate.commonName),
       );
       expect(aliceReinstalled.fingerprint, isNot(alice.fingerprint));
       final server = await _CountingServer.start(
@@ -464,6 +465,113 @@ void main() {
       await Future<void>.delayed(_settle);
       expect(server.handled, 0);
     });
+
+    test('the pin is checked again after the handshake: a callback that '
+        'accepts inside the TLS handshake and refuses outside it gives null '
+        'without reaching the handler (V7)', () async {
+      final server = await _CountingServer.start(
+        alice.serverContext(trustedCertificatesPem: const []),
+      );
+      final inside = <String>[];
+      final outside = <String>[];
+
+      final response = await postJson(
+        address: _loopback,
+        port: server.port,
+        path: ApiPaths.pairStart,
+        json: const {'hello': 'world'},
+        context: bob.clientContext(),
+        acceptServer: (certificate) {
+          final duringHandshake = _calledByTls();
+          (duringHandshake ? inside : outside).add(_fingerprintOf(certificate));
+          return duringHandshake;
+        },
+      );
+
+      expect(response, isNull);
+      await Future<void>.delayed(_settle);
+      expect(server.handled, 0);
+      expect(inside, isNotEmpty);
+      expect(outside, [alice.fingerprint]);
+    });
+
+    test('a callback that throws only outside the handshake gives null '
+        'without reaching the handler (V7)', () async {
+      final server = await _CountingServer.start(
+        alice.serverContext(trustedCertificatesPem: const []),
+      );
+      var outside = 0;
+
+      final response = await postJson(
+        address: _loopback,
+        port: server.port,
+        path: ApiPaths.pairStart,
+        json: const {'hello': 'world'},
+        context: bob.clientContext(),
+        acceptServer: (_) {
+          if (_calledByTls()) return true;
+          outside++;
+          throw StateError('check after the handshake failed');
+        },
+      );
+
+      expect(response, isNull);
+      await Future<void>.delayed(_settle);
+      expect(server.handled, 0);
+      expect(outside, 1);
+    });
+
+    test('control: a callback that accepts both inside and outside the '
+        'handshake reaches the handler, and the check outside sees the '
+        'certificate of the server once (V7)', () async {
+      final server = await _CountingServer.start(
+        alice.serverContext(trustedCertificatesPem: const []),
+      );
+      final outside = <String>[];
+
+      final response = await postJson(
+        address: _loopback,
+        port: server.port,
+        path: ApiPaths.pairStart,
+        json: const {'hello': 'world'},
+        context: bob.clientContext(),
+        acceptServer: (certificate) {
+          if (!_calledByTls()) outside.add(_fingerprintOf(certificate));
+          return true;
+        },
+      );
+
+      expect(response?.status, 404);
+      expect(server.handled, 1);
+      expect(outside, [alice.fingerprint]);
+    });
+
+    test(
+      'a server that a trusted context would validate still goes through '
+      'the pin: another fingerprint never reaches the handler (V7)',
+      () async {
+        final server = await _CountingServer.start(
+          carol.serverContext(trustedCertificatesPem: const []),
+        );
+        final trusting = SecurityContext(withTrustedRoots: false)
+          ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3
+          ..setTrustedCertificatesBytes(utf8.encode(carol.certificatePem));
+        final seen = <String>[];
+
+        final response = await post(
+          server.port,
+          expected: alice.fingerprint,
+          context: trusting,
+          seen: seen,
+        );
+
+        expect(response, isNull);
+        await Future<void>.delayed(_settle);
+        expect(server.handled, 0);
+        expect(seen, isNotEmpty);
+        expect(seen.toSet(), {carol.fingerprint});
+      },
+    );
   });
 
   group('C22: responses of a real HTTPS server', () {

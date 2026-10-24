@@ -184,6 +184,13 @@ final class _Listener {
   final HttpServer server;
 
   Future<void> close() async {
+    await socket.stopAccepting();
+    await server.close();
+    final waited = Stopwatch()..start();
+    while (server.connectionsInfo().total > 0 &&
+        waited.elapsed < Limits.listenerCloseGrace) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
     await server.close(force: true);
     await socket.close();
   }
@@ -269,9 +276,9 @@ final class ApiServer {
         for (final entry in _listeners.entries)
           if (wanted[entry.key]?.subnet != entry.value.iface.subnet) entry.key,
       ];
-      for (final id in stale) {
-        await _listeners.remove(id)!.close();
-      }
+      await Future.wait([
+        for (final id in stale) _listeners.remove(id)!.close(),
+      ]);
       for (final entry in _listeners.entries) {
         final current = wanted[entry.key]!;
         if (current.friendlyName != entry.value.iface.friendlyName) {
@@ -316,9 +323,7 @@ final class ApiServer {
   Future<void> _closeAll() async {
     final previous = _listeners.values.toList();
     _listeners.clear();
-    for (final listener in previous) {
-      await listener.close();
-    }
+    await Future.wait([for (final listener in previous) listener.close()]);
   }
 
   Future<SecurityContext> _contextOrCloseAll() async {
@@ -387,9 +392,9 @@ final class ApiServer {
         _listeners[iface.id] = await _open(iface, port, context);
         opened.add(iface.id);
       } on PortInUseException {
-        for (final id in opened) {
-          await _listeners.remove(id)!.close();
-        }
+        await Future.wait([
+          for (final id in opened) _listeners.remove(id)!.close(),
+        ]);
         rethrow;
       } catch (e) {
         _log('interface bind failed: ${e.runtimeType}');

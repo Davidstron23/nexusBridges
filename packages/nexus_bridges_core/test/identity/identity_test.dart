@@ -4,13 +4,11 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:basic_utils/basic_utils.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_builder.dart';
+import 'package:nexus_bridges_core/src/identity/certificate_parser.dart';
 import 'package:nexus_bridges_core/src/identity/der.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:test/test.dart';
-
-const String _aliceCommonName = 'NexusBridges-a11ce0000000000a';
-
-const String _twinCommonName = 'NexusBridges-7e57000000000000';
 
 final class _ReversingProtector implements SecretProtector {
   final List<Uint8List> received = [];
@@ -69,7 +67,7 @@ List<String> _privateScalarForms(String privateKeyPem) {
   final privateKey = pair.privateKey as ECPrivateKey;
   final publicKey = pair.publicKey as ECPublicKey;
   final csr = X509Utils.generateEccCsrPem(
-    {'CN': randomCommonName()},
+    {'CN': commonNameForSpki(spkiOf(publicKey))},
     privateKey,
     publicKey,
   );
@@ -283,9 +281,9 @@ void main() {
   late String carolPrivateKeyPem;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: _aliceCommonName);
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
     alicePrivateKeyPem = _privateKeyPemOf(alice);
     bobPrivateKeyPem = _privateKeyPemOf(bob);
     carolPrivateKeyPem = _privateKeyPemOf(carol);
@@ -311,10 +309,13 @@ void main() {
       );
     });
 
-    test('puts the given common name in the subject', () {
+    test('puts the name bound to its own key in the subject', () {
       final data = X509Utils.x509CertificateFromPem(alice.certificatePem);
 
-      expect(data.tbsCertificate!.subject['2.5.4.3'], _aliceCommonName);
+      expect(
+        data.tbsCertificate!.subject['2.5.4.3'],
+        'NexusBridges-${alice.fingerprint.substring(0, 16).toLowerCase()}',
+      );
     });
 
     test('uses an EC P-256 key', () {
@@ -686,9 +687,16 @@ void main() {
     );
 
     test('with two subjects alike only the first is trusted', () async {
-      final first = DeviceIdentity.generate(commonName: _twinCommonName);
-      final second = DeviceIdentity.generate(commonName: _twinCommonName);
-      final trusted = [first.certificatePem, second.certificatePem];
+      final first = DeviceIdentity.generate();
+      final pair = CryptoUtils.generateEcKeyPair();
+      final secondKey = pair.privateKey as ECPrivateKey;
+      final secondPem = buildSelfSignedCertificatePem(
+        privateKey: secondKey,
+        publicKey: pair.publicKey as ECPublicKey,
+        commonName: first.certificate.commonName,
+        serialNumber: Uint8List.fromList(List<int>.generate(16, (i) => i + 1)),
+      );
+      final trusted = [first.certificatePem, secondPem];
 
       final fromFirst = await _serverOutcome(
         server: alice,
@@ -702,8 +710,8 @@ void main() {
         server: alice,
         trusted: trusted,
         client: _clientWithCertificate(
-          second.certificatePem,
-          _privateKeyPemOf(second),
+          secondPem,
+          CryptoUtils.encodeEcPrivateKeyToPem(secondKey),
         ),
       );
 
@@ -727,7 +735,7 @@ void main() {
     late String davePrivateKeyPem;
 
     setUpAll(() {
-      dave = DeviceIdentity.generate(commonName: randomCommonName());
+      dave = DeviceIdentity.generate();
       davePrivateKeyPem = _privateKeyPemOf(dave);
     });
 

@@ -86,7 +86,7 @@ void main() {
   late DeviceInfo self;
 
   setUpAll(() {
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    bob = DeviceIdentity.generate();
     verifier = DeviceVerifier(identity: bob);
     self = DeviceInfo(
       name: 'Bob',
@@ -162,7 +162,7 @@ void main() {
 
     test('control: a valid identity behind the same counting server reaches '
         'the handler', () async {
-      final alice = DeviceIdentity.generate(commonName: randomCommonName());
+      final alice = DeviceIdentity.generate();
       final server = await _CountingServer.start(
         alice.serverContext(trustedCertificatesPem: const []),
       );

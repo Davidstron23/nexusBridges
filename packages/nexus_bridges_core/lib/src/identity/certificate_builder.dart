@@ -45,6 +45,11 @@ String normalizedPemOf(List<int> der) {
   return lines.toString();
 }
 
+Uint8List spkiOf(ECPublicKey publicKey) => derSequence([
+  derSequence([derOid(_oidEcPublicKey), derOid(_oidPrime256v1)]),
+  derBitString(publicKey.Q!.getEncoded(false)),
+]);
+
 String buildSelfSignedCertificatePem({
   required ECPrivateKey privateKey,
   required ECPublicKey publicKey,
@@ -62,11 +67,7 @@ String buildSelfSignedCertificatePem({
       ]),
     ]);
     final signatureAlgorithm = derSequence([derOid(_oidEcdsaWithSha256)]);
-    final point = publicKey.Q!.getEncoded(false);
-    final spki = derSequence([
-      derSequence([derOid(_oidEcPublicKey), derOid(_oidPrime256v1)]),
-      derBitString(point),
-    ]);
+    final spki = spkiOf(publicKey);
     final tbs = derSequence([
       derExplicit(0, derInteger(Uint8List.fromList([2]))),
       derInteger(serialNumber),

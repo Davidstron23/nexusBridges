@@ -176,16 +176,20 @@ Uint8List _nameOf(Uint8List commonNameValue) => derSequence([
   ]),
 ]);
 
+String _boundName(_KeyPair keys) => commonNameForSpki(spkiOf(keys.publicKey));
+
 Uint8List _handBuilt(
   _KeyPair keys, {
-  String commonName = _sharedCommonName,
+  String? commonName,
   Uint8List? commonNameValue,
   Uint8List? point,
   Uint8List? validity,
   List<Uint8List> afterSpki = const [],
   bool indefiniteCertificate = false,
 }) {
-  final name = _nameOf(commonNameValue ?? derPrintable(commonName));
+  final name = _nameOf(
+    commonNameValue ?? derPrintable(commonName ?? _boundName(keys)),
+  );
   final algorithm = derSequence([derOid(_oidEcdsaWithSha256)]);
   final tbs = derSequence([
     derExplicit(0, derInteger(_bytes([2]))),
@@ -275,8 +279,8 @@ void main() {
   late String alicePrivateKeyPem;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
     alicePrivateKeyPem = _privateKeyPemOf(alice);
   });
 
@@ -331,9 +335,7 @@ void main() {
     test('the serial changes between generations and never repeats', () {
       final serials = <String>{};
       for (var i = 0; i < 20; i++) {
-        final identity = DeviceIdentity.generate(
-          commonName: randomCommonName(),
-        );
+        final identity = DeviceIdentity.generate();
         final der = identity.certificateDer;
         final serial = derValue(der, _layoutOf(der).tbs[1]);
         expect(serial, hasLength(16));
@@ -539,7 +541,7 @@ void main() {
     });
 
     test('an untrusted client presenting its certificate is cut', () async {
-      final carol = DeviceIdentity.generate(commonName: randomCommonName());
+      final carol = DeviceIdentity.generate();
       final server = await _CountingServer.start(
         bob.serverContext(trustedCertificatesPem: [alice.certificatePem]),
       );
@@ -690,14 +692,14 @@ void main() {
       final peer = PeerCertificate.fromDer(der);
 
       expect(peer, isNotNull);
-      expect(peer!.commonName, _sharedCommonName);
+      expect(peer!.commonName, _boundName(keys));
       expect(
         peer.fingerprint,
         PeerCertificate.tryParse(
           buildSelfSignedCertificatePem(
             privateKey: keys.privateKey,
             publicKey: keys.publicKey,
-            commonName: _sharedCommonName,
+            commonName: _boundName(keys),
             serialNumber: _serial(),
           ),
         )!.fingerprint,
@@ -705,12 +707,13 @@ void main() {
     });
 
     test('a valid UTF8String CN gives an object', () {
-      final der = _handBuilt(keys, commonNameValue: derUtf8(_sharedCommonName));
+      final name = _boundName(keys);
+      final der = _handBuilt(keys, commonNameValue: derUtf8(name));
       final built = _derOf(
         buildSelfSignedCertificatePem(
           privateKey: keys.privateKey,
           publicKey: keys.publicKey,
-          commonName: _sharedCommonName,
+          commonName: name,
           serialNumber: _serial(),
           utf8CommonName: true,
         ),
@@ -719,8 +722,8 @@ void main() {
       for (final certificate in [der, built]) {
         final peer = PeerCertificate.tryParse(_pemOf(certificate));
         expect(peer, isNotNull);
-        expect(peer!.commonName, _sharedCommonName);
-        expect(peer.canonicalName, _sharedCommonName.toLowerCase());
+        expect(peer!.commonName, name);
+        expect(peer.canonicalName, name.toLowerCase());
         expect(peer.fingerprint, PeerCertificate.fromDer(der)!.fingerprint);
       }
     });
@@ -734,7 +737,7 @@ void main() {
     });
 
     test('a CN as IA5String gives null', () {
-      final ia5 = derUtf8(_sharedCommonName)..[0] = 0x16;
+      final ia5 = derUtf8(_boundName(keys))..[0] = 0x16;
 
       _expectRejected(_handBuilt(keys, commonNameValue: ia5), 'IA5String');
     });
@@ -756,7 +759,7 @@ void main() {
       _expectRejected(
         _handBuilt(
           keys,
-          commonNameValue: _indefinite(derUtf8(_sharedCommonName)..[0] = 0x2C),
+          commonNameValue: _indefinite(derUtf8(_boundName(keys))..[0] = 0x2C),
         ),
         'constructed CN',
       );
@@ -849,110 +852,116 @@ void main() {
   group('C8 trusted context without repeated subjects (RF-93)', () {
     late DeviceIdentity server;
     late DeviceIdentity printable;
-    late DeviceIdentity utf8Twin;
+    late String twinPem;
+    late String twinKeyPem;
 
     setUpAll(() {
-      server = DeviceIdentity.generate(commonName: randomCommonName());
-      printable = DeviceIdentity.generate(commonName: _sharedCommonName);
+      server = DeviceIdentity.generate();
+      printable = DeviceIdentity.generate();
       final keys = _keyPair();
-      utf8Twin = DeviceIdentity.fromPem(
-        certificatePem: buildSelfSignedCertificatePem(
-          privateKey: keys.privateKey,
-          publicKey: keys.publicKey,
-          commonName: _sharedCommonName,
-          serialNumber: _serial(),
-          utf8CommonName: true,
-        ),
-        privateKeyPem: CryptoUtils.encodeEcPrivateKeyToPem(keys.privateKey),
-      )!;
+      twinPem = buildSelfSignedCertificatePem(
+        privateKey: keys.privateKey,
+        publicKey: keys.publicKey,
+        commonName: printable.certificate.commonName,
+        serialNumber: _serial(),
+        utf8CommonName: true,
+      );
+      twinKeyPem = CryptoUtils.encodeEcPrivateKeyToPem(keys.privateKey);
     });
 
-    test('the two certificates share the canonical name, not the key', () {
+    test('a UTF8String twin with the same name and another key is not '
+        'readable: its name is not the one of its key', () {
+      final twinDer = _derOf(twinPem);
       expect(
-        printable.certificate.canonicalName,
-        _sharedCommonName.toLowerCase(),
+        derBytes(twinDer, _layoutOf(twinDer).tbs[5]),
+        _nameOf(derUtf8(printable.certificate.commonName)),
       );
       expect(
-        utf8Twin.certificate.canonicalName,
-        _sharedCommonName.toLowerCase(),
+        printable.certificate.commonName,
+        commonNameForSpki(parseCertificate(printable.certificateDer).spki),
       );
-      expect(printable.fingerprint, isNot(utf8Twin.fingerprint));
+
+      expect(PeerCertificate.tryParse(twinPem), isNull);
       expect(
-        derBytes(
-          utf8Twin.certificateDer,
-          _layoutOf(utf8Twin.certificateDer).tbs[5],
+        DeviceIdentity.fromPem(
+          certificatePem: twinPem,
+          privateKeyPem: twinKeyPem,
         ),
-        _nameOf(derUtf8(_sharedCommonName)),
+        isNull,
       );
     });
 
-    Future<({_Attempt first, _Attempt second, int handled, List<String> seen})>
-    run(List<DeviceIdentity> order) async {
+    Future<
+      ({_Attempt printable, _Attempt twin, int handled, List<String> seen})
+    >
+    run({required bool twinFirst}) async {
       final counting = await _CountingServer.start(
         server.serverContext(
-          trustedCertificatesPem: [for (final i in order) i.certificatePem],
+          trustedCertificatesPem: twinFirst
+              ? [twinPem, printable.certificatePem]
+              : [printable.certificatePem, twinPem],
         ),
       );
       addTearDown(counting.close);
-      final first = await _get(
+      final fromPrintable = await _get(
         counting.port,
-        order[0].clientContext(presentCertificate: true),
+        printable.clientContext(presentCertificate: true),
         server.fingerprint,
       );
-      final afterFirst = counting.handled;
-      final second = await _get(
+      final fromTwin = await _get(
         counting.port,
-        order[1].clientContext(presentCertificate: true),
+        _presenting(twinPem, twinKeyPem),
         server.fingerprint,
       );
-      expect(afterFirst, 1);
       return (
-        first: first,
-        second: second,
+        printable: fromPrintable,
+        twin: fromTwin,
         handled: counting.handled,
         seen: counting.clients,
       );
     }
 
-    test('PrintableString first: it reaches HTTP and the UTF8String one is '
-        'cut in the handshake', () async {
-      final outcome = await run([printable, utf8Twin]);
+    for (final twinFirst in [false, true]) {
+      test('twin ${twinFirst ? 'first' : 'second'}: the paired certificate '
+          'reaches HTTP and the twin is cut in the handshake', () async {
+        final outcome = await run(twinFirst: twinFirst);
 
-      expect(outcome.first.status, HttpStatus.notFound);
-      expect(outcome.second.status, isNull);
-      expect(outcome.second.error, isA<IOException>());
-      expect(outcome.handled, 1);
-      expect(outcome.seen, [printable.fingerprint]);
-    });
+        expect(outcome.printable.status, HttpStatus.notFound);
+        expect(outcome.twin.status, isNull);
+        expect(outcome.twin.error, isA<IOException>());
+        expect(outcome.handled, 1);
+        expect(outcome.seen, [printable.fingerprint]);
+      });
+    }
 
-    test('UTF8String first: it reaches HTTP and the PrintableString one is '
-        'cut in the handshake', () async {
-      final outcome = await run([utf8Twin, printable]);
+    test('control: the twin alone is skipped and cut, the paired one alone '
+        'reaches HTTP', () async {
+      final twinOnly = await _CountingServer.start(
+        server.serverContext(trustedCertificatesPem: [twinPem]),
+      );
+      addTearDown(twinOnly.close);
+      final printableOnly = await _CountingServer.start(
+        server.serverContext(
+          trustedCertificatesPem: [printable.certificatePem],
+        ),
+      );
+      addTearDown(printableOnly.close);
 
-      expect(outcome.first.status, HttpStatus.notFound);
-      expect(outcome.second.status, isNull);
-      expect(outcome.handled, 1);
-      expect(outcome.seen, [utf8Twin.fingerprint]);
-    });
+      final twin = await _get(
+        twinOnly.port,
+        _presenting(twinPem, twinKeyPem),
+        server.fingerprint,
+      );
+      final paired = await _get(
+        printableOnly.port,
+        printable.clientContext(presentCertificate: true),
+        server.fingerprint,
+      );
 
-    test('control: each one alone reaches HTTP', () async {
-      for (final identity in [printable, utf8Twin]) {
-        final counting = await _CountingServer.start(
-          server.serverContext(
-            trustedCertificatesPem: [identity.certificatePem],
-          ),
-        );
-        addTearDown(counting.close);
-
-        final outcome = await _get(
-          counting.port,
-          identity.clientContext(presentCertificate: true),
-          server.fingerprint,
-        );
-
-        expect(outcome.status, HttpStatus.notFound, reason: '${outcome.error}');
-        expect(counting.clients, [identity.fingerprint]);
-      }
+      expect(twin.status, isNull);
+      expect(twinOnly.handled, 0);
+      expect(paired.status, HttpStatus.notFound, reason: '${paired.error}');
+      expect(printableOnly.clients, [printable.fingerprint]);
     });
   });
 
@@ -962,9 +971,9 @@ void main() {
     late DeviceIdentity a;
 
     setUpAll(() {
-      server = DeviceIdentity.generate(commonName: randomCommonName());
+      server = DeviceIdentity.generate();
       serverPrivateKeyPem = _privateKeyPemOf(server);
-      a = DeviceIdentity.generate(commonName: _sharedCommonName);
+      a = DeviceIdentity.generate();
     });
 
     String impostor(String commonName, {bool utf8CommonName = false}) {
@@ -1005,10 +1014,12 @@ void main() {
     });
 
     final variants = <String, String Function()>{
-      '(1) NEXUSBRIDGES-0123456789ABCDEF': () =>
-          impostor('NEXUSBRIDGES-0123456789ABCDEF'),
-      '(2) UTF8String': () => impostor(_sharedCommonName, utf8CommonName: true),
-      '(3) spaces before and after': () => impostor('  $_sharedCommonName  '),
+      '(1) the name in capitals': () =>
+          impostor(a.certificate.commonName.toUpperCase()),
+      '(2) UTF8String': () =>
+          impostor(a.certificate.commonName, utf8CommonName: true),
+      '(3) spaces before and after': () =>
+          impostor('  ${a.certificate.commonName}  '),
     };
 
     for (final MapEntry(key: label, value: build) in variants.entries) {
@@ -1042,19 +1053,27 @@ void main() {
   group('serverContext skips unreadable and repeated trusted certificates', () {
     late DeviceIdentity server;
     late DeviceIdentity carol;
-    late DeviceIdentity bobTwin;
+    late String bobTwinPem;
+    late String bobTwinKeyPem;
     late DeviceIdentity readableByTls;
 
     setUpAll(() {
-      server = DeviceIdentity.generate(commonName: randomCommonName());
-      carol = DeviceIdentity.generate(commonName: randomCommonName());
-      bobTwin = DeviceIdentity.generate(commonName: bob.certificate.commonName);
+      server = DeviceIdentity.generate();
+      carol = DeviceIdentity.generate();
+      final twinKeys = _keyPair();
+      bobTwinPem = buildSelfSignedCertificatePem(
+        privateKey: twinKeys.privateKey,
+        publicKey: twinKeys.publicKey,
+        commonName: bob.certificate.commonName,
+        serialNumber: _serial(),
+      );
+      bobTwinKeyPem = CryptoUtils.encodeEcPrivateKeyToPem(twinKeys.privateKey);
       final keys = _keyPair();
       readableByTls = DeviceIdentity.fromPem(
         certificatePem: buildSelfSignedCertificatePem(
           privateKey: keys.privateKey,
           publicKey: keys.publicKey,
-          commonName: randomCommonName(),
+          commonName: commonNameForSpki(spkiOf(keys.publicKey)),
           serialNumber: _serial(),
         ),
         privateKeyPem: CryptoUtils.encodeEcPrivateKeyToPem(keys.privateKey),
@@ -1084,7 +1103,7 @@ void main() {
         keys.privateKey,
       );
       expect(PeerCertificate.tryParse(rejectedPem), isNull);
-      expect(bobTwin.certificate.canonicalName, bob.certificate.canonicalName);
+      expect(PeerCertificate.tryParse(bobTwinPem), isNull);
       final trusted = [
         'garbage',
         '',
@@ -1092,7 +1111,7 @@ void main() {
         alicePrivateKeyPem,
         bob.certificatePem,
         rejectedPem,
-        bobTwin.certificatePem,
+        bobTwinPem,
         carol.certificatePem,
         unreadableButTlsValid(),
         readableByTls.certificatePem,
@@ -1116,9 +1135,7 @@ void main() {
       final fromLast = await from(
         readableByTls.clientContext(presentCertificate: true),
       );
-      final fromTwin = await from(
-        bobTwin.clientContext(presentCertificate: true),
-      );
+      final fromTwin = await from(_presenting(bobTwinPem, bobTwinKeyPem));
       final fromRejected = await from(_presenting(rejectedPem, rejectedKeyPem));
 
       expect(fromBob.status, HttpStatus.notFound, reason: '${fromBob.error}');
@@ -1161,20 +1178,307 @@ void main() {
       expect(counting.handled, 1);
     });
 
-    test('control: the repeated one alone reaches HTTP', () async {
+    test('the same name with another key alone is skipped too, and it is '
+        'cut in the handshake', () async {
       final counting = await _CountingServer.start(
-        server.serverContext(trustedCertificatesPem: [bobTwin.certificatePem]),
+        server.serverContext(trustedCertificatesPem: [bobTwinPem]),
       );
       addTearDown(counting.close);
 
       final outcome = await _get(
         counting.port,
-        bobTwin.clientContext(presentCertificate: true),
+        _presenting(bobTwinPem, bobTwinKeyPem),
         server.fingerprint,
       );
 
-      expect(outcome.status, HttpStatus.notFound, reason: '${outcome.error}');
-      expect(counting.clients, [bobTwin.fingerprint]);
+      expect(outcome.status, isNull);
+      expect(counting.handled, 0);
     });
   });
+
+  group('the point of the key is on P-256 (V6)', () {
+    late _KeyPair keys;
+
+    setUpAll(() {
+      keys = _keyPair();
+    });
+
+    Uint8List withPoint(BigInt x, BigInt y) {
+      final point = Uint8List.fromList([
+        0x04,
+        ..._bigEndian32(x),
+        ..._bigEndian32(y),
+      ]);
+      final spki = derSequence([
+        derSequence([derOid(_oidEcPublicKey), derOid(_oidPrime256v1)]),
+        derBitString(point),
+      ]);
+      return _handBuilt(
+        keys,
+        point: point,
+        commonName: commonNameForSpki(spki),
+      );
+    }
+
+    test('control: the real point, written the same way, is read', () {
+      final encoded = keys.publicKey.Q!.getEncoded(false);
+      final der = withPoint(
+        _bigInt(encoded.sublist(1, 33)),
+        _bigInt(encoded.sublist(33, 65)),
+      );
+
+      expect(PeerCertificate.fromDer(der), isNotNull);
+      expect(
+        fingerprintOfCertificate(der),
+        PeerCertificate.fromDer(_handBuilt(keys))!.fingerprint,
+      );
+    });
+
+    test('a point off the curve gives null and is not readable', () {
+      final encoded = keys.publicKey.Q!.getEncoded(false);
+      final x = _bigInt(encoded.sublist(1, 33));
+      final y = _bigInt(encoded.sublist(33, 65));
+      final cases = <String, Uint8List>{
+        'y + 1': withPoint(x, (y + BigInt.one) % _fieldPrime),
+        'x + 1': withPoint((x + BigInt.one) % _fieldPrime, y),
+        '(0, 0)': withPoint(BigInt.zero, BigInt.zero),
+        '(1, 1)': withPoint(BigInt.one, BigInt.one),
+      };
+
+      for (final MapEntry(key: label, value: der) in cases.entries) {
+        _expectRejected(der, label);
+        expect(
+          () => fingerprintOfCertificate(der),
+          throwsA(isA<FormatException>()),
+          reason: label,
+        );
+      }
+    });
+
+    test('x written as x + p passes the curve equation modulo p and is still '
+        'rejected', () {
+      final (x, y) = _smallPoint();
+      expect(
+        (y * y - (x * x * x - BigInt.from(3) * x + _curveB)) % _fieldPrime,
+        BigInt.zero,
+      );
+      expect(PeerCertificate.fromDer(withPoint(x, y)), isNotNull);
+
+      _expectRejected(withPoint(x + _fieldPrime, y), 'x + p');
+    });
+
+    test('x or y equal to or above p give null', () {
+      final (x, y) = _smallPoint();
+      final top = (BigInt.one << 256) - BigInt.one;
+      final cases = <String, Uint8List>{
+        'x = p': withPoint(_fieldPrime, y),
+        'y = p': withPoint(x, _fieldPrime),
+        'y = p + 2': withPoint(x, _fieldPrime + BigInt.two),
+        'x all ones': withPoint(top, y),
+        'y all ones': withPoint(x, top),
+      };
+
+      for (final MapEntry(key: label, value: der) in cases.entries) {
+        _expectRejected(der, label);
+      }
+    });
+  });
+
+  group('no extensions: a certificate cannot act as a CA (Q-4)', () {
+    late _KeyPair caKeys;
+    late String caName;
+    late String caPem;
+    late String caKeyPem;
+    late DeviceIdentity server;
+    late String serverKeyPem;
+
+    setUpAll(() {
+      caKeys = _keyPair();
+      caName = _boundName(caKeys);
+      caPem = _pemOf(
+        _issued(
+          subject: caName,
+          issuer: caName,
+          subjectKeys: caKeys,
+          signer: caKeys,
+          extensions: _caExtensions(),
+        ),
+      );
+      caKeyPem = CryptoUtils.encodeEcPrivateKeyToPem(caKeys.privateKey);
+      server = DeviceIdentity.generate();
+      serverKeyPem = _privateKeyPemOf(server);
+    });
+
+    test('a certificate with basicConstraints CA:TRUE gives null even with '
+        'its own name bound to its key', () {
+      final der = _derOf(caPem);
+      expect(_layoutOf(der).tbs.last.tag, 0xA3);
+
+      _expectRejected(der, 'CA:TRUE');
+      expect(
+        () => fingerprintOfCertificate(der),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('any [3] after the SPKI gives null, even an empty one', () {
+      final cases = <String, Uint8List>{
+        'empty [3]': derExplicit(3, derSequence([])),
+        'CA:TRUE': _caExtensions(),
+        'keyUsage keyCertSign': derExplicit(
+          3,
+          derSequence([
+            derSequence([
+              derOid(const [0x55, 0x1D, 0x0F]),
+              _bytes([0x01, 0x01, 0xFF]),
+              _bytes([0x04, 0x04, 0x03, 0x02, 0x02, 0x04]),
+            ]),
+          ]),
+        ),
+      };
+
+      for (final MapEntry(key: label, value: extra) in cases.entries) {
+        _expectRejected(_handBuilt(caKeys, afterSpki: [extra]), label);
+      }
+    });
+
+    test('control: the same certificate without the [3] is read', () {
+      final der = _issued(
+        subject: caName,
+        issuer: caName,
+        subjectKeys: caKeys,
+        signer: caKeys,
+      );
+
+      expect(PeerCertificate.fromDer(der)?.commonName, caName);
+    });
+
+    Future<({_Attempt outcome, int handled})> presentLeaf(
+      SecurityContext serverContext,
+    ) async {
+      final leafKeys = _keyPair();
+      final leafPem = _pemOf(
+        _issued(
+          subject: _boundName(leafKeys),
+          issuer: caName,
+          subjectKeys: leafKeys,
+          signer: caKeys,
+        ),
+      );
+      final counting = await _CountingServer.start(serverContext);
+      addTearDown(counting.close);
+      final outcome = await _get(
+        counting.port,
+        _presenting(
+          leafPem,
+          CryptoUtils.encodeEcPrivateKeyToPem(leafKeys.privateKey),
+        ),
+        server.fingerprint,
+      );
+      return (outcome: outcome, handled: counting.handled);
+    }
+
+    test('control: BoringSSL alone, trusting the CA, lets a leaf it issued '
+        'reach HTTP', () async {
+      final byHand = _presenting(server.certificatePem, serverKeyPem)
+        ..setTrustedCertificatesBytes(utf8.encode(caPem));
+
+      final result = await presentLeaf(byHand);
+
+      expect(
+        result.outcome.status,
+        HttpStatus.notFound,
+        reason: '${result.outcome.error}',
+      );
+      expect(result.handled, 1);
+    });
+
+    test('a paired list with the CA certificate trusts nothing from it: a '
+        'leaf it issued and the CA itself are cut in the handshake', () async {
+      final context = server.serverContext(trustedCertificatesPem: [caPem]);
+
+      final leaf = await presentLeaf(context);
+      final counting = await _CountingServer.start(context);
+      addTearDown(counting.close);
+      final itself = await _get(
+        counting.port,
+        _presenting(caPem, caKeyPem),
+        server.fingerprint,
+      );
+
+      expect(leaf.outcome.status, isNull);
+      expect(leaf.handled, 0);
+      expect(itself.status, isNull);
+      expect(counting.handled, 0);
+    });
+  });
+}
+
+final BigInt _fieldPrime = BigInt.parse(
+  'FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF',
+  radix: 16,
+);
+
+final BigInt _curveB = BigInt.parse(
+  '5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B',
+  radix: 16,
+);
+
+(BigInt, BigInt) _smallPoint() {
+  final exponent = (_fieldPrime + BigInt.one) >> 2;
+  for (var i = 1; ; i++) {
+    final x = BigInt.from(i);
+    final right = (x * x * x - BigInt.from(3) * x + _curveB) % _fieldPrime;
+    final y = right.modPow(exponent, _fieldPrime);
+    if ((y * y) % _fieldPrime == right) return (x, y);
+  }
+}
+
+Uint8List _caExtensions() => derExplicit(
+  3,
+  derSequence([
+    derSequence([
+      derOid(const [0x55, 0x1D, 0x13]),
+      _bytes([0x01, 0x01, 0xFF]),
+      _bytes([0x04, 0x05, 0x30, 0x03, 0x01, 0x01, 0xFF]),
+    ]),
+  ]),
+);
+
+Uint8List _issued({
+  required String subject,
+  required String issuer,
+  required _KeyPair subjectKeys,
+  required _KeyPair signer,
+  Uint8List? extensions,
+}) {
+  final algorithm = derSequence([derOid(_oidEcdsaWithSha256)]);
+  final tbs = derSequence([
+    derExplicit(0, derInteger(_bytes([2]))),
+    derInteger(_serial()),
+    algorithm,
+    _nameOf(derPrintable(issuer)),
+    derSequence([
+      derUtcTime('000101000000Z'),
+      derGeneralizedTime('99991231235959Z'),
+    ]),
+    _nameOf(derPrintable(subject)),
+    spkiOf(subjectKeys.publicKey),
+    ?extensions,
+  ]);
+  final signature = CryptoUtils.ecSign(
+    signer.privateKey,
+    tbs,
+    algorithmName: 'SHA-256/ECDSA',
+  );
+  return derSequence([
+    tbs,
+    algorithm,
+    derBitString(
+      derSequence([
+        derIntegerFromBigInt(signature.r),
+        derIntegerFromBigInt(signature.s),
+      ]),
+    ),
+  ]);
 }

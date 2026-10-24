@@ -14,10 +14,10 @@ void main() {
   late DeviceIdentity dave;
 
   setUpAll(() {
-    alice = DeviceIdentity.generate(commonName: randomCommonName());
-    bob = DeviceIdentity.generate(commonName: randomCommonName());
-    carol = DeviceIdentity.generate(commonName: randomCommonName());
-    dave = DeviceIdentity.generate(commonName: randomCommonName());
+    alice = DeviceIdentity.generate();
+    bob = DeviceIdentity.generate();
+    carol = DeviceIdentity.generate();
+    dave = DeviceIdentity.generate();
   });
 
   Future<ServerHarness> start({
@@ -333,7 +333,7 @@ void main() {
   group('certificate dates (RF-9)', () {
     test('a server whose own certificate has expired is reached by a client '
         'that pins its fingerprint', () async {
-      final expired = expiredIdentity(randomCommonName());
+      final expired = expiredIdentity();
       final harness = await ServerHarness.start(identity: expired);
 
       final reply = await harness.send(registerRequest(callerInfoOf(bob)));
@@ -346,7 +346,7 @@ void main() {
       'observed (risk R7): a paired client whose certificate has expired '
       'is cut in the handshake, while a paired one in its dates is served',
       () async {
-        final expired = expiredIdentity(randomCommonName());
+        final expired = expiredIdentity();
         final harness = await start(pairedWith: [expired, bob]);
 
         final cut = await harness.send(
