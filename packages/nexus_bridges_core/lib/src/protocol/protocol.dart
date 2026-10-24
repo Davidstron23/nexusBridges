@@ -77,6 +77,10 @@ abstract final class Limits {
   static const Duration listenerCloseGrace = Duration(milliseconds: 300);
 }
 
+final Stopwatch _monotonicWatch = Stopwatch()..start();
+
+Duration monotonicClock() => _monotonicWatch.elapsed;
+
 final class PortInUseException implements Exception {
   const PortInUseException(this.port);
 
