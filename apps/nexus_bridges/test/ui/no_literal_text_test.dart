@@ -26,13 +26,31 @@ void main() {
       expect(_literalText.hasMatch('Text(\n  message,\n)'), isFalse);
     });
 
-    test('lib/src/ui holds the two screens', () {
+    test('lib/src/ui holds the screens and the pairing dialogs', () {
       final names = _uiSources()
           .map((file) => file.uri.pathSegments.last)
           .toSet();
       expect(
         names,
-        containsAll(['home_screen.dart', 'network_prompt_dialog.dart']),
+        containsAll([
+          'home_screen.dart',
+          'network_prompt_dialog.dart',
+          'pairing_dialogs.dart',
+        ]),
+      );
+    });
+
+    test('the pairing dialogs take every text from AppStrings', () {
+      final source = File(
+        'lib${Platform.pathSeparator}src${Platform.pathSeparator}ui'
+        '${Platform.pathSeparator}pairing_dialogs.dart',
+      ).readAsStringSync();
+      expect(_literalText.hasMatch(source), isFalse);
+      expect(source, contains('AppStringsDelegate.of('));
+      expect(
+        RegExp(r'''(title|content|child|label):\s*(const\s+)?Text\(\s*['"]''')
+            .hasMatch(source),
+        isFalse,
       );
     });
 

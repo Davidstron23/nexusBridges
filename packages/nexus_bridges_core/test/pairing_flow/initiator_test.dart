@@ -678,6 +678,56 @@ void main() {
     });
   });
 
+  group('the receiver is paused (C111, RF-106b)', () {
+    test('three "does not match" on B pause it: the next attempt of A ends '
+        'in paused at once, free and without pair/cancel', () async {
+      final (a, b) = await twoStacks();
+      for (var i = 0; i < 3; i++) {
+        await begin(a, b);
+        b.coordinator.answerAsReceiver(ReceiverAnswer.mismatch);
+        await outcomeOf(a, PairingOutcome.cancelledByPeer);
+        a.coordinator.dismissOutcome();
+      }
+      await waitUntil(
+        () => b.events.whereType<PairingPaused>().isNotEmpty,
+        reason: 'B paused',
+      );
+      final startsBefore = b.handledOn(ApiPaths.pairStart);
+      final cancelsBefore = b.handledOn(ApiPaths.pairCancel);
+
+      expect(a.coordinator.tryPair(a.targetOf(b)), PairStart.started);
+      await outcomeOf(a, PairingOutcome.paused);
+
+      expect(a.view!.phase, PairingPhase.finished);
+      expect(a.view!.code, isNull);
+      expect(a.coordinator.busy, isFalse);
+      expect(b.handledOn(ApiPaths.pairStart), startsBefore + 1);
+      await pause();
+      expect(b.handledOn(ApiPaths.pairCancel), cancelsBefore);
+      expect(b.handledOn(ApiPaths.pairReveal), 3);
+      expect(b.events.whereType<PairingPaused>(), hasLength(1));
+      expect(a.paired.devices, isEmpty);
+    });
+
+    for (final (label, body) in <(String, Map<String, Object?>)>[
+      ('rate_limited', {'error': 'rate_limited'}),
+      ('paused with one key too many', {'error': 'paused', 'x': 1}),
+    ]) {
+      test('a 429 $label from the pair/start of B: failed', () async {
+        final (a, b) = await twoStacks();
+        b.wrappers[ApiPaths.pairStart] = (call, inner) async =>
+            ApiReply(429, body);
+
+        expect(a.coordinator.tryPair(a.targetOf(b)), PairStart.started);
+        await outcomeOf(a, PairingOutcome.failed);
+
+        expect(a.coordinator.busy, isFalse);
+        await pause();
+        expect(b.handledOn(ApiPaths.pairCancel), 0);
+      });
+    }
+  });
+
   group('confirm retries (C101, RF-87)', () {
     Future<void> retriedAfterFirst(ApiReply Function() first) async {
       final (a, b) = await twoStacks();
@@ -888,6 +938,35 @@ void main() {
       await startEndsIn(
         const FakeAnswer(409, {'error': 'busy'}),
         PairingOutcome.busy,
+      );
+    });
+
+    test('start 429 with exactly {"error":"paused"}: paused (RF-106b, '
+        'C111)', () async {
+      await startEndsIn(
+        const FakeAnswer(429, {'error': 'paused'}),
+        PairingOutcome.paused,
+      );
+    });
+
+    test('start 429 rate_limited: failed (C111)', () async {
+      await startEndsIn(
+        const FakeAnswer(429, {'error': 'rate_limited'}),
+        PairingOutcome.failed,
+      );
+    });
+
+    test('start 429 paused with one key too many: failed (C111)', () async {
+      await startEndsIn(
+        const FakeAnswer(429, {'error': 'paused', 'x': 1}),
+        PairingOutcome.failed,
+      );
+    });
+
+    test('start 200 with the paused body: failed (C111)', () async {
+      await startEndsIn(
+        const FakeAnswer(200, {'error': 'paused'}),
+        PairingOutcome.failed,
       );
     });
 

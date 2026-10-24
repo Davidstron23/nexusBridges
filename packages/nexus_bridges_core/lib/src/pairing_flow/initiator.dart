@@ -343,6 +343,10 @@ final class PairingInitiator {
       _finish(run, PairingOutcome.busy);
       return;
     }
+    if (started.$1 == 429 && isPausedReply(started.$2)) {
+      _finish(run, PairingOutcome.paused);
+      return;
+    }
     final startReply = started.$1 == 200
         ? StartReply.tryParse(started.$2)
         : null;

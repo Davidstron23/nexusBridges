@@ -119,6 +119,30 @@ Map<String, Object?> deviceInfoJson(Object? protocol) => {
 };
 
 void main() {
+  group('the paused reply (RF-106b, D16)', () {
+    test('the code is "paused" and only the exact body is a paused reply', () {
+      expect(pausedErrorCode, 'paused');
+      expect(isPausedReply({'error': 'paused'}), isTrue);
+      expect(
+        isPausedReply(jsonDecode('{"error":"paused"}') as Map<String, Object?>),
+        isTrue,
+      );
+      for (final body in <Map<String, Object?>>[
+        {},
+        {'error': 'rate_limited'},
+        {'error': 'rejected'},
+        {'error': 'Paused'},
+        {'error': 'paused', 'x': 1},
+        {'error': 'paused', 'retryAfter': 600},
+        {'state': 'paused'},
+        {'error': null},
+        {'error': 1},
+      ]) {
+        expect(isPausedReply(body), isFalse, reason: '$body');
+      }
+    });
+  });
+
   group('every message (C39, RF-74, RF-75)', () {
     for (final c in cases) {
       group(c.name, () {

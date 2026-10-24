@@ -21,6 +21,7 @@ enum PairingOutcome {
   paired,
   rejected,
   busy,
+  paused,
   cancelledByPeer,
   expired,
   lost,
@@ -152,10 +153,23 @@ final class UnpairedByPeer extends PairingEvent {
   final bool saved;
 }
 
+enum AttemptCause { commitmentMismatch, cancelledAfterReveal }
+
 final class PairingAttemptRejected extends PairingEvent {
-  const PairingAttemptRejected({required this.fingerprint});
+  const PairingAttemptRejected({
+    required this.fingerprint,
+    required this.cause,
+  });
 
   final String fingerprint;
+
+  final AttemptCause cause;
+}
+
+final class PairingPaused extends PairingEvent {
+  const PairingPaused({required this.until});
+
+  final DateTime until;
 }
 
 final class PairingNotSaved extends PairingEvent {

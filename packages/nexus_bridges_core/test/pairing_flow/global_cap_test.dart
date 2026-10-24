@@ -13,9 +13,16 @@ import 'receiver_harness.dart';
 
 final Uint8List rejectedBody = utf8.encode('{"error":"rejected"}');
 final Uint8List busyBody = utf8.encode('{"error":"busy"}');
+final Uint8List pausedBody = utf8.encode('{"error":"paused"}');
 
 InternetAddress origin(int n) =>
     InternetAddress('127.0.${10 + n ~/ 250}.${1 + n % 250}');
+
+String summary(PairingEvent event) => switch (event) {
+  PairingAttemptRejected(:final cause) => 'rejected ${cause.name}',
+  PairingPaused(:final until) => 'paused $until',
+  _ => '${event.runtimeType}',
+};
 
 void main() {
   const long = Timeout(Duration(minutes: 3));
@@ -36,6 +43,12 @@ void main() {
     expect(reply, isNotNull, reason: reason);
     expect(reply!.status, 403, reason: reason);
     expect(reply.body, rejectedBody, reason: reason);
+  }
+
+  void expectPaused(RawReply? reply, {String reason = ''}) {
+    expect(reply, isNotNull, reason: reason);
+    expect(reply!.status, 429, reason: reason);
+    expect(reply.body, pausedBody, reason: reason);
   }
 
   void expectState(RawReply? reply, String state, {String reason = ''}) {
@@ -73,8 +86,8 @@ void main() {
 
   group('global cap on failures after the reveal (RF-106b, Q-1)', () {
     test('a mismatch, a cancel after the reveal and a commitment that does '
-        'not match, from three origins, reject the next pair/start of every '
-        'origin, a new one included, with the generic bytes', () async {
+        'not match, from three origins, answer the next pair/start of every '
+        'origin, a new one included, with the paused bytes', () async {
       final fixture = await receiver();
       await failWithMismatch(fixture, 0);
       await failWithPeerCancel(fixture, 1);
@@ -96,7 +109,7 @@ void main() {
       };
 
       for (final MapEntry(key: label, value: reply) in replies.entries) {
-        expectRejected(reply, reason: label);
+        expectPaused(reply, reason: label);
       }
       expect(fixture.handledOn(ApiPaths.pairStart), handledBefore + 5);
       await settle();
@@ -127,17 +140,17 @@ void main() {
       fixture.now = first.add(
         const Duration(minutes: 9, seconds: 59, milliseconds: 999),
       );
-      expectRejected(await freshStart(fixture, 3));
+      expectPaused(await freshStart(fixture, 3));
 
       fixture.now = first.add(const Duration(minutes: 10));
       await startAndLeave(fixture, 4);
       await failWithMismatch(fixture, 5);
-      expectRejected(await freshStart(fixture, 6));
+      expectPaused(await freshStart(fixture, 6));
 
       fixture.now = first.add(
         const Duration(minutes: 11, seconds: 59, milliseconds: 999),
       );
-      expectRejected(await freshStart(fixture, 6));
+      expectPaused(await freshStart(fixture, 6));
       fixture.now = first.add(const Duration(minutes: 12));
       await startAndLeave(fixture, 7);
     });
@@ -152,7 +165,7 @@ void main() {
 
       fixture.now = first.add(const Duration(minutes: 5));
       for (var i = 0; i < 6; i++) {
-        expectRejected(await freshStart(fixture, 9), reason: 'attempt $i');
+        expectPaused(await freshStart(fixture, 9), reason: 'attempt $i');
       }
 
       fixture.now = first.add(const Duration(minutes: 10));
@@ -211,7 +224,7 @@ void main() {
         expectState(await initiator.confirm(), 'paired');
         await failWithMismatch(fixture, 3);
 
-        expectRejected(await freshStart(fixture, 4));
+        expectPaused(await freshStart(fixture, 4));
       },
     );
 
@@ -231,7 +244,7 @@ void main() {
           final attacker = fixture.initiator(peer(n), from: origin(n));
           final started = await attacker.start(name: 'PC-DAVID');
           if (started?.status != 200) {
-            expectRejected(started, reason: 'origin $n');
+            expectPaused(started, reason: 'origin $n');
             rejected++;
             continue;
           }
@@ -247,7 +260,7 @@ void main() {
         }
         prompts.add(reached);
         refused.add(rejected);
-        expectRejected(
+        expectPaused(
           await fixture
               .initiator(DeviceIdentity.generate(), from: origin(200 + round))
               .start(),
@@ -259,10 +272,18 @@ void main() {
       expect(prompts, [3, 3]);
       expect(refused, [perRound - 3, perRound - 3]);
       expect(codes.length, lessThanOrEqualTo(6));
-      await eventually(
-        () => fixture.events.whereType<PairingAttemptRejected>().length == 6,
-      );
-      expect(fixture.events, everyElement(isA<PairingAttemptRejected>()));
+      await eventually(() => fixture.events.length == 8);
+      final first = fixture.now.subtract(Limits.pairingGlobalWindow * 2);
+      expect(fixture.events.map(summary), [
+        'rejected cancelledAfterReveal',
+        'rejected cancelledAfterReveal',
+        'rejected cancelledAfterReveal',
+        'paused ${first.add(Limits.pairingGlobalWindow)}',
+        'rejected cancelledAfterReveal',
+        'rejected cancelledAfterReveal',
+        'rejected cancelledAfterReveal',
+        'paused ${first.add(Limits.pairingGlobalWindow * 2)}',
+      ]);
     }, timeout: long);
   });
 
@@ -279,6 +300,7 @@ void main() {
       await eventually(() => fixture.events.isNotEmpty);
       final event = fixture.events.single as PairingAttemptRejected;
       expect(event.fingerprint, peers[0].fingerprint);
+      expect(event.cause, AttemptCause.cancelledAfterReveal);
       expect(() => (event as dynamic).name, throwsNoSuchMethodError);
       expect(fixture.view!.phase, PairingPhase.finished);
       expect(fixture.view!.outcome, PairingOutcome.cancelledByPeer);
@@ -298,13 +320,23 @@ void main() {
         );
       }
 
-      await eventually(() => fixture.events.length == 3);
+      await eventually(() => fixture.events.length == 4);
       expect(
-        fixture.events.map((e) => (e as PairingAttemptRejected).fingerprint),
-        [for (var n = 0; n < 3; n++) peer(n).fingerprint],
+        fixture.events.whereType<PairingAttemptRejected>().map(
+          (e) => (e.fingerprint, e.cause),
+        ),
+        [
+          for (var n = 0; n < 3; n++)
+            (peer(n).fingerprint, AttemptCause.cancelledAfterReveal),
+        ],
+      );
+      expect(fixture.events.last, isA<PairingPaused>());
+      expect(
+        (fixture.events.last as PairingPaused).until,
+        fixture.now.add(Limits.pairingGlobalWindow),
       );
       expect(fixture.paired.devices, isEmpty);
-      expectRejected(await freshStart(fixture, 3));
+      expectPaused(await freshStart(fixture, 3));
     });
 
     test('a repeated cancel on the finished session emits nothing more and '
@@ -335,6 +367,139 @@ void main() {
       await settle();
       expect(fixture.events, isEmpty);
     });
+  });
+
+  group('the paused reply (C109, RF-106b, RF-75)', () {
+    test('during the pause every pair/start gets the same 429 bytes, without '
+        'a session, a view or an event, and without using the quota of its '
+        'origin', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      final blocked = origin(0);
+      await fixture.ignored.ignore(peers[3].fingerprint, name: 'Old');
+      for (var i = 0; i < 3; i++) {
+        fixture.now = first.add(Duration(minutes: i));
+        await fixture.initiator(peer(i), from: blocked).begin();
+        fixture.coordinator.answerAsReceiver(ReceiverAnswer.mismatch);
+      }
+      await eventually(() => fixture.events.isNotEmpty);
+      expect(fixture.events.map(summary), [
+        'paused ${first.add(Limits.pairingGlobalWindow)}',
+      ]);
+
+      fixture.now = first.add(const Duration(minutes: 5));
+      final viewsBefore = fixture.views.length;
+      final handledBefore = fixture.handledOn(ApiPaths.pairStart);
+      final replies = <String, RawReply?>{
+        'valid from the blocked origin': await fixture
+            .initiator(peer(1), from: blocked)
+            .start(),
+        'new identity from a new origin': await fixture
+            .initiator(DeviceIdentity.generate(), from: origin(1))
+            .start(),
+        'ignored fingerprint from another origin': await fixture
+            .initiator(peers[3], from: origin(2))
+            .start(),
+        'well formed with one key too many': await fixture
+            .initiator(peer(1), from: origin(3))
+            .start(edit: (body) => {...body, 'x': 1}),
+      };
+      for (var i = 0; i < 5; i++) {
+        expectPaused(await freshStart(fixture, 1), reason: 'again $i');
+      }
+
+      for (final MapEntry(key: label, value: reply) in replies.entries) {
+        expectPaused(reply, reason: label);
+      }
+      expect(
+        {for (final reply in replies.values) reply!.text},
+        {'{"error":"paused"}'},
+      );
+      expect(fixture.handledOn(ApiPaths.pairStart), handledBefore + 9);
+      await settle();
+      expect(fixture.coordinator.busy, isFalse);
+      expect(fixture.view?.phase, isNot(PairingPhase.comparing));
+      expect(fixture.views.length, viewsBefore);
+      expect(fixture.events, hasLength(1));
+
+      fixture.now = first.add(
+        const Duration(minutes: 9, seconds: 59, milliseconds: 999),
+      );
+      expectPaused(await freshStart(fixture, 4));
+      fixture.now = first.add(Limits.pairingGlobalWindow);
+      await startAndLeave(fixture, 4);
+
+      for (var i = 0; i < Limits.pairingRequestsPerOrigin; i++) {
+        await startAndLeave(fixture, 1);
+      }
+      expectRejected(await freshStart(fixture, 1));
+
+      expectRejected(await fixture.initiator(peer(1), from: blocked).start());
+      fixture.now = first.add(const Duration(minutes: 12));
+      for (var i = 0; i < Limits.pairingRequestsPerOrigin - 1; i++) {
+        final initiator = fixture.initiator(peer(i % 3), from: blocked);
+        expect((await initiator.start())!.status, 200, reason: 'start $i');
+        expectState(
+          await initiator.cancel(CancelReason.cancelled),
+          'cancelled',
+        );
+      }
+      expectRejected(await fixture.initiator(peer(1), from: blocked).start());
+    }, timeout: long);
+  });
+
+  group('one PairingPaused per pause (C110, RF-106b)', () {
+    final scenarios =
+        <(String, Future<void> Function(ReceiverFixture), List<String>)>[
+          ('a local mismatch', (fixture) => failWithMismatch(fixture, 2), []),
+          (
+            'a cancel after the reveal',
+            (fixture) => failWithPeerCancel(fixture, 2),
+            ['rejected cancelledAfterReveal'],
+          ),
+          (
+            'a commitment that does not match',
+            (fixture) => failWithCommitment(fixture, 2),
+            ['rejected commitmentMismatch'],
+          ),
+        ];
+
+    for (final (label, third, before) in scenarios) {
+      test('the third failure is $label: one event when the pause starts, '
+          'none for the rejected requests and a new one when three are '
+          'reached again', () async {
+        final fixture = await receiver();
+        final first = fixture.now;
+        final expected = [
+          ...before,
+          'paused ${first.add(Limits.pairingGlobalWindow)}',
+        ];
+        await failWithMismatch(fixture, 0);
+        fixture.now = first.add(const Duration(minutes: 1));
+        await failWithMismatch(fixture, 1);
+        fixture.now = first.add(const Duration(minutes: 2));
+        await third(fixture);
+        await eventually(
+          () => fixture.events.whereType<PairingPaused>().isNotEmpty,
+        );
+        await settle();
+        expect(fixture.events.map(summary), expected);
+
+        expectPaused(await freshStart(fixture, 3));
+        expectPaused(await freshStart(fixture, 4));
+        await settle();
+        expect(fixture.events.map(summary), expected);
+
+        fixture.now = first.add(Limits.pairingGlobalWindow);
+        await failWithMismatch(fixture, 5);
+        await eventually(() => fixture.events.length == expected.length + 1);
+        await settle();
+        expect(fixture.events.map(summary), [
+          ...expected,
+          'paused ${first.add(const Duration(minutes: 11))}',
+        ]);
+      });
+    }
   });
 
   group('signature budget on the anonymous routes (Q-7)', () {

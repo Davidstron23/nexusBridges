@@ -209,6 +209,7 @@ void main() {
       expect(utf8.decode(cheated!.body), '{"error":"rejected"}');
       expect(r.rejectedAttempts, hasLength(1));
       expect(r.rejectedAttempts.single.fingerprint, m2.fingerprint);
+      expect(r.rejectedAttempts.single.cause, AttemptCause.commitmentMismatch);
       expect(r.events.single, isA<PairingAttemptRejected>());
       expect(r.shownCodes, isEmpty);
       expect(r.idle, isTrue);
@@ -230,13 +231,22 @@ void main() {
           ).start(name: 'Laptop');
       final fromM = await freshFrom(hostM);
       final fromB = await freshFrom(hostB);
-      expect(fromM?.status, 403);
-      expect(fromB?.status, 403);
+      expect(fromM?.status, 429);
+      expect(fromB?.status, 429);
       expect(fromB!.body, fromM!.body);
-      expect(utf8.decode(fromB.body), '{"error":"rejected"}');
+      expect(utf8.decode(fromB.body), '{"error":"paused"}');
       expect(r.idle, isTrue);
+      await until(() => r.events.length == 2);
+      expect(
+        r.events.last,
+        isA<PairingPaused>().having(
+          (e) => e.until,
+          'until',
+          third.add(Limits.pairingGlobalWindow),
+        ),
+      );
       r.clock.now = third.add(const Duration(minutes: 9, seconds: 59));
-      expect((await freshFrom(hostB))?.status, 403);
+      expect((await freshFrom(hostB))?.status, 429);
       r.clock.now = third.add(const Duration(minutes: 10));
       final elsewhere = ForgedInitiator(
         DeviceIdentity.generate(),
@@ -268,36 +278,41 @@ void main() {
       expect(r.paired.devices, isEmpty);
     });
 
-    test('three "does not match" from the origin of the intermediary block it '
-        'for 10 minutes', () async {
-      final (i, r, m) = await intermediary();
-      for (var n = 0; n < 3; n++) {
+    test(
+      'three "does not match" from the origin of the intermediary block it '
+      'and pause R for 10 minutes, with the paused reply for anybody',
+      () async {
+        final (i, r, m) = await intermediary();
+        for (var n = 0; n < 3; n++) {
+          installAdaptive(r, m);
+          i.coordinator.tryPair(spoofed(i, r, m));
+          await bothComparing(i, r);
+          await bothRefuse(i, r);
+        }
+        final started = r.clock.now;
+        Future<int?> freshStart() async => (await ForgedInitiator(
+          DeviceIdentity.generate(),
+          r,
+        ).start(name: 'Laptop'))?.status;
+        expect(await freshStart(), 429);
+        r.clock.now = started.add(const Duration(minutes: 9, seconds: 59));
+        expect(await freshStart(), 429);
+        expect(r.events.whereType<PairingPaused>(), hasLength(1));
         installAdaptive(r, m);
         i.coordinator.tryPair(spoofed(i, r, m));
-        await bothComparing(i, r);
-        await bothRefuse(i, r);
-      }
-      final started = r.clock.now;
-      Future<int?> freshStart() async => (await ForgedInitiator(
-        DeviceIdentity.generate(),
-        r,
-      ).start(name: 'Laptop'))?.status;
-      expect(await freshStart(), 403);
-      r.clock.now = started.add(const Duration(minutes: 9, seconds: 59));
-      expect(await freshStart(), 403);
-      installAdaptive(r, m);
-      i.coordinator.tryPair(spoofed(i, r, m));
-      await until(
-        () => i.view?.outcome == PairingOutcome.rejected,
-        reason: 'I is refused while M is blocked',
-      );
-      expect(r.shownCodes, hasLength(3));
-      r.clock.now = started.add(const Duration(minutes: 10));
-      final after = ForgedInitiator(DeviceIdentity.generate(), r);
-      expect((await after.start(name: 'Laptop'))?.status, 200);
-      expect((await after.cancel(CancelReason.cancelled))?.status, 200);
-      expect(r.paired.devices, isEmpty);
-    }, timeout: long);
+        await until(
+          () => i.view?.outcome == PairingOutcome.rejected,
+          reason: 'I is refused while M is blocked',
+        );
+        expect(r.shownCodes, hasLength(3));
+        r.clock.now = started.add(const Duration(minutes: 10));
+        final after = ForgedInitiator(DeviceIdentity.generate(), r);
+        expect((await after.start(name: 'Laptop'))?.status, 200);
+        expect((await after.cancel(CancelReason.cancelled))?.status, 200);
+        expect(r.paired.devices, isEmpty);
+      },
+      timeout: long,
+    );
 
     test('an intermediary that gives up before revealing learns only Cr and '
         'R stays silent', () async {
