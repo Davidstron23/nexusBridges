@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-export 'raw_https.dart' show postJson;
+export 'raw_https.dart' show postJson, postStream;
 
 void _noop() {}
 
@@ -47,4 +47,33 @@ final class HttpsResponse {
   final int status;
 
   final Uint8List body;
+}
+
+sealed class StreamPostResult {
+  const StreamPostResult();
+}
+
+final class StreamPostAnswered extends StreamPostResult {
+  const StreamPostAnswered(this.response, {required this.bodyComplete});
+
+  final HttpsResponse response;
+
+  final bool bodyComplete;
+}
+
+final class StreamPostFailed extends StreamPostResult {
+  const StreamPostFailed(this.failure, {required this.sent});
+
+  final StreamPostFailure failure;
+
+  final int sent;
+}
+
+enum StreamPostFailure {
+  notConnected,
+  sourceError,
+  stalled,
+  connectionLost,
+  noAnswer,
+  aborted,
 }

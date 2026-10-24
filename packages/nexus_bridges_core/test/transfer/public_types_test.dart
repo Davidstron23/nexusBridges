@@ -20,6 +20,7 @@ const FolderQuestionView question = FolderQuestionView(
 );
 
 const IncomingTransferView incoming = IncomingTransferView(
+  sessionId: 'S1',
   peerFingerprint: 'F1',
   peerName: 'Portatil',
   fileName: 'informe.pdf',
@@ -250,6 +251,7 @@ void main() {
 
     test('IncomingTransferView, with its defaults and the nested question', () {
       const bare = IncomingTransferView(
+        sessionId: 'S1',
         peerFingerprint: 'F1',
         peerName: null,
         fileName: 'a',
@@ -262,6 +264,7 @@ void main() {
       expect(bare.receivedBytes, 0);
 
       IncomingTransferView copy({
+        String sessionId = 'S1',
         String peerFingerprint = 'F1',
         String? peerName = 'Portatil',
         String fileName = 'informe.pdf',
@@ -272,6 +275,7 @@ void main() {
         FolderQuestionView? folder = question,
         int receivedBytes = 0,
       }) => IncomingTransferView(
+        sessionId: sessionId,
         peerFingerprint: peerFingerprint,
         peerName: peerName,
         fileName: fileName,
@@ -293,6 +297,7 @@ void main() {
         ),
       );
       expectDifferent({
+        'sessionId': copy(sessionId: 'S2'),
         'peerFingerprint': copy(peerFingerprint: 'F2'),
         'peerName': copy(peerName: 'Otro'),
         'fileName': copy(fileName: 'b'),
@@ -310,6 +315,8 @@ void main() {
         ),
         'receivedBytes': copy(receivedBytes: 1),
       }, incoming);
+      expect(copy(sessionId: 'S2').hashCode, isNot(incoming.hashCode));
+      expect(incoming.sessionId, 'S1');
     });
 
     test('TransferResultView', () {
