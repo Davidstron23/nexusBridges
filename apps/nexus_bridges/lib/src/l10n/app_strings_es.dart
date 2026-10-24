@@ -161,6 +161,10 @@ final class AppStringsEs implements AppStrings {
       'Este equipo ya está vinculado. Si confirmas, se queda como está.';
 
   @override
+  String namesakeWarning(String name) =>
+      'Ya tienes vinculado un equipo llamado $name con otra huella.';
+
+  @override
   String get ignoreDeviceButton => 'Ignorar este dispositivo';
 
   @override
@@ -259,6 +263,15 @@ final class AppStringsEs implements AppStrings {
   String noticeAttemptsCancelled(int count) =>
       'Se han cancelado $count intentos de vinculación en los últimos '
       'minutos. Si no has sido tú, revisa tu red.';
+
+  @override
+  String noticeAttemptLost(String short) =>
+      'El equipo con huella $short dejó de responder después de ver el código '
+      'de vinculación.';
+
+  @override
+  String noticeReplaceWithdrawn(String name) =>
+      '$name ha vuelto a aparecer, así que no se ha sustituido.';
 
   @override
   String get noticePairingPaused =>

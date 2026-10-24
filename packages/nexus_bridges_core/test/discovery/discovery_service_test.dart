@@ -1039,6 +1039,169 @@ void main() {
     });
   });
 
+  group('C130: the goodbye of a paired device is verified first (RF-52 of '
+      'the 002, RF-111, N2)', () {
+    test('two forged byes from the address of a live paired device leave it '
+        'listed and cost it one presentation; its real bye after closing its '
+        'server removes it as soon as the connection is refused (about 2 s '
+        'on Windows)', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob, address: '127.0.0.2');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      expect(peer.registrations, hasLength(1));
+      final emissions = s.emitted.length;
+
+      await channel.deliver(_host(2), _bye(peer.info));
+      await _until(() => peer.registrations.length == 2);
+      clock.advance(_oneSecond);
+      await channel.deliver(_host(2), _bye(peer.info));
+      await _settle(() => peer.registrations.length, quiet: _oneSecond);
+
+      expect(peer.registrations, hasLength(2));
+      expect(s.lists(bob.fingerprint), isTrue);
+      expect(s.find(bob.fingerprint)!.address, _host(2));
+      expect(s.emitted, hasLength(emissions));
+
+      clock.advance(const Duration(seconds: 5));
+      final info = peer.info;
+      await peer.server.close();
+      final watch = Stopwatch()..start();
+      await channel.deliver(_host(2), _bye(info));
+      await _until(
+        () => !s.lists(bob.fingerprint),
+        limit: const Duration(seconds: 4),
+      );
+      expect(watch.elapsed, lessThan(Limits.requestTimeout));
+      expect(s.emitted.last, isEmpty);
+    });
+
+    test('the real bye of a paired device whose port drops the connection '
+        'removes it within 1 s', () async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      final info = peer.info;
+      await peer.server.close();
+      final dropping = await ServerSocket.bind(_host(2), info.port);
+      addTearDown(dropping.close);
+      var dropped = 0;
+      dropping.listen((socket) {
+        dropped++;
+        socket.destroy();
+      });
+
+      await channel.deliver(_host(2), _bye(info));
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+      expect(dropped, 1);
+      expect(s.emitted.last, isEmpty);
+    });
+
+    test('a forged bye whose own port points elsewhere is checked against the '
+        'stored port, never the one in the datagram', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob, address: '127.0.0.2');
+      final knocks = await _Knocks.start([_host(2)]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      await channel.deliver(
+        _host(2),
+        _bye(_claim(bob.fingerprint, knocks.port, name: 'Forged')),
+      );
+      await _until(() => peer.registrations.length == 2);
+      await _quiet();
+
+      expect(knocks.hits, isEmpty);
+      expect(s.lists(bob.fingerprint), isTrue);
+      expect(s.find(bob.fingerprint)!.info.toJson(), peer.info.toJson());
+    });
+
+    test('the bye of a device that is not paired removes it at once without '
+        'a check, as before', () async {
+      final peer = await _Peer.start(carol, address: '127.0.0.2');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(carol.fingerprint));
+
+      await channel.deliver(_host(2), _bye(peer.info));
+      await _until(() => !s.lists(carol.fingerprint), limit: _oneSecond);
+      await _quiet();
+      expect(peer.registrations, hasLength(1));
+    });
+  });
+
+  group('C131: a poisoned cooldown does not hide a paired device (RF-44 of '
+      'the 002, SEC-05, N2)', () {
+    test('a forged hello with the fingerprint of P and a port that does not '
+        'answer fails, and the real hello of P one second later gets P listed '
+        'within 2 s', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob, address: '127.0.0.2');
+      final dead = await _Knocks.start([_host(2)]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(bob.fingerprint, dead.port, name: 'Forged')),
+      );
+      await _until(() => dead.hits['127.0.0.2'] == 1);
+      await _quiet();
+      expect(s.lists(bob.fingerprint), isFalse);
+      expect(peer.registrations, isEmpty);
+
+      clock.advance(_oneSecond);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(
+        () => s.lists(bob.fingerprint),
+        limit: const Duration(seconds: 2),
+      );
+      expect(s.find(bob.fingerprint)!.info.port, peer.port);
+      expect(peer.registrations, hasLength(1));
+    });
+
+    test('the same forged hello still cools down an unpaired device for 9 s '
+        '(R14 is not relaxed)', () async {
+      final clock = _Clock();
+      final dead = await _Knocks.start([_host(2)]);
+      final peer = await _Peer.start(carol, address: '127.0.0.2');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.service.syncInterfaces([first]);
+
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(carol.fingerprint, dead.port)),
+      );
+      await _until(() => dead.hits['127.0.0.2'] == 1);
+      await _quiet();
+      clock.advance(_oneSecond);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _quiet(_oneSecond);
+
+      expect(s.lists(carol.fingerprint), isFalse);
+      expect(peer.registrations, isEmpty);
+    });
+  });
+
   group('expiry (RF-53)', () {
     test('a device without news for 29 s stays, and past 30 s it is gone '
         'at the next tick', () async {

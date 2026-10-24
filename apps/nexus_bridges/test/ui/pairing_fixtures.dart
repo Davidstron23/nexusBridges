@@ -10,6 +10,21 @@ final String peerFingerprint = fingerprintOf(peerShort);
 const String peerName = 'Portátil de Ana';
 const String rawCode = '482913';
 const String formattedCode = '482 913';
+const String namesakeName = 'PC';
+
+NodeState pairingState({
+  PairingView? pairing,
+  List<PairingQuestion> questions = const [],
+  String? namesake,
+  List<Notice> notices = const [],
+}) {
+  return NodeState(
+    pairing: pairing,
+    pairingNamesake: namesake,
+    questions: questions,
+    notices: notices,
+  );
+}
 
 DeviceEntry entry({
   required String fingerprint,
@@ -181,6 +196,9 @@ Set<String> allowedTexts(
       s.noticeIgnoreNotSaved(n),
       s.noticePairingNotSaved(n),
       s.noticePairingFailed(n),
+      s.noticeAttemptLost(n),
+      s.noticeReplaceWithdrawn(n),
+      s.namesakeWarning(n),
     ],
   };
 }

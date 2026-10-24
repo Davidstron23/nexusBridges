@@ -55,6 +55,7 @@ abstract class AppStrings {
   String pairingRequestTitle(String name);
   String fingerprintLine(String short);
   String get alreadyPairedNote;
+  String namesakeWarning(String name);
   String get ignoreDeviceButton;
   String receiverWaiting(String name);
   String get pairingResultTitle;
@@ -84,6 +85,8 @@ abstract class AppStrings {
   String noticeAttemptCancelled(String short);
   String noticeAttemptPeerCancelled(String short);
   String noticeAttemptsCancelled(int count);
+  String noticeAttemptLost(String short);
+  String noticeReplaceWithdrawn(String name);
   String get noticePairingPaused;
   String noticeUnpairedByPeer(String name);
   String noticeUnpairNotSaved(String name);

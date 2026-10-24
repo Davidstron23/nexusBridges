@@ -153,7 +153,7 @@ final class UnpairedByPeer extends PairingEvent {
   final bool saved;
 }
 
-enum AttemptCause { commitmentMismatch, cancelledAfterReveal }
+enum AttemptCause { commitmentMismatch, cancelledAfterReveal, lostAfterReveal }
 
 final class PairingAttemptRejected extends PairingEvent {
   const PairingAttemptRejected({

@@ -81,6 +81,25 @@ final class _RawInitiator {
     return reply?.status;
   }
 
+  Future<int?> reveal() async {
+    final reply = await _post(
+      ApiPaths.pairReveal,
+      RevealRequest(
+        session: _session!,
+        nonce: nonce,
+        signature: identity.sign(
+          revealTranscript(
+            startTranscript: _startTranscript!,
+            sessionId: _session!,
+            receiverCommitment: _receiverCommitment!,
+            initiatorNonce: nonce,
+          ),
+        ),
+      ).toJson(),
+    );
+    return reply?.status;
+  }
+
   Future<int?> revealAnotherNumber() async {
     final other = randomBytes(nonceLength);
     final reply = await _post(
@@ -333,6 +352,12 @@ void main() {
       );
 
       final oldLabel = labelOf('node b', old.fingerprint);
+      expect(a.entryOf(b.fingerprint)!.possiblyReplaces, isNull);
+      a.clock = a.clock.add(Limits.replaceAfterAbsence);
+      await a.until(
+        (s) => a.entryOf(b.fingerprint)?.possiblyReplaces == oldLabel,
+        reason: 'warning once the old one is 2 minutes out of sight',
+      );
       final newcomer = a.entryOf(b.fingerprint)!;
       expect(newcomer.possiblyReplaces, oldLabel);
       expect(newcomer.displayName, labelOf('Node B', b.fingerprint));
@@ -573,6 +598,103 @@ void main() {
       expect(merged.kind, NoticeKind.attemptCancelled);
       expect(merged.deviceName, shortOf(a.fingerprint));
       b.node.dismissPairing();
+    }, timeout: _slow);
+
+    test('C124: a raw client that reveals and goes silent leaves one '
+        'attemptLost notice with count 1 and only the 8 characters; a cancel '
+        'after the reveal within 10 minutes turns it into one attemptCancelled '
+        'with count 2 and the same id', () async {
+      final (a, b) = await twoPairingNodes();
+      final raw = _RawInitiator(b);
+      expect(await raw.start(), 200);
+      expect(await raw.reveal(), 200);
+      await b.until((s) => s.pairing?.phase == PairingPhase.comparing);
+
+      b.clock = b.clock.add(const Duration(seconds: 10, milliseconds: 1));
+
+      final lost = await b.until(
+        (s) =>
+            s.pairing?.outcome == PairingOutcome.lost && s.notices.isNotEmpty,
+        reason: 'B lost with a notice',
+      );
+      final first = lost.notices.single;
+      expect(first.kind, NoticeKind.attemptLost);
+      expect(first.count, 1);
+      expect(first.deviceName, shortOf(raw.identity.fingerprint));
+      expect(first.deviceName, isNot(contains('Laptop')));
+      expect(first.canRetry, isFalse);
+      expect(a.state.notices, isEmpty);
+
+      b.clock = b.clock.add(const Duration(minutes: 9));
+      expect(await a.node.pair(b.fingerprint), PairRequestResult.started);
+      await bothComparing(a, b);
+      a.node.cancelPairing();
+
+      await b.until((s) => s.notices.single.count == 2);
+      final merged = b.state.notices.single;
+      expect(merged.id, first.id);
+      expect(merged.kind, NoticeKind.attemptCancelled);
+      expect(merged.deviceName, shortOf(a.fingerprint));
+      b.node.dismissPairing();
+    }, timeout: _slow);
+  });
+
+  group('C132, RF-83, RF-73: the namesake line data in the node (v8)', () {
+    Future<(PairingNode, PairingNode)> withNamesake() async {
+      final port = await freeTcpPort();
+      final a = await PairingNode.create('Node A', '127.0.0.1', port: port);
+      final b = await PairingNode.create('PC', '127.0.0.2', port: port);
+      final own = await a.loadIdentity();
+      await a.writePaired(own.fingerprint, [
+        pairedEntryFor(DeviceIdentity.generate(), name: 'pc'),
+      ]);
+      await a.start();
+      await b.start();
+      await meet(a, b);
+      return (a, b);
+    }
+
+    test('A, with a paired "pc", receives a request from B called "PC": '
+        'pairingNamesake is "pc" while the view lasts and null without a '
+        'view; B has no namesake', () async {
+      final (a, b) = await withNamesake();
+      expect(a.state.pairingNamesake, isNull);
+
+      expect(await b.node.pair(a.fingerprint), PairRequestResult.started);
+      await bothComparing(b, a);
+
+      expect(a.state.pairing!.role, PairingRole.receiver);
+      expect(a.state.pairingNamesake, 'pc');
+      expect(b.state.pairingNamesake, isNull);
+      expect(
+        a.states.where((s) => s.pairing != null && s.pairingNamesake != 'pc'),
+        isEmpty,
+      );
+
+      b.node.cancelPairing();
+      final ended = await a.until(
+        (s) => s.pairing?.phase == PairingPhase.finished,
+      );
+      expect(ended.pairingNamesake, 'pc');
+      a.node.dismissPairing();
+      await a.until((s) => s.pairing == null);
+      expect(a.state.pairingNamesake, isNull);
+    }, timeout: _slow);
+
+    test('A starts the pairing with B called "PC": pairingNamesake is "pc" '
+        'in A as the initiator', () async {
+      final (a, b) = await withNamesake();
+
+      expect(await a.node.pair(b.fingerprint), PairRequestResult.started);
+      await bothComparing(a, b);
+
+      expect(a.state.pairing!.role, PairingRole.initiator);
+      expect(a.state.pairingNamesake, 'pc');
+      expect(b.state.pairingNamesake, isNull);
+
+      a.node.cancelPairing();
+      await a.until((s) => s.pairing == null);
+      expect(a.state.pairingNamesake, isNull);
     }, timeout: _slow);
   });
 
@@ -833,16 +955,26 @@ void main() {
       expect(entry.canPair, isFalse);
     }, timeout: _slow);
 
-    test('a paired device that says bye keeps its row, not visible, with the '
-        'last saved name and no type', () async {
+    test('a forged bye from the address of a live paired device does not '
+        'hide it; once it really leaves, its bye keeps its row, not visible, '
+        'with the last saved name and no type', () async {
       final (a, b) = await twoPairingNodes();
       await pairUp(a, b);
+      final fingerprintOfB = b.fingerprint;
 
       await sayBye(b, a);
+      await Future<void>.delayed(const Duration(seconds: 1));
+      expect(a.sees(b), isTrue);
+      expect(a.entryOf(fingerprintOfB)!.visible, isTrue);
+
+      await b.node.shutdown();
+      a.clock = a.clock.add(Limits.goodbyeCheckInterval);
+      await sayByeAs(b, a, fingerprint: fingerprintOfB);
 
       final state = await a.until(
         (s) =>
-            s.entries.any((e) => e.fingerprint == b.fingerprint && !e.visible),
+            s.entries.any((e) => e.fingerprint == fingerprintOfB && !e.visible),
+        limit: const Duration(seconds: 10),
       );
       final row = state.entries.single;
       expect(row.paired, isTrue);

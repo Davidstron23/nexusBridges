@@ -175,17 +175,103 @@ void main() {
       expectRejected(await freshStart(fixture, 9));
     });
 
-    test('cancels with reason expired after the reveal do not count', () async {
-      final fixture = await receiver();
+    test('genuine expiries after the reveal (cancel with reason expired 50 s '
+        'or more after the presentation) do not count', () async {
+      final fixture = await ReceiverFixture.start(identity: r, ticking: false);
       for (var n = 0; n < 4; n++) {
         final initiator = fixture.initiator(peer(n), from: origin(n));
         await initiator.begin();
+        fixture.advance(Limits.pairingPeerExpiryAfter);
         expectState(await initiator.cancel(CancelReason.expired), 'expired');
       }
 
       await startAndLeave(fixture, 4);
       await settle();
       expect(fixture.events, isEmpty);
+    });
+
+    test('C121: three origins that cancel with reason expired right after the '
+        'reveal count as three cancels after the reveal and pause every '
+        'origin, and the receiver never shows them as expired', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      final outcomes = <PairingOutcome?>[];
+      for (var n = 0; n < 3; n++) {
+        final initiator = fixture.initiator(peer(n), from: origin(n));
+        await initiator.begin();
+        expectState(
+          await initiator.cancel(CancelReason.expired),
+          'cancelled',
+          reason: 'origin $n',
+        );
+        outcomes.add(fixture.view?.outcome);
+      }
+
+      await eventually(() => fixture.events.length == 4);
+      expect(fixture.events.map(summary), [
+        'rejected cancelledAfterReveal',
+        'rejected cancelledAfterReveal',
+        'rejected cancelledAfterReveal',
+        'paused ${first.add(Limits.pairingGlobalWindow)}',
+      ]);
+      expect(
+        fixture.events.whereType<PairingAttemptRejected>().map(
+          (e) => e.fingerprint,
+        ),
+        [for (var n = 0; n < 3; n++) peer(n).fingerprint],
+      );
+      expect(outcomes, List.filled(3, PairingOutcome.cancelledByPeer));
+      expect(
+        fixture.views.where((v) => v?.outcome == PairingOutcome.expired),
+        isEmpty,
+      );
+      expectPaused(await freshStart(fixture, 3));
+    });
+
+    test('C121: three immediate expired cancels from one origin, 10 minutes '
+        'apart so that the global pause never starts, block that origin with '
+        'the generic 403 (RF-104)', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      for (var i = 0; i < 3; i++) {
+        fixture.now = first.add(Limits.pairingGlobalWindow * i);
+        final initiator = fixture.initiator(peer(i), from: origin(0));
+        await initiator.begin();
+        expectState(await initiator.cancel(CancelReason.expired), 'cancelled');
+      }
+
+      expectRejected(await freshStart(fixture, 0));
+      await startAndLeave(fixture, 1);
+      await eventually(() => fixture.events.length == 3);
+      await settle();
+      expect(fixture.events.map(summary), [
+        for (var i = 0; i < 3; i++) 'rejected cancelledAfterReveal',
+      ]);
+    });
+
+    test('C123: three origins that go silent after the reveal end in lost, '
+        'emit lostAfterReveal and pause every origin', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      for (var n = 0; n < 3; n++) {
+        await fixture.initiator(peer(n), from: origin(n)).begin();
+        fixture.advance(const Duration(seconds: 10, milliseconds: 1));
+        await eventually(
+          () => fixture.view?.outcome == PairingOutcome.lost,
+          reason: 'origin $n lost',
+        );
+        expect(fixture.coordinator.busy, isFalse);
+      }
+
+      await eventually(() => fixture.events.length == 4);
+      final lostAt = first.add(const Duration(seconds: 10, milliseconds: 1));
+      expect(fixture.events.map(summary), [
+        'rejected lostAfterReveal',
+        'rejected lostAfterReveal',
+        'rejected lostAfterReveal',
+        'paused ${lostAt.add(Limits.pairingGlobalWindow)}',
+      ]);
+      expectPaused(await freshStart(fixture, 3));
     });
 
     test('cancels before the reveal do not count', () async {
@@ -354,11 +440,12 @@ void main() {
       await startAndLeave(fixture, 2);
     });
 
-    test('a cancel with reason expired or before the reveal emits '
+    test('a genuine expiry (50 s or more) or a cancel before the reveal emits '
         'nothing', () async {
-      final fixture = await receiver();
+      final fixture = await ReceiverFixture.start(identity: r, ticking: false);
       final expired = fixture.initiator(peers[0], from: origin(0));
       await expired.begin();
+      fixture.advance(const Duration(seconds: 55));
       expectState(await expired.cancel(CancelReason.expired), 'expired');
       final early = fixture.initiator(peers[1], from: origin(1));
       expect((await early.start())!.status, 200);

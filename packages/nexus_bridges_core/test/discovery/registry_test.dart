@@ -290,6 +290,113 @@ void main() {
     });
   });
 
+  group('C128: the goodbye of a paired device is verified (RF-52 of the 002, '
+      'RF-111, N2)', () {
+    test('a bye from the known address of a paired device asks to verify it '
+        'with the stored info, address and interface, and leaves the entry '
+        'untouched', () {
+      paired.add(_fingerprint(1));
+      verified(_info(1, name: 'Laptop', port: 40001), '192.168.1.10', 'wifi');
+      final before = deviceOf(1);
+      at(const Duration(seconds: 3));
+
+      final action = registry.onAnnouncement(
+        _bye(_info(1, name: 'Forged', port: 9)),
+        _ip('192.168.1.10'),
+        'other',
+      );
+
+      expect(
+        action,
+        isA<VerifyGoodbye>()
+            .having((v) => v.info.name, 'name', 'Laptop')
+            .having((v) => v.info.port, 'port', 40001)
+            .having((v) => v.info.fingerprint, 'fingerprint', _fingerprint(1))
+            .having((v) => v.address.address, 'address', '192.168.1.10')
+            .having((v) => v.interfaceId, 'interfaceId', 'wifi'),
+      );
+      final after = deviceOf(1);
+      expect(after.info.name, 'Laptop');
+      expect(after.info.port, 40001);
+      expect(after.lastSeen, before.lastSeen);
+      expect(after.interfaceId, 'wifi');
+    });
+
+    test('the bye of a device that is not paired removes it at once, as '
+        'before', () {
+      paired.add(_fingerprint(2));
+      verified(_info(1), '192.168.1.10');
+
+      final action = registry.onAnnouncement(
+        _bye(_info(1)),
+        _ip('192.168.1.10'),
+        'eth',
+      );
+
+      expect(action, isA<Refreshed>());
+      expect(listed(), isEmpty);
+    });
+
+    test('the bye of a paired device from another address is ignored', () {
+      paired.add(_fingerprint(1));
+      verified(_info(1), '192.168.1.10');
+
+      final action = registry.onAnnouncement(
+        _bye(_info(1)),
+        _ip('192.168.1.66'),
+        'eth',
+      );
+
+      expect(action, isA<Ignore>());
+      expect(listed(), [_fingerprint(1)]);
+    });
+
+    test('onGoodbyeFailed removes the entry only while it is still at that '
+        'address', () {
+      paired.add(_fingerprint(1));
+      paired.add(_fingerprint(2));
+      verified(_info(1), '192.168.1.10');
+      verified(_info(2), '192.168.1.20');
+
+      expect(
+        registry.onGoodbyeFailed(_fingerprint(1), _ip('192.168.1.10')),
+        isTrue,
+      );
+      expect(listed(), [_fingerprint(2)]);
+
+      verified(_info(2), '192.168.1.30');
+      expect(
+        registry.onGoodbyeFailed(_fingerprint(2), _ip('192.168.1.20')),
+        isFalse,
+      );
+      expect(deviceOf(2).address.address, '192.168.1.30');
+      expect(
+        registry.onGoodbyeFailed(_fingerprint(3), _ip('192.168.1.10')),
+        isFalse,
+      );
+      expect(
+        registry.onGoodbyeFailed(_fingerprint(1), _ip('192.168.1.10')),
+        isFalse,
+      );
+    });
+
+    test('a device removed by a failed goodbye needs a new verification to '
+        'come back', () {
+      paired.add(_fingerprint(1));
+      verified(_info(1), '192.168.1.10');
+      registry.onGoodbyeFailed(_fingerprint(1), _ip('192.168.1.10'));
+
+      final action = registry.onAnnouncement(
+        _hello(_info(1)),
+        _ip('192.168.1.10'),
+        'eth',
+      );
+
+      expect(action, isA<Verify>());
+      expect(listed(), isEmpty);
+    });
+  });
+
   group('expiry (RF-53)', () {
     test('a device last heard 29 s ago stays', () {
       verified(_info(1));

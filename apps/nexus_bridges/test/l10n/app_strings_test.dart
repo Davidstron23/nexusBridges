@@ -93,6 +93,9 @@ final Map<String, _Text> _texts = {
   'noticeIgnoreNotSaved': (s) => s.noticeIgnoreNotSaved(_sampleName),
   'noticePairingNotSaved': (s) => s.noticePairingNotSaved(_sampleName),
   'noticePairingFailed': (s) => s.noticePairingFailed(_sampleName),
+  'namesakeWarning': (s) => s.namesakeWarning(_sampleName),
+  'noticeAttemptLost': (s) => s.noticeAttemptLost(_sampleShort),
+  'noticeReplaceWithdrawn': (s) => s.noticeReplaceWithdrawn(_sampleOldName),
 };
 
 const String _sampleShort = 'ABCD1234';
@@ -123,15 +126,21 @@ const Set<String> _withName = {
   'noticeIgnoreNotSaved',
   'noticePairingNotSaved',
   'noticePairingFailed',
+  'namesakeWarning',
 };
 
 const Set<String> _withShort = {
   'fingerprintLine',
   'noticeAttemptCancelled',
   'noticeAttemptPeerCancelled',
+  'noticeAttemptLost',
 };
 
-const Set<String> _withOldName = {'replaceTitle', 'replaceBody'};
+const Set<String> _withOldName = {
+  'replaceTitle',
+  'replaceBody',
+  'noticeReplaceWithdrawn',
+};
 
 const Set<String> _meaningOnly = {
   'noticeAttemptCancelled',
@@ -320,6 +329,21 @@ final Map<String, (String, String)> _expectedPairing = {
     '$_sampleName queda ignorado hasta que cierres la app, pero no se ha '
         'podido guardar y no se recordará.',
   ),
+  'namesakeWarning': (
+    'You already have a paired device called $_sampleName with a different '
+        'fingerprint.',
+    'Ya tienes vinculado un equipo llamado $_sampleName con otra huella.',
+  ),
+  'noticeAttemptLost': (
+    'The device with fingerprint $_sampleShort stopped responding after '
+        'seeing the pairing code.',
+    'El equipo con huella $_sampleShort dejó de responder después de ver el '
+        'código de vinculación.',
+  ),
+  'noticeReplaceWithdrawn': (
+    '$_sampleOldName showed up again, so it was not replaced.',
+    '$_sampleOldName ha vuelto a aparecer, así que no se ha sustituido.',
+  ),
 };
 
 final Map<String, (String, String)> _expected = {
@@ -382,8 +406,8 @@ void main() {
   final spanish = AppStringsEs();
 
   group('RF-62: every text exists in both languages', () {
-    test('the table covers the 81 texts of the plans of 001, 002 and 003', () {
-      expect(_texts.length, 81);
+    test('the table covers the 84 texts of the plans of 001, 002 and 003', () {
+      expect(_texts.length, 84);
       expect(
         _expected.keys.toSet().intersection(_expectedPairing.keys.toSet()),
         isEmpty,
@@ -558,6 +582,49 @@ void main() {
         expect(
           strings.noticePairingPaused,
           isNot(strings.noticeAttemptsCancelled(3)),
+        );
+      });
+
+      test('C136: namesakeWarning changes with the name and is not the '
+          'possible reinstall warning ($language)', () {
+        expect(strings.namesakeWarning(odd), contains(odd));
+        expect(
+          strings.namesakeWarning('A'),
+          isNot(strings.namesakeWarning('B')),
+        );
+        expect(
+          strings.namesakeWarning(_sampleName),
+          isNot(strings.possibleReinstall(_sampleName)),
+        );
+      });
+
+      test('C136: noticeAttemptLost changes with the short fingerprint and '
+          'differs from the cancelled notices and the lost outcome '
+          '($language)', () {
+        final lost = strings.noticeAttemptLost(_sampleShort);
+        expect(
+          strings.noticeAttemptLost('X1'),
+          isNot(strings.noticeAttemptLost('X2')),
+        );
+        for (final other in [
+          strings.noticeAttemptPeerCancelled(_sampleShort),
+          strings.noticeAttemptCancelled(_sampleShort),
+          strings.outcomeLost(_sampleShort),
+        ]) {
+          expect(lost, isNot(other));
+        }
+      });
+
+      test('C136: noticeReplaceWithdrawn changes with the name and differs '
+          'from the replace question ($language)', () {
+        expect(strings.noticeReplaceWithdrawn(odd), contains(odd));
+        expect(
+          strings.noticeReplaceWithdrawn('A'),
+          isNot(strings.noticeReplaceWithdrawn('B')),
+        );
+        expect(
+          strings.noticeReplaceWithdrawn(_sampleOldName),
+          isNot(strings.replaceTitle(_sampleOldName)),
         );
       });
 

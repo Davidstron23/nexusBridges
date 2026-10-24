@@ -57,15 +57,21 @@ Future<bool> _tcpFree(String address, int port) async {
   }
 }
 
-Future<int> freeTcpPort() async {
+Future<int> freeTcpPort({
+  List<String> hosts = const ['127.0.0.1', '127.0.0.2'],
+}) async {
   for (var attempt = 0; attempt < 100; attempt++) {
     final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
     final port = probe.port;
     await probe.close();
-    if (await _tcpFree('127.0.0.1', port) &&
-        await _tcpFree('127.0.0.2', port)) {
-      return port;
+    var free = true;
+    for (final host in hosts) {
+      if (!await _tcpFree(host, port)) {
+        free = false;
+        break;
+      }
     }
+    if (free) return port;
   }
   throw StateError('no free port');
 }
@@ -100,7 +106,7 @@ String shortOf(String fingerprint) => fingerprint.substring(0, 8);
 String labelOf(String name, String fingerprint) =>
     '$name $dot ${shortOf(fingerprint)}';
 
-AdapterInfo _wifi() => AdapterInfo(
+AdapterInfo wifiAdapter() => AdapterInfo(
   id: _adapterId,
   friendlyName: 'Wi-Fi',
   description: 'Test wireless adapter',
@@ -152,6 +158,8 @@ final class PairingNode {
   final List<String> logs = [];
   final List<NodeState> states = [];
   DateTime clock = DateTime.utc(2026, 10, 24, 12);
+  List<AdapterInfo> adapters = [wifiAdapter()];
+  int prefixLength = _prefixLength;
   NexusNode? _node;
 
   static Future<PairingNode> create(
@@ -212,6 +220,7 @@ final class PairingNode {
   Future<NexusNode> start({
     Duration pollHold = shortHold,
     Duration tick = const Duration(milliseconds: 50),
+    Duration pollInterval = const Duration(minutes: 1),
   }) async {
     final loopback = await _systemLoopbackName();
     final channel = MulticastChannel(port: channelPort, log: logs.add);
@@ -219,7 +228,7 @@ final class PairingNode {
     final started = await NexusNode.start(
       dataDir: dataDir,
       protector: XorProtector(),
-      readNetworks: () async => [_wifi()],
+      readNetworks: () async => adapters,
       port: port,
       deviceName: name,
       now: now,
@@ -231,10 +240,10 @@ final class PairingNode {
               id: '${state.adapter.id}#$address',
               adapterId: state.adapter.id,
               friendlyName: loopback,
-              subnet: Ipv4Subnet(InternetAddress(address), _prefixLength),
+              subnet: Ipv4Subnet(InternetAddress(address), prefixLength),
             ),
       ],
-      pollInterval: const Duration(minutes: 1),
+      pollInterval: pollInterval,
       channel: channel,
       pairingTickInterval: tick,
       pairingPollHold: pollHold,
@@ -345,7 +354,14 @@ Future<void> pairUp(PairingNode initiator, PairingNode receiver) async {
   );
 }
 
-Future<void> sayBye(PairingNode from, PairingNode to) async {
+Future<void> sayBye(PairingNode from, PairingNode to) =>
+    sayByeAs(from, to, fingerprint: from.fingerprint);
+
+Future<void> sayByeAs(
+  PairingNode from,
+  PairingNode to, {
+  required String fingerprint,
+}) async {
   final socket = await RawDatagramSocket.bind(
     from.internetAddress,
     0,
@@ -356,7 +372,7 @@ Future<void> sayBye(PairingNode from, PairingNode to) async {
     AnnouncementKind.bye,
     DeviceInfo(
       name: from.name,
-      fingerprint: from.fingerprint,
+      fingerprint: fingerprint,
       port: from.port,
       protocol: protocolVersion,
       deviceType: DeviceType.desktop,

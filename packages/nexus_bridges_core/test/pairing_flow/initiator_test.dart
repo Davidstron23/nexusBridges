@@ -402,12 +402,18 @@ void main() {
       },
     );
 
-    test('only the initiator clock moves: the receiver gets cancel with reason expired', () async {
+    test('only the initiator clock reaches 60 s: the receiver, 55 s into the '
+        'session, gets cancel with reason expired and ends in expired without '
+        'counting it', () async {
       final (a, b) = await twoStacks(
         clockA: StackClock(),
         clockB: StackClock(),
+        pollHoldB: const Duration(seconds: 6),
       );
       await begin(a, b);
+      await waitUntil(() => b.handledOn(ApiPaths.pairWait) >= 1);
+      await pause();
+      b.clock.advance(const Duration(seconds: 55));
       a.clock.advance(const Duration(seconds: 61));
       await outcomeOf(a, PairingOutcome.expired);
       await outcomeOf(b, PairingOutcome.expired);
@@ -417,6 +423,29 @@ void main() {
         containsPair('reason', 'expired'),
       );
       expect(b.paired.devices, isEmpty);
+      expect(b.events.whereType<PairingAttemptRejected>(), isEmpty);
+    });
+
+    test('an initiator whose clock reaches 60 s while the receiver is only '
+        'a few seconds in: the receiver counts it as a cancel after the '
+        'reveal (N1)', () async {
+      final (a, b) = await twoStacks(
+        clockA: StackClock(),
+        clockB: StackClock(),
+      );
+      await begin(a, b);
+      a.clock.advance(const Duration(seconds: 61));
+      await outcomeOf(a, PairingOutcome.expired);
+      await outcomeOf(b, PairingOutcome.cancelledByPeer);
+      expect(
+        b.calls[ApiPaths.pairCancel]!.single.json,
+        containsPair('reason', 'expired'),
+      );
+      await waitUntil(() => b.events.isNotEmpty);
+      expect(
+        b.events.whereType<PairingAttemptRejected>().single.cause,
+        AttemptCause.cancelledAfterReveal,
+      );
     });
 
     test('59 s are not enough to expire', () async {
