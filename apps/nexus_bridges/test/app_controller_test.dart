@@ -18,11 +18,19 @@ final class _XorProtector implements SecretProtector {
 }
 
 Future<int> _freePort() async {
-  for (var attempt = 0; attempt < 20; attempt++) {
-    final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final port = probe.port;
-    await probe.close();
-    if (await _udpPortFree(port)) return port;
+  for (var attempt = 0; attempt < 600; attempt++) {
+    try {
+      final udp = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        0,
+        reuseAddress: false,
+      );
+      final port = udp.port;
+      udp.close();
+      if (await _tcpPortFree(port)) return port;
+    } on SocketException {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
   }
   throw StateError('no free port');
 }
@@ -35,6 +43,16 @@ Future<bool> _udpPortFree(int port) async {
       reuseAddress: false,
     );
     socket.close();
+    return true;
+  } on SocketException {
+    return false;
+  }
+}
+
+Future<bool> _tcpPortFree(int port) async {
+  try {
+    final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    await socket.close();
     return true;
   } on SocketException {
     return false;
