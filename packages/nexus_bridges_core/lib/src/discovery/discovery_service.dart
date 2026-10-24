@@ -26,7 +26,9 @@ final class DiscoveryService {
     required this._verifier,
     required this._scanner,
     this._now = DateTime.now,
+    this._monotonic = monotonicClock,
     this._announceInterval = Limits.announceInterval,
+    this._presentInterval = Limits.announceInterval,
     this._expireInterval = const Duration(seconds: 1),
     this._log = _noLog,
   });
@@ -38,7 +40,9 @@ final class DiscoveryService {
   final DeviceVerifier _verifier;
   final SubnetScanner _scanner;
   final DateTime Function() _now;
+  final Duration Function() _monotonic;
   final Duration _announceInterval;
+  final Duration _presentInterval;
   final Duration _expireInterval;
   final void Function(String) _log;
 
@@ -46,6 +50,7 @@ final class DiscoveryService {
     selfFingerprint: _identity.fingerprint,
     isPaired: _paired.isPaired,
     now: _now,
+    clock: _monotonic,
   );
   late final VerificationGate _gate = VerificationGate(now: _now);
 
@@ -53,6 +58,7 @@ final class DiscoveryService {
   final Map<String, ActiveInterface> _active = {};
   final Map<String, AbortSignal> _aborts = {};
   final Map<String, DateTime> _lastReplies = {};
+  final Set<String> _presenting = {};
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
 
@@ -60,6 +66,7 @@ final class DiscoveryService {
   _incomingSubscription;
   StreamSubscription<void>? _pairedSubscription;
   Timer? _announceTimer;
+  Timer? _presentTimer;
   Timer? _expireTimer;
   Future<void>? _stopping;
   bool _started = false;
@@ -78,6 +85,10 @@ final class DiscoveryService {
       onError: (Object e) => _log('incoming failed: ${e.runtimeType}'),
     );
     _announceTimer = Timer.periodic(_announceInterval, (_) => announceNow());
+    _presentTimer = Timer.periodic(
+      _presentInterval,
+      (_) => _presentToScanned(),
+    );
     _expireTimer = Timer.periodic(_expireInterval, (_) => _expire());
     _pairedSubscription = _paired.changes.listen(
       (_) => _emitIfChanged(),
@@ -149,7 +160,9 @@ final class DiscoveryService {
       )) {
         final signal = signals[iface.id];
         if (_stopped || signal == null || signal.aborted) continue;
-        if (_registry.onVerified(info, address, iface.id)) _emitIfChanged();
+        if (_registry.onVerified(info, address, iface.id, fromScan: true)) {
+          _emitIfChanged();
+        }
       }
     } catch (e) {
       _log('rescan failed: ${e.runtimeType}');
@@ -173,8 +186,10 @@ final class DiscoveryService {
     _gate.clear();
     _lastReplies.clear();
     _announceTimer?.cancel();
+    _presentTimer?.cancel();
     _expireTimer?.cancel();
     _announceTimer = null;
+    _presentTimer = null;
     _expireTimer = null;
     final incoming = _incomingSubscription;
     final paired = _pairedSubscription;
@@ -267,6 +282,55 @@ final class DiscoveryService {
       return;
     }
     _gate.markFailed(info.fingerprint, address.address, reverse: reverse);
+  }
+
+  void _presentToScanned() {
+    if (_stopped) return;
+    try {
+      for (final device in _registry.dueForPresentation(_announceInterval)) {
+        final fingerprint = device.info.fingerprint;
+        final abort = _aborts[device.interfaceId];
+        if (_presenting.contains(fingerprint) ||
+            abort == null ||
+            !_active.containsKey(device.interfaceId)) {
+          continue;
+        }
+        _presenting.add(fingerprint);
+        unawaited(_present(device, abort));
+      }
+    } catch (e) {
+      _log('presentation failed: ${e.runtimeType}');
+    }
+  }
+
+  Future<void> _present(DiscoveredDevice device, AbortSignal abort) async {
+    final fingerprint = device.info.fingerprint;
+    try {
+      final verified = await _verifier.register(
+        address: device.address,
+        port: device.info.port,
+        expectedFingerprint: fingerprint,
+        self: _selfInfo(),
+        abort: abort,
+      );
+      if (_stopped || abort.aborted) return;
+      if (verified != null &&
+          verified.fingerprint == fingerprint &&
+          _active.containsKey(device.interfaceId)) {
+        if (_registry.onVerified(
+          verified,
+          device.address,
+          device.interfaceId,
+          fromScan: true,
+        )) {
+          _emitIfChanged();
+        }
+      }
+    } catch (e) {
+      _log('presentation failed: ${e.runtimeType}');
+    } finally {
+      _presenting.remove(fingerprint);
+    }
   }
 
   void _send(AnnouncementKind kind, ActiveInterface iface) {

@@ -61,6 +61,8 @@ final class NexusNode {
     required this._port,
     required this._deviceName,
     required this._now,
+    required this._monotonic,
+    required this._presentInterval,
     required this._log,
     required this._pollInterval,
     required this._injectedChannel,
@@ -76,6 +78,8 @@ final class NexusNode {
     int port = defaultPort,
     String? deviceName,
     DateTime Function() now = DateTime.now,
+    Duration Function() monotonic = monotonicClock,
+    Duration presentInterval = Limits.announceInterval,
     void Function(String) log = _noLog,
     List<ActiveInterface> Function(List<InterfaceState>) activeOf =
         activeInterfaces,
@@ -91,6 +95,8 @@ final class NexusNode {
       port: port,
       deviceName: _resolveDeviceName(deviceName),
       now: now,
+      monotonic: monotonic,
+      presentInterval: presentInterval,
       log: log,
       pollInterval: pollInterval,
       injectedChannel: channel,
@@ -114,6 +120,8 @@ final class NexusNode {
   final int _port;
   final String _deviceName;
   final DateTime Function() _now;
+  final Duration Function() _monotonic;
+  final Duration _presentInterval;
   final void Function(String) _log;
   final Duration _pollInterval;
   final MulticastChannel? _injectedChannel;
@@ -139,6 +147,7 @@ final class NexusNode {
   List<DiscoveredDevice> _devices = const [];
   Map<String, String> _displayNames = const {};
   bool _suggestRescan = false;
+  bool _scanning = false;
   DateTime? _emptySince;
   List<NetworkPrompt> _prompts = const [];
   List<NetworkPrompt> _pausedNetworks = const [];
@@ -387,6 +396,8 @@ final class NexusNode {
   }
 
   Future<void> _rescan() async {
+    _scanning = true;
+    _emit();
     try {
       Future<void>? scan;
       await _exclusive(() async {
@@ -398,6 +409,8 @@ final class NexusNode {
       _log('rescan failed: ${e.runtimeType}');
     } finally {
       _rescanning = null;
+      _scanning = false;
+      _emit();
     }
   }
 
@@ -513,6 +526,8 @@ final class NexusNode {
       verifier: verifier,
       scanner: scanner,
       now: _now,
+      monotonic: _monotonic,
+      presentInterval: _presentInterval,
       log: _log,
     );
     final scheduler = PeerCheckScheduler(now: _now);
@@ -1231,6 +1246,7 @@ final class NexusNode {
       unsavedChanges:
           (_paired?.hasUnsavedChanges ?? false) ||
           (_ignored?.hasUnsavedChanges ?? false),
+      scanning: _scanning,
     );
     _state = next;
     final last = _lastEmitted;
@@ -1250,6 +1266,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.deviceName == b.deviceName &&
       a.fingerprint == b.fingerprint &&
       a.unsavedChanges == b.unsavedChanges &&
+      a.scanning == b.scanning &&
       a.pairing == b.pairing &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&
       _sameList(a.questions, b.questions, (x, y) => x == y) &&
