@@ -273,14 +273,6 @@ void main() {
     });
   });
 
-  group('shortFingerprint', () {
-    test('the first 8 characters, and a shorter text as it is', () {
-      expect(shortFingerprint(_fingerprint('1A2B3C4D')), '1A2B3C4D');
-      expect(shortFingerprint('ABC'), 'ABC');
-      expect(shortFingerprint('12345678'), '12345678');
-    });
-  });
-
   group('shouldSuggestRescan (RF-55)', () {
     bool suggest({
       bool anyActive = true,

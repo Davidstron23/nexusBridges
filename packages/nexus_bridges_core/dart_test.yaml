@@ -1,2 +1,4 @@
 tags:
   slow:
+  large:
+    skip: "dart test --run-skipped -t large"

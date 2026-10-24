@@ -145,6 +145,15 @@ void main() {
       expect(root['src/node/node.dart'], isNull);
     });
 
+    test('the root library shows only the language helpers of settings', () {
+      final root = _exportsOf(_read('lib/nexus_bridges_core.dart'));
+
+      expect(root['src/settings/settings.dart'], {
+        'resolveLanguage',
+        'loadLanguage',
+      });
+    });
+
     test('from discovery it only shows DiscoveredDevice', () {
       expect(exports['../discovery/discovery.dart'], {'DiscoveredDevice'});
     });
@@ -206,4 +215,62 @@ void main() {
       expect(_exportsOf(_read('lib/src/node/node_state.dart')), isEmpty);
     });
   });
+
+  group(
+    'E174: exports and boundaries of the spec 004 (v2, points 24 and 34)',
+    () {
+      final definesShortFingerprint = RegExp(
+        r'^\s*String\s+shortFingerprint\s*\(',
+        multiLine: true,
+      );
+
+      test('the root library does not expose SettingsStore nor the receive '
+          'folder', () {
+        final root = _exportsOf(_read('lib/nexus_bridges_core.dart'));
+        final shown = root['src/settings/settings.dart'];
+
+        expect(shown, isNotNull);
+        expect(shown, isNot(contains('SettingsStore')));
+        expect(
+          shown!.where((name) => name.toLowerCase().contains('receive')),
+          isEmpty,
+        );
+        expect(root.keys.where((uri) => uri.contains('transfer')), isEmpty);
+      });
+
+      test('shortFingerprint is defined in identity', () {
+        expect(
+          definesShortFingerprint.hasMatch(
+            _read('lib/src/identity/identity.dart'),
+          ),
+          isTrue,
+        );
+      });
+
+      test('discovery no longer defines nor exports shortFingerprint', () {
+        final folder = Directory(
+          'lib/src/discovery'.replaceAll('/', Platform.pathSeparator),
+        );
+        for (final file in folder.listSync().whereType<File>()) {
+          expect(
+            definesShortFingerprint.hasMatch(file.readAsStringSync()),
+            isFalse,
+            reason: file.path,
+          );
+        }
+        final discovery = _exportsOf(_read('lib/src/discovery/discovery.dart'));
+        for (final MapEntry(:key, :value) in discovery.entries) {
+          expect(value, isNotNull, reason: key);
+          expect(value, isNot(contains('shortFingerprint')), reason: key);
+        }
+      });
+
+      test('presentation.dart takes shortFingerprint from identity', () {
+        expect(
+          _read('lib/src/discovery/presentation.dart'),
+          contains("import '../identity/identity.dart'"),
+        );
+      });
+    },
+  );
 }

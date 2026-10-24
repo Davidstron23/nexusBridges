@@ -21,6 +21,7 @@ const Map<String, Set<String>> allowedImports = {
     'transport',
   },
   'transfer': {
+    'storage',
     'identity',
     'network',
     'pairing',
@@ -170,6 +171,22 @@ void main() {
     test('respects the module boundaries', () {
       expect(findViolations(files), isEmpty);
     });
+  });
+
+  test('E174: transfer may use storage and the modules of the plan, and the '
+      'node may use transfer', () {
+    expect(allowedImports['transfer'], {
+      'storage',
+      'identity',
+      'network',
+      'pairing',
+      'protocol',
+      'server',
+      'transport',
+    });
+    expect(allowedImports['node'], contains('transfer'));
+    expect(allowedImports['storage'], isEmpty);
+    expect(allowedImports['protocol'], isEmpty);
   });
 
   test('the module table has no cycles', () {
