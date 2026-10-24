@@ -3,7 +3,7 @@ import 'registry.dart';
 
 const int _shortFingerprintLength = 8;
 
-String _shortFingerprint(String fingerprint) =>
+String shortFingerprint(String fingerprint) =>
     fingerprint.length > _shortFingerprintLength
     ? fingerprint.substring(0, _shortFingerprintLength)
     : fingerprint;
@@ -16,23 +16,29 @@ String _similarityKey(String name) =>
     name.toLowerCase().replaceAll(_unicodeSpaces, ' ').trim();
 
 Map<String, String> displayNames(List<DiscoveredDevice> devices) {
+  return displayNamesFor([
+    for (final device in devices) (device.info.fingerprint, device.info.name),
+  ]);
+}
+
+Map<String, String> displayNamesFor(
+  List<(String fingerprint, String? name)> devices,
+) {
   final uses = <String, int>{};
-  for (final device in devices) {
-    final name = device.info.name;
+  for (final (_, name) in devices) {
     if (name != null) {
       final key = _similarityKey(name);
       uses[key] = (uses[key] ?? 0) + 1;
     }
   }
   return {
-    for (final device in devices)
-      device.info.fingerprint: _displayNameOf(device.info, uses),
+    for (final (fingerprint, name) in devices)
+      fingerprint: _displayNameOf(fingerprint, name, uses),
   };
 }
 
-String _displayNameOf(DeviceInfo info, Map<String, int> uses) {
-  final short = _shortFingerprint(info.fingerprint);
-  final name = info.name;
+String _displayNameOf(String fingerprint, String? name, Map<String, int> uses) {
+  final short = shortFingerprint(fingerprint);
   if (name == null) return short;
   return (uses[_similarityKey(name)] ?? 0) > 1 ? '$name · $short' : name;
 }

@@ -26,6 +26,71 @@ abstract class AppStrings {
   String get retryButton;
   String get decisionNotSaved;
   String get closeButton;
+
+  String get pairButton;
+  String get unpairButton;
+  String get moreOptions;
+  String get notVisibleLabel;
+  String get pairedMineLabel;
+  String get pairedForeignLabel;
+  String get markAsMine;
+  String get markAsForeign;
+  String get ignoredLabel;
+  String get unignoreButton;
+  String get mismatchWarning;
+  String get removeButton;
+  String get pairAgainButton;
+  String possibleReinstall(String oldName);
+  String get pairingAlreadyInProgress;
+  String get tooManyPaired;
+  String get pairUnavailable;
+
+  String pairingWithTitle(String name);
+  String connectingTo(String name);
+  String compareCode(String name);
+  String get matchesButton;
+  String get doesNotMatchButton;
+  String get cancelButton;
+  String waitingForPeer(String name);
+  String pairingRequestTitle(String name);
+  String fingerprintLine(String short);
+  String get alreadyPairedNote;
+  String get ignoreDeviceButton;
+  String receiverWaiting(String name);
+  String get pairingResultTitle;
+
+  String outcomePaired(String name);
+  String outcomeRejected(String name);
+  String outcomeBusy(String name);
+  String outcomePaused(String name);
+  String outcomeCancelledByPeer(String name);
+  String get outcomeExpired;
+  String outcomeLost(String name);
+  String get outcomeNetworkChanged;
+  String outcomeFailed(String name);
+  String get outcomeNotSaved;
+
+  String replaceTitle(String oldName);
+  String replaceBody(String newName, String oldName);
+  String get replaceButton;
+  String get keepBothButton;
+  String mineTitle(String name);
+  String get mineBody;
+  String get mineYesButton;
+  String get mineNoButton;
+  String unpairTitle(String name);
+  String unpairBody(String name);
+
+  String noticeAttemptCancelled(String short);
+  String noticeAttemptPeerCancelled(String short);
+  String noticeAttemptsCancelled(int count);
+  String get noticePairingPaused;
+  String noticeUnpairedByPeer(String name);
+  String noticeUnpairNotSaved(String name);
+  String get noticeChangeNotSaved;
+  String noticeIgnoreNotSaved(String name);
+  String noticePairingNotSaved(String who);
+  String noticePairingFailed(String who);
 }
 
 AppStrings stringsFor(String languageCode) {

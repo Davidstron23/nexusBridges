@@ -19,6 +19,7 @@ import 'receiver_harness.dart';
 final Uint8List rejectedBody = utf8.encode('{"error":"rejected"}');
 final Uint8List notFoundBody = utf8.encode('{"error":"not_found"}');
 final Uint8List busyBody = utf8.encode('{"error":"busy"}');
+final Uint8List pausedBody = utf8.encode('{"error":"paused"}');
 
 void main() {
   late DeviceIdentity r;
@@ -58,6 +59,12 @@ void main() {
     expect(reply, isNotNull, reason: reason);
     expect(reply!.status, 403, reason: reason);
     expect(reply.body, rejectedBody, reason: reason);
+  }
+
+  void expectPaused(RawReply? reply, {String reason = ''}) {
+    expect(reply, isNotNull, reason: reason);
+    expect(reply!.status, 429, reason: reason);
+    expect(reply.body, pausedBody, reason: reason);
   }
 
   void expectNotFound(RawReply? reply, {String reason = ''}) {
@@ -202,9 +209,11 @@ void main() {
       },
     );
 
-    test('an origin blocked after 3 mismatches (RF-104)', () async {
+    test('an origin blocked after 3 mismatches (RF-104), spread so that the '
+        'global pause is not active', () async {
       final fixture = await receiver();
       for (var i = 0; i < 3; i++) {
+        if (i > 0) fixture.advance(const Duration(minutes: 5));
         await finishWithMismatch(fixture, a);
       }
       await settle();
@@ -490,6 +499,7 @@ void main() {
       await eventually(() => fixture.events.isNotEmpty);
       final event = fixture.events.single as PairingAttemptRejected;
       expect(event.fingerprint, a.fingerprint);
+      expect(event.cause, AttemptCause.commitmentMismatch);
       expect(() => (event as dynamic).name, throwsNoSuchMethodError);
       expect(fixture.views.where((v) => v != null), isEmpty);
       expectNotFound(await initiator.wait());
@@ -497,18 +507,39 @@ void main() {
       expect((await fixture.initiator(a).start())!.status, 200);
     });
 
-    test('3 in a row block the origin for 10 minutes', () async {
+    test('3 in a row in the same instant block the origin and start the '
+        'global pause for 10 minutes: the paused reply covers the block, '
+        'and the pause is announced once, after the third note', () async {
       final fixture = await receiver();
+      final first = fixture.now;
       for (var i = 0; i < 3; i++) {
         final initiator = fixture.initiator(a);
         expect((await initiator.start())!.status, 200);
         expectRejected(await initiator.reveal(nonce: randomBytes(nonceLength)));
       }
-      expect(fixture.events.whereType<PairingAttemptRejected>(), hasLength(3));
+      await eventually(() => fixture.events.length == 4);
+      expect(
+        fixture.events.take(3),
+        everyElement(
+          isA<PairingAttemptRejected>().having(
+            (e) => e.cause,
+            'cause',
+            AttemptCause.commitmentMismatch,
+          ),
+        ),
+      );
+      expect(
+        fixture.events.last,
+        isA<PairingPaused>().having(
+          (e) => e.until,
+          'until',
+          first.add(Limits.pairingGlobalWindow),
+        ),
+      );
 
-      expectRejected(await fixture.initiator(b).start());
+      expectPaused(await fixture.initiator(b).start());
       fixture.advance(const Duration(minutes: 9, seconds: 59));
-      expectRejected(await fixture.initiator(b).start());
+      expectPaused(await fixture.initiator(b).start());
       fixture.advance(const Duration(seconds: 1));
       expect((await fixture.initiator(b).start())!.status, 200);
     });
@@ -541,7 +572,7 @@ void main() {
       );
     });
 
-    test('three from three origins in the same window also reject a fresh '
+    test('three from three origins in the same window also pause a fresh '
         'origin, until the oldest leaves the window (RF-106b)', () async {
       final fixture = await receiver();
       for (final origin in [thirdLoopback, otherLoopback, loopback]) {
@@ -551,9 +582,9 @@ void main() {
       }
 
       final fresh = InternetAddress('127.0.0.9');
-      expectRejected(await fixture.initiator(b, from: fresh).start());
+      expectPaused(await fixture.initiator(b, from: fresh).start());
       fixture.advance(const Duration(minutes: 9, seconds: 59));
-      expectRejected(await fixture.initiator(b, from: fresh).start());
+      expectPaused(await fixture.initiator(b, from: fresh).start());
       fixture.advance(const Duration(seconds: 1));
       expect((await fixture.initiator(b, from: fresh).start())!.status, 200);
     });
@@ -782,7 +813,7 @@ void main() {
         for (var i = 0; i < 3; i++) {
           await finishWithMismatch(first, a);
         }
-        expectRejected(await first.initiator(a).start());
+        expectPaused(await first.initiator(a).start());
         await first.close();
 
         final second = await receiver(dataDir: dir);
@@ -1106,13 +1137,41 @@ void main() {
       expect(fixture.events, isEmpty);
     });
 
-    test('3 "mismatch" in a row block the origin for 10 minutes', () async {
+    test('3 "mismatch" in a row block the origin for 10 minutes after the '
+        'third, with the generic 403 once the global pause is over', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      for (final minute in [0, 5, 10]) {
+        fixture.now = first.add(Duration(minutes: minute));
+        await finishWithMismatch(fixture, a);
+      }
+
+      expectRejected(await fixture.initiator(a).start());
+      fixture.now = first.add(const Duration(minutes: 19, seconds: 59));
+      expectRejected(await fixture.initiator(a).start());
+      fixture.now = first.add(const Duration(minutes: 20));
+      expect((await fixture.initiator(a).start())!.status, 200);
+    });
+
+    test('3 "mismatch" in the same instant also start the global pause: the '
+        'next pair/start gets the paused reply and the receiver announces the '
+        'pause once (C110)', () async {
       final fixture = await receiver();
       for (var i = 0; i < 3; i++) {
         await finishWithMismatch(fixture, a);
       }
 
-      expectRejected(await fixture.initiator(a).start());
+      expectPaused(await fixture.initiator(a).start());
+      await eventually(() => fixture.events.isNotEmpty);
+      await settle();
+      expect(
+        fixture.events.single,
+        isA<PairingPaused>().having(
+          (e) => e.until,
+          'until',
+          fixture.now.add(Limits.pairingGlobalWindow),
+        ),
+      );
       fixture.advance(const Duration(minutes: 10));
       expect((await fixture.initiator(a).start())!.status, 200);
     });
@@ -1120,19 +1179,21 @@ void main() {
     test('a cancel from the initiator after the reveal counts as a mismatch: '
         'two mismatches and that cancel block the origin (RF-106)', () async {
       final fixture = await receiver();
+      final first = fixture.now;
       await finishWithMismatch(fixture, a);
+      fixture.now = first.add(const Duration(minutes: 5));
       await finishWithMismatch(fixture, a);
+      fixture.now = first.add(const Duration(minutes: 10));
       await finishWithPeerCancel(fixture, a);
 
       expectRejected(await fixture.initiator(a).start());
       await eventually(() => fixture.events.isNotEmpty);
+      await settle();
       expect(
         fixture.events.single,
-        isA<PairingAttemptRejected>().having(
-          (e) => e.fingerprint,
-          'fingerprint',
-          a.fingerprint,
-        ),
+        isA<PairingAttemptRejected>()
+            .having((e) => e.fingerprint, 'fingerprint', a.fingerprint)
+            .having((e) => e.cause, 'cause', AttemptCause.cancelledAfterReveal),
       );
     });
 
@@ -1160,7 +1221,15 @@ void main() {
       fixture.now = first.add(const Duration(minutes: 16));
       expect((await fixture.initiator(a).start())!.status, 200);
       await settle();
-      expect(fixture.events, isEmpty);
+      expect(fixture.events, hasLength(1));
+      expect(
+        fixture.events.single,
+        isA<PairingPaused>().having(
+          (e) => e.until,
+          'until',
+          first.add(Limits.pairingGlobalWindow),
+        ),
+      );
     });
 
     test('a completed pairing resets the streak (RF-106)', () async {

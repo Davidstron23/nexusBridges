@@ -79,6 +79,7 @@ final class PeerCheckScheduler {
       _deferred.remove(fingerprint);
       return;
     }
+    _schedules.remove(fingerprint);
     _deferred[fingerprint] = time;
   }
 

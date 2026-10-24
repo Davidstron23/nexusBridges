@@ -8,6 +8,11 @@ const int _maxProtocolLength = 16;
 
 final RegExp _protocolPattern = RegExp(r'^\d+\.\d+$');
 
+const String pausedErrorCode = 'paused';
+
+bool isPausedReply(Map<String, Object?> body) =>
+    body.length == 1 && body['error'] == pausedErrorCode;
+
 enum RemoteState { pending, paired, cancelled, expired }
 
 enum CancelReason { cancelled, expired }

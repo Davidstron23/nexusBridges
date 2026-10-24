@@ -16,6 +16,8 @@ const ApiReply _rejected = ApiReply(403, {'error': 'rejected'});
 
 const ApiReply _busy = ApiReply(409, {'error': 'busy'});
 
+const ApiReply _paused = ApiReply(429, {'error': pausedErrorCode});
+
 const ApiReply _notFound = ApiReply(404, {'error': 'not_found'});
 
 const ApiReply _unauthorized = ApiReply(401, {'error': 'unauthorized'});
@@ -249,8 +251,9 @@ final class PairingReceiver {
           _onChanged();
         }
       case ReceiverAnswer.mismatch:
-        _countFailureAfterReveal(session.origin);
+        final until = _countFailureAfterReveal(session.origin);
         _finish(session, _ReceiverStatus.cancelledLocal);
+        if (until != null) _emit(PairingPaused(until: until));
       case ReceiverAnswer.ignore:
         if (session.alreadyPaired) return;
         _finish(session, _ReceiverStatus.cancelledLocal);
@@ -332,7 +335,7 @@ final class PairingReceiver {
 
   ApiReply _start(ApiCall call) {
     final origin = call.remoteAddress.address;
-    if (_guard.globalBlocked(_now())) return _rejected;
+    if (_guard.globalBlocked(_now())) return _paused;
     if (!_guard.admit(origin)) return _rejected;
     final request = StartRequest.tryParse(call.json);
     if (request == null) return _rejected;
@@ -401,8 +404,14 @@ final class PairingReceiver {
       nonce: request.nonce,
     )) {
       _discard(session);
-      _countFailureAfterReveal(session.origin);
-      _emit(PairingAttemptRejected(fingerprint: initiator));
+      final until = _countFailureAfterReveal(session.origin);
+      _emit(
+        PairingAttemptRejected(
+          fingerprint: initiator,
+          cause: AttemptCause.commitmentMismatch,
+        ),
+      );
+      if (until != null) _emit(PairingPaused(until: until));
       return _rejected;
     }
     final transcript = revealTranscript(
@@ -481,7 +490,9 @@ final class PairingReceiver {
           session.status == _ReceiverStatus.waitingPeer;
       final cancelledAfterReveal =
           revealed && request.reason == CancelReason.cancelled;
-      if (cancelledAfterReveal) _countFailureAfterReveal(session.origin);
+      final until = cancelledAfterReveal
+          ? _countFailureAfterReveal(session.origin)
+          : null;
       _finish(
         session,
         request.reason == CancelReason.expired
@@ -489,7 +500,13 @@ final class PairingReceiver {
             : _ReceiverStatus.cancelledByPeer,
       );
       if (cancelledAfterReveal) {
-        _emit(PairingAttemptRejected(fingerprint: session.peer.fingerprint));
+        _emit(
+          PairingAttemptRejected(
+            fingerprint: session.peer.fingerprint,
+            cause: AttemptCause.cancelledAfterReveal,
+          ),
+        );
+        if (until != null) _emit(PairingPaused(until: until));
       }
     }
     return _stateReply(session);
@@ -542,9 +559,9 @@ final class PairingReceiver {
     return session;
   }
 
-  void _countFailureAfterReveal(String origin) {
+  DateTime? _countFailureAfterReveal(String origin) {
     _guard.countMismatch(origin);
-    _guard.countGlobalFailure(_now());
+    return _guard.countGlobalFailure(_now());
   }
 
   bool _subjectClashes(PeerCertificate peer) {

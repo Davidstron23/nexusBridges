@@ -962,16 +962,65 @@ void main() {
       });
     }
 
-    test('without disk the new name rules and returns false', () async {
+    test('without disk the new name rules in memory, returns false and does '
+        'not turn on the unsaved change (C117, D12)', () async {
       final store = await storeWith([_device(0)]);
       final held = lock(pairedFile);
+      final changes = recordChanges(store);
+      final status = recordSaveStatus(store);
 
       final saved = await store.rename(_fp(0), 'NEW');
+      await pumpEventQueue();
       held.release();
 
       expect(saved, isFalse);
       expect(store.deviceOf(_fp(0))!.name, 'NEW');
+      expect(changes, hasLength(1));
+      expect(store.hasUnsavedChanges, isFalse);
+      expect(status, isEmpty);
+      expect(entriesOf(pairedFile).single['name'], _device(0).name);
+    });
+
+    test('a silent rename is saved by the next write: a relation change '
+        'without disk turns the unsaved change on, and retrySave writes both '
+        '(C117)', () async {
+      final store = await storeWith([_device(0)]);
+      final held = lock(pairedFile);
+      final status = recordSaveStatus(store);
+
+      expect(await store.rename(_fp(0), 'NEW'), isFalse);
+      expect(store.hasUnsavedChanges, isFalse);
+      expect(await store.setRelation(_fp(0), PeerRelation.mine), isFalse);
+      await pumpEventQueue();
       expect(store.hasUnsavedChanges, isTrue);
+      expect(status, [true]);
+      held.release();
+
+      expect(await store.retrySave(), isTrue);
+      await pumpEventQueue();
+      expect(store.hasUnsavedChanges, isFalse);
+      expect(status, [true, false]);
+      final entry = entriesOf(pairedFile).single;
+      expect(entry['name'], 'NEW');
+      expect(entry['relation'], 'mine');
+    });
+
+    test('with an unsaved change already on, a rename that fails keeps it on '
+        'and one that is written turns it off (C117)', () async {
+      final store = await storeWith([_device(0)]);
+      final held = lock(pairedFile);
+
+      expect(await store.setRelation(_fp(0), PeerRelation.mine), isFalse);
+      expect(store.hasUnsavedChanges, isTrue);
+      expect(await store.rename(_fp(0), 'NEW'), isFalse);
+      expect(store.hasUnsavedChanges, isTrue);
+      held.release();
+
+      expect(await store.rename(_fp(0), 'NEWER'), isTrue);
+      expect(store.hasUnsavedChanges, isFalse);
+      final entry = entriesOf(pairedFile).single;
+      expect(entry['name'], 'NEWER');
+      expect(entry['relation'], 'mine');
     });
   });
 

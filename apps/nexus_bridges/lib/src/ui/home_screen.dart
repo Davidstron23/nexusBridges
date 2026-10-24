@@ -3,6 +3,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
+import 'pairing_dialogs.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen(this.controller, {super.key});
@@ -74,24 +75,66 @@ class HomeScreen extends StatelessWidget {
               ),
             ],
           ),
-        if (state.devices.isEmpty)
+        for (final notice in state.notices)
+          _Notice(
+            key: ValueKey('notice-${notice.id}'),
+            message: _noticeText(strings, notice),
+            actions: [
+              if (notice.canRetry)
+                TextButton(
+                  onPressed: controller.retrySave,
+                  child: Text(strings.retryButton),
+                ),
+              TextButton(
+                onPressed: () => controller.dismissNotice(notice.id),
+                child: Text(strings.closeButton),
+              ),
+            ],
+          ),
+        if (state.unsavedChanges && !state.notices.any((n) => n.canRetry))
+          _Notice(
+            message: strings.noticeChangeNotSaved,
+            actions: [
+              TextButton(
+                onPressed: controller.retrySave,
+                child: Text(strings.retryButton),
+              ),
+            ],
+          ),
+        if (state.entries.isEmpty)
           _EmptyDevices(
             strings: strings,
             suggestRescan: state.suggestRescan,
             onRescan: controller.rescan,
           )
         else
-          for (final device in state.devices)
+          for (final entry in state.entries)
             _DeviceTile(
-              key: ValueKey(device.info.fingerprint),
+              key: ValueKey(entry.fingerprint),
               strings: strings,
-              device: device,
-              name:
-                  state.displayNames[device.info.fingerprint] ??
-                  device.info.fingerprint.substring(0, 8),
+              controller: controller,
+              entry: entry,
             ),
       ],
     );
+  }
+
+  String _noticeText(AppStrings strings, Notice notice) {
+    final name = notice.deviceName ?? '';
+    return switch (notice.kind) {
+      NoticeKind.attemptDataMismatch => strings.noticeAttemptCancelled(name),
+      NoticeKind.attemptCancelled =>
+        notice.count == 1
+            ? strings.noticeAttemptPeerCancelled(name)
+            : strings.noticeAttemptsCancelled(notice.count),
+      NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
+      NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
+      NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,
+      NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
+      NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
+      NoticeKind.pairingFailed => strings.noticePairingFailed(name),
+      NoticeKind.pairingPaused => strings.noticePairingPaused,
+    };
   }
 }
 
@@ -129,7 +172,7 @@ class _MessageWithRetry extends StatelessWidget {
 }
 
 class _Notice extends StatelessWidget {
-  const _Notice({required this.message, this.actions = const []});
+  const _Notice({required this.message, this.actions = const [], super.key});
 
   final String message;
   final List<Widget> actions;
@@ -158,34 +201,162 @@ class _Notice extends StatelessWidget {
   }
 }
 
+enum _RowAction { toggleMine, unpair }
+
 class _DeviceTile extends StatelessWidget {
   const _DeviceTile({
     required this.strings,
-    required this.device,
-    required this.name,
+    required this.controller,
+    required this.entry,
     super.key,
   });
 
   final AppStrings strings;
-  final DiscoveredDevice device;
-  final String name;
+  final AppController controller;
+  final DeviceEntry entry;
+
+  String get _label {
+    if (entry.paired) {
+      return entry.mine ? strings.pairedMineLabel : strings.pairedForeignLabel;
+    }
+    return entry.ignored ? strings.ignoredLabel : strings.notPairedLabel;
+  }
+
+  String get _subtitle {
+    if (!entry.visible) return strings.notVisibleLabel;
+    return entry.deviceType == DeviceType.mobile
+        ? strings.deviceTypeMobile
+        : strings.deviceTypeDesktop;
+  }
+
+  Future<void> _pair(BuildContext context) async {
+    final result = await controller.pair(entry.fingerprint);
+    if (!context.mounted) return;
+    final message = switch (result) {
+      PairRequestResult.started => null,
+      PairRequestResult.alreadyInProgress => strings.pairingAlreadyInProgress,
+      PairRequestResult.tooManyPaired => strings.tooManyPaired,
+      PairRequestResult.unavailable => strings.pairUnavailable,
+    };
+    if (message == null) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _unpair(BuildContext context) async {
+    final confirmed = await confirmUnpair(context, entry.displayName);
+    if (!confirmed) return;
+    await controller.unpair(entry.fingerprint);
+  }
+
+  void _onMenu(BuildContext context, _RowAction action) {
+    switch (action) {
+      case _RowAction.toggleMine:
+        controller.setMine(entry.fingerprint, mine: !entry.mine);
+      case _RowAction.unpair:
+        _unpair(context);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final mobile = device.info.deviceType == DeviceType.mobile;
+    final bodyStyle = Theme.of(context).textTheme.bodyMedium;
+    final possiblyReplaces = entry.possiblyReplaces;
+    final actions = <Widget>[
+      if (entry.paired && entry.mismatch) ...[
+        TextButton(
+          onPressed: () => _unpair(context),
+          child: Text(strings.removeButton),
+        ),
+        FilledButton.tonal(
+          onPressed: () => _pair(context),
+          child: Text(strings.pairAgainButton),
+        ),
+      ] else if (entry.canPair)
+        FilledButton.tonal(
+          onPressed: () => _pair(context),
+          child: Text(strings.pairButton),
+        ),
+      if (entry.ignored)
+        TextButton(
+          onPressed: () => controller.unignore(entry.fingerprint),
+          child: Text(strings.unignoreButton),
+        ),
+    ];
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Card.outlined(
         margin: EdgeInsets.zero,
-        child: ListTile(
-          leading: Icon(mobile ? Icons.smartphone : Icons.computer),
-          title: Text(name),
-          subtitle: Text(
-            mobile ? strings.deviceTypeMobile : strings.deviceTypeDesktop,
-          ),
-          trailing: Text(
-            device.paired ? strings.pairedLabel : strings.notPairedLabel,
-          ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) => ListTile(
+                leading: Icon(
+                  entry.deviceType == DeviceType.mobile
+                      ? Icons.smartphone
+                      : Icons.computer,
+                ),
+                title: Text(entry.displayName),
+                subtitle: Text(_subtitle),
+                trailing: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth * 0.4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          _label,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (entry.paired)
+                        PopupMenuButton<_RowAction>(
+                          tooltip: strings.moreOptions,
+                          onSelected: (action) => _onMenu(context, action),
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: _RowAction.toggleMine,
+                              child: Text(
+                                entry.mine
+                                    ? strings.markAsForeign
+                                    : strings.markAsMine,
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _RowAction.unpair,
+                              child: Text(strings.unpairButton),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (entry.paired && entry.mismatch)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(strings.mismatchWarning, style: bodyStyle),
+              ),
+            if (possiblyReplaces != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  strings.possibleReinstall(possiblyReplaces),
+                  style: bodyStyle,
+                ),
+              ),
+            if (actions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Wrap(spacing: 8, runSpacing: 4, children: actions),
+              ),
+          ],
         ),
       ),
     );

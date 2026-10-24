@@ -1,4 +1,5 @@
 import 'package:nexus_bridges_core/src/pairing_flow/pairing_flow.dart';
+import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
 final DateTime _start = DateTime.utc(2026, 10, 24, 12);
@@ -313,20 +314,28 @@ void main() {
     });
 
     test('a time in the past only removes the wait: a device checked a '
-        'minute ago is still not due, a device never checked is', () {
+        'minute ago is still not due; a future time first resets the schedule, '
+        'so after a future and a past one the device is due, like a device '
+        'never checked (Q-5)', () {
       checkA(PeerStatus.paired);
+      expect(scheduler.due({fpC: addressC}), [fpC]);
+      scheduler.finished(fpC, PeerStatus.paired);
       at(const Duration(minutes: 1));
       scheduler.deferUntil(fpA, _start.add(const Duration(minutes: 10)));
       scheduler.deferUntil(fpB, _start.add(const Duration(minutes: 10)));
 
       scheduler.deferUntil(fpA, _start);
       scheduler.deferUntil(fpB, _start.add(const Duration(minutes: 1)));
+      scheduler.deferUntil(fpC, _start);
 
-      expect(scheduler.due({fpA: addressA, fpB: addressB}), [fpB]);
+      expect(scheduler.due({fpC: addressC}), isEmpty);
+      expect(
+        scheduler.due({fpA: addressA, fpB: addressB, fpC: addressC}),
+        unorderedEquals([fpA, fpB]),
+      );
     });
 
-    test('a past time lifts a longer wait so the normal interval applies '
-        'again', () {
+    test('a past time lifts a longer wait', () {
       checkA(PeerStatus.paired);
       scheduler.deferUntil(fpA, _start.add(const Duration(minutes: 10)));
 
@@ -343,6 +352,60 @@ void main() {
       scheduler.deferUntil(fpA, _start.add(const Duration(seconds: 30)));
 
       expect(scheduler.mismatched, {fpA});
+    });
+  });
+
+  group('waiting after pairing again (C119, RF-118, Q-5)', () {
+    test('a device checked a minute ago and paired again is due 30 s after '
+        'the new pairing, not 5 min after its last check', () {
+      checkA(PeerStatus.notPaired);
+      at(const Duration(minutes: 1));
+      scheduler.clear(fpA);
+      scheduler.deferUntil(
+        fpA,
+        _start.add(const Duration(minutes: 1) + Limits.peerCheckAfterPairing),
+      );
+
+      at(const Duration(minutes: 1, seconds: 29));
+      expect(scheduler.due(onlyA()), isEmpty);
+      at(const Duration(minutes: 1, seconds: 31));
+      expect(scheduler.due(onlyA()), [fpA]);
+      expect(scheduler.mismatched, isEmpty);
+    });
+
+    test('a check still in progress when the device is paired again ends '
+        'without creating a schedule, and the device is due 30 s after the '
+        'new pairing', () {
+      expect(scheduler.due(onlyA()), [fpA]);
+      at(const Duration(minutes: 1));
+      scheduler.clear(fpA);
+      scheduler.deferUntil(
+        fpA,
+        _start.add(const Duration(minutes: 1, seconds: 30)),
+      );
+      at(const Duration(minutes: 1, seconds: 10));
+      scheduler.finished(fpA, PeerStatus.notPaired);
+
+      at(const Duration(minutes: 1, seconds: 29));
+      expect(scheduler.due(onlyA()), isEmpty);
+      at(const Duration(minutes: 1, seconds: 31));
+      expect(scheduler.due(onlyA()), [fpA]);
+    });
+
+    test('the other devices keep their schedule', () {
+      expect(scheduler.due({fpA: addressA, fpB: addressB}), hasLength(2));
+      scheduler.finished(fpA, PeerStatus.paired);
+      scheduler.finished(fpB, PeerStatus.paired);
+      at(const Duration(minutes: 1));
+      scheduler.deferUntil(
+        fpA,
+        _start.add(const Duration(minutes: 1, seconds: 30)),
+      );
+
+      at(const Duration(minutes: 1, seconds: 31));
+      expect(scheduler.due({fpA: addressA, fpB: addressB}), [fpA]);
+      at(const Duration(minutes: 5));
+      expect(scheduler.due({fpA: addressA, fpB: addressB}), [fpB]);
     });
   });
 

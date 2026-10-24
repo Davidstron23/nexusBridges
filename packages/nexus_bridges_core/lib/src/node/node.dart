@@ -5,16 +5,25 @@ import 'dart:isolate';
 import '../discovery/discovery.dart';
 import '../identity/identity.dart';
 import '../network/network.dart';
-import '../pairing/pairing.dart' show PairedDevicesStore;
+import '../pairing/pairing.dart'
+    show
+        IgnoredDevicesStore,
+        PairedDevicesStore,
+        PairedLoadResult,
+        PeerRelation;
+import '../pairing_flow/pairing_flow.dart';
 import '../protocol/protocol.dart';
 import '../server/server.dart' show ApiServer;
 import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
+import 'entries.dart';
 import 'node_state.dart';
 import 'reconcile.dart';
 
 export '../discovery/discovery.dart' show DiscoveredDevice;
 export '../identity/identity.dart' show SecretProtector;
 export '../network/network.dart' show NetworkDecision, AdapterInfo, Ipv4Subnet;
+export '../pairing_flow/pairing_flow.dart'
+    show PairingView, PairingRole, PairingPhase, PairingOutcome, ReceiverAnswer;
 export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
 export 'node_state.dart';
 
@@ -23,6 +32,8 @@ void _noLog(String message) {}
 const String _fallbackDeviceName = 'NexusBridges';
 
 const Duration _suggestInterval = Duration(seconds: 1);
+
+const int _maxNotices = 8;
 
 Future<List<AdapterInfo>> _readWindowsNetworks() =>
     Isolate.run(() => WindowsNetworkSnapshotReader().read());
@@ -54,6 +65,8 @@ final class NexusNode {
     required this._pollInterval,
     required this._injectedChannel,
     required this._activeOf,
+    required this._pairingTickInterval,
+    required this._pairingPollHold,
   });
 
   static Future<NexusNode> start({
@@ -68,6 +81,8 @@ final class NexusNode {
         activeInterfaces,
     Duration pollInterval = const Duration(seconds: 2),
     MulticastChannel? channel,
+    Duration pairingTickInterval = const Duration(seconds: 1),
+    Duration pairingPollHold = Limits.pairingPollHold,
   }) async {
     final node = NexusNode._(
       dataDir: dataDir,
@@ -80,10 +95,14 @@ final class NexusNode {
       pollInterval: pollInterval,
       injectedChannel: channel,
       activeOf: activeOf,
+      pairingTickInterval: pairingTickInterval,
+      pairingPollHold: pairingPollHold,
     );
     await node._exclusive(node._boot);
     node._suggestTimer = Timer.periodic(_suggestInterval, (_) {
       if (node._closing) return;
+      node._runDueChecks();
+      node._expirePause();
       if (node._refreshSuggest()) node._emit();
     });
     return node;
@@ -99,6 +118,8 @@ final class NexusNode {
   final Duration _pollInterval;
   final MulticastChannel? _injectedChannel;
   final List<ActiveInterface> Function(List<InterfaceState>) _activeOf;
+  final Duration _pairingTickInterval;
+  final Duration _pairingPollHold;
 
   final StreamController<NodeState> _states =
       StreamController<NodeState>.broadcast();
@@ -128,8 +149,20 @@ final class NexusNode {
   final Set<String> _dismissed = {};
   final Set<String> _asking = {};
   Map<String, String> _activeNetworks = {};
+  List<ActiveInterface> _listening = const [];
+  List<DeviceEntry> _entries = const [];
+  List<PairingQuestion> _questions = const [];
+  List<Notice> _notices = const [];
+  int _nextNoticeId = 1;
+  DateTime? _pauseUntil;
+  DateTime? _attemptsAt;
+  final Map<String, int> _pairingRounds = {};
 
   NetworkTrustStore? _trust;
+  PairedDevicesStore? _paired;
+  IgnoredDevicesStore? _ignored;
+  PairingCoordinator? _coordinator;
+  PeerCheckScheduler? _scheduler;
   ApiServer? _server;
   MulticastChannel? _channel;
   DiscoveryService? _discovery;
@@ -137,6 +170,11 @@ final class NexusNode {
   StreamSubscription<NetworkChange>? _changesSubscription;
   StreamSubscription<void>? _pairedSubscription;
   StreamSubscription<List<DiscoveredDevice>>? _devicesSubscription;
+  StreamSubscription<void>? _coordinatorChangesSubscription;
+  StreamSubscription<PairingEvent>? _coordinatorEventsSubscription;
+  StreamSubscription<void>? _ignoredSubscription;
+  StreamSubscription<void>? _pairedSaveSubscription;
+  StreamSubscription<void>? _ignoredSaveSubscription;
   Timer? _suggestTimer;
 
   NodeState get state => _state;
@@ -179,6 +217,127 @@ final class NexusNode {
       _asking.add(networkId);
       _dismissed.remove(networkId);
       await _reconcileLocked();
+    });
+  }
+
+  Future<PairRequestResult> pair(String fingerprint) async {
+    var result = PairRequestResult.unavailable;
+    await _run('pair', () async {
+      result = _pairLocked(fingerprint);
+    });
+    return result;
+  }
+
+  void answerCode({required bool matches}) {
+    _callCoordinator(
+      'answer code',
+      (coordinator) => coordinator.answerAsInitiator(matches: matches),
+    );
+  }
+
+  void cancelPairing() {
+    _callCoordinator(
+      'cancel pairing',
+      (coordinator) => coordinator.cancelAsInitiator(),
+    );
+  }
+
+  void answerRequest(ReceiverAnswer answer) {
+    _callCoordinator(
+      'answer request',
+      (coordinator) => coordinator.answerAsReceiver(answer),
+    );
+  }
+
+  void dismissPairing() {
+    _callCoordinator(
+      'dismiss pairing',
+      (coordinator) => coordinator.dismissOutcome(),
+    );
+  }
+
+  Future<void> answerMine(String fingerprint, {required bool mine}) {
+    return _run('answer mine', () async {
+      _questions = List.unmodifiable([
+        for (final question in _questions)
+          if (question is! MineQuestion || question.fingerprint != fingerprint)
+            question,
+      ]);
+      if (mine) await _setRelationLocked(fingerprint, PeerRelation.mine);
+      _refresh();
+    });
+  }
+
+  Future<void> setMine(String fingerprint, {required bool mine}) {
+    return _run('set mine', () async {
+      await _setRelationLocked(
+        fingerprint,
+        mine ? PeerRelation.mine : PeerRelation.foreign,
+      );
+      _refresh();
+    });
+  }
+
+  Future<void> unpair(String fingerprint) {
+    return _run('unpair', () async {
+      await _unpairLocked(fingerprint);
+    });
+  }
+
+  Future<void> answerReplace(String fingerprint, {required bool replace}) {
+    return _run('answer replace', () async {
+      String? oldFingerprint;
+      final remaining = <PairingQuestion>[];
+      for (final question in _questions) {
+        if (question is ReplaceQuestion &&
+            question.fingerprint == fingerprint) {
+          oldFingerprint = question.oldFingerprint;
+        } else {
+          remaining.add(question);
+        }
+      }
+      _questions = List.unmodifiable(remaining);
+      if (replace && oldFingerprint != null) {
+        await _unpairLocked(oldFingerprint);
+      }
+      _refresh();
+    });
+  }
+
+  Future<void> unignore(String fingerprint) {
+    return _run('unignore', () async {
+      final ignored = _ignored;
+      if (ignored == null) return;
+      final saved = await ignored.unignore(fingerprint);
+      if (!saved) _addNotice(NoticeKind.changeNotSaved);
+      _refresh();
+    });
+  }
+
+  Future<void> retrySave() {
+    return _run('retry save', () async {
+      final paired = _paired;
+      final ignored = _ignored;
+      if (paired == null || ignored == null) return;
+      final pairedSaved = await paired.retrySave();
+      final ignoredSaved = await ignored.retrySave();
+      if (pairedSaved && ignoredSaved) {
+        _notices = List.unmodifiable([
+          for (final notice in _notices)
+            if (!notice.canRetry) notice,
+        ]);
+      }
+      _emit();
+    });
+  }
+
+  void dismissNotice(int id) {
+    _enqueue('dismiss notice', () async {
+      _notices = List.unmodifiable([
+        for (final notice in _notices)
+          if (notice.id != id) notice,
+      ]);
+      _emit();
     });
   }
 
@@ -244,6 +403,7 @@ final class NexusNode {
 
   Future<void> _boot() async {
     await _bootStages();
+    _rebuildEntries();
     _refreshSuggest();
     _emit();
   }
@@ -262,6 +422,8 @@ final class NexusNode {
     _lastChange = null;
     _resumePending = false;
     _activeNetworks = {};
+    _listening = const [];
+    _entries = const [];
     if (_closing) return;
 
     final Directory dir;
@@ -278,6 +440,7 @@ final class NexusNode {
         dataDir: dir,
         protector: _protector,
         now: _now,
+        log: _log,
       ).loadOrCreate();
     } on IdentityCreationException catch (e) {
       _log('identity failed: ${e.runtimeType}');
@@ -299,15 +462,26 @@ final class NexusNode {
       ownerFingerprint: identity.fingerprint,
       now: _now,
     );
+    final ignored = IgnoredDevicesStore(
+      JsonFileStore(_fileIn(dir, 'ignored.json')),
+      isPaired: paired.isPaired,
+      now: _now,
+    );
     try {
       await trust.load();
     } catch (e) {
       _log('networks load failed: ${e.runtimeType}');
     }
+    PairedLoadResult? pairedResult;
     try {
-      await paired.load();
+      pairedResult = await paired.load();
     } catch (e) {
       _log('paired load failed: ${e.runtimeType}');
+    }
+    try {
+      await ignored.load();
+    } catch (e) {
+      _log('ignored load failed: ${e.runtimeType}');
     }
     if (_closing) return;
 
@@ -315,6 +489,9 @@ final class NexusNode {
       IdentityReset() => IdentityStatus.reset,
       IdentityCreated() || IdentityLoaded() => IdentityStatus.ok,
     };
+    if (pairedResult == PairedLoadResult.previousIdentity) {
+      _identityStatus = IdentityStatus.reset;
+    }
     _fingerprint = identity.fingerprint;
 
     final channel =
@@ -338,11 +515,23 @@ final class NexusNode {
       now: _now,
       log: _log,
     );
+    final scheduler = PeerCheckScheduler(now: _now);
+    final coordinator = PairingCoordinator(
+      identity: identity,
+      paired: paired,
+      ignored: ignored,
+      selfInfo: selfInfo,
+      now: _now,
+      tickInterval: _pairingTickInterval,
+      pollHold: _pairingPollHold,
+      log: _log,
+    );
     final server = ApiServer(
       identity: identity,
       paired: paired,
       selfInfo: selfInfo,
       onRegistered: discovery.handleRegistration,
+      routes: coordinator.routes,
       port: _port,
       now: _now,
       log: _log,
@@ -354,6 +543,10 @@ final class NexusNode {
       log: _log,
     );
     _trust = trust;
+    _paired = paired;
+    _ignored = ignored;
+    _scheduler = scheduler;
+    _coordinator = coordinator;
     _channel = channel;
     _discovery = discovery;
     _server = server;
@@ -377,6 +570,18 @@ final class NexusNode {
     _pairedSubscription = paired.changes.listen(
       (_) => _enqueue('paired change', _onPairedChanged),
     );
+    coordinator.start();
+    _coordinatorChangesSubscription = coordinator.changes.listen(
+      (_) => _emit(),
+    );
+    _coordinatorEventsSubscription = coordinator.events.listen(
+      (event) => _enqueue('pairing event', () async => _onPairingEvent(event)),
+    );
+    _ignoredSubscription = ignored.changes.listen(
+      (_) => _enqueue('ignored change', () async => _refresh()),
+    );
+    _pairedSaveSubscription = paired.saveStatusChanges.listen((_) => _emit());
+    _ignoredSaveSubscription = ignored.saveStatusChanges.listen((_) => _emit());
     _changesSubscription = monitor.changes.listen(
       (change) => _enqueue('network change', () async {
         _lastChange = change;
@@ -388,6 +593,7 @@ final class NexusNode {
   }
 
   Future<void> _onPairedChanged() async {
+    _rebuildEntries();
     final server = _server;
     if (server == null) return;
     try {
@@ -511,14 +717,26 @@ final class NexusNode {
     MulticastChannel channel,
     DiscoveryService discovery,
   ) async {
+    final wanted = {for (final iface in active) iface.id};
+    _notifyInterfaces(wanted);
     await server.syncInterfaces(active);
     final open = server.openInterfaceIds;
     final listening = [
       for (final iface in active)
         if (open.contains(iface.id)) iface,
     ];
+    _listening = listening;
     await channel.syncInterfaces(listening);
     await discovery.syncInterfaces(listening);
+    final bound = {for (final iface in listening) iface.id};
+    if (bound.length != wanted.length) _notifyInterfaces(bound);
+  }
+
+  void _notifyInterfaces(Set<String> ids) {
+    _callCoordinator(
+      'interfaces changed',
+      (coordinator) => coordinator.interfacesChanged(ids),
+    );
   }
 
   Future<void> _enterPortInUseLocked(
@@ -529,6 +747,8 @@ final class NexusNode {
   ) async {
     _portInUse = port;
     _activeNetworks = {};
+    _listening = const [];
+    _notifyInterfaces(const {});
     await _guard('server sync', () => server.syncInterfaces(const []));
     await _guard('channel sync', () => channel.syncInterfaces(const []));
     await _guard('discovery sync', () => discovery.syncInterfaces(const []));
@@ -540,10 +760,25 @@ final class NexusNode {
     final discovery = _discovery;
     final server = _server;
     final channel = _channel;
+    final coordinator = _coordinator;
     final changes = _changesSubscription;
     final paired = _pairedSubscription;
     final devices = _devicesSubscription;
+    final pairingChanges = _coordinatorChangesSubscription;
+    final pairingEvents = _coordinatorEventsSubscription;
+    final ignoredChanges = _ignoredSubscription;
+    final pairedSave = _pairedSaveSubscription;
+    final ignoredSave = _ignoredSaveSubscription;
     _trust = null;
+    _paired = null;
+    _ignored = null;
+    _coordinator = null;
+    _scheduler = null;
+    _pairingRounds.clear();
+    _questions = const [];
+    _notices = const [];
+    _pauseUntil = null;
+    _attemptsAt = null;
     _monitor = null;
     _discovery = null;
     _server = null;
@@ -551,9 +786,20 @@ final class NexusNode {
     _changesSubscription = null;
     _pairedSubscription = null;
     _devicesSubscription = null;
+    _coordinatorChangesSubscription = null;
+    _coordinatorEventsSubscription = null;
+    _ignoredSubscription = null;
+    _pairedSaveSubscription = null;
+    _ignoredSaveSubscription = null;
     await _guard('network changes cancel', () => changes?.cancel());
     await _guard('paired changes cancel', () => paired?.cancel());
+    await _guard('pairing changes cancel', () => pairingChanges?.cancel());
+    await _guard('pairing events cancel', () => pairingEvents?.cancel());
+    await _guard('ignored changes cancel', () => ignoredChanges?.cancel());
+    await _guard('paired save status cancel', () => pairedSave?.cancel());
+    await _guard('ignored save status cancel', () => ignoredSave?.cancel());
     await _guard('monitor stop', () => monitor?.stop());
+    await _guard('pairing close', () => coordinator?.close());
     await _guard('server close', () => server?.close());
     await _guard('discovery stop', () {
       return discovery?.stop(sayGoodbye: sayGoodbye);
@@ -579,8 +825,370 @@ final class NexusNode {
     if (_closing) return;
     _devices = devices;
     _displayNames = displayNames(devices);
+    _renameVisiblePaired(devices);
+    _rebuildEntries();
+    _runDueChecks();
     _refreshSuggest();
     _emit();
+  }
+
+  void _rebuildEntries() {
+    final paired = _paired;
+    final ignored = _ignored;
+    if (paired == null || ignored == null) {
+      _entries = const [];
+      return;
+    }
+    _entries = buildEntries(
+      visible: _devices,
+      paired: paired.devices,
+      isIgnored: ignored.isIgnored,
+      mismatched: _scheduler?.mismatched ?? const {},
+    );
+  }
+
+  void _refresh() {
+    _rebuildEntries();
+    _emit();
+  }
+
+  void _callCoordinator(String what, void Function(PairingCoordinator) action) {
+    final coordinator = _coordinator;
+    if (_closing || coordinator == null) return;
+    try {
+      action(coordinator);
+    } catch (e) {
+      _log('$what failed: ${e.runtimeType}');
+    }
+  }
+
+  PairRequestResult _pairLocked(String fingerprint) {
+    final coordinator = _coordinator;
+    final paired = _paired;
+    if (coordinator == null || paired == null) {
+      return PairRequestResult.unavailable;
+    }
+    DeviceEntry? entry;
+    for (final candidate in _entries) {
+      if (candidate.fingerprint == fingerprint) entry = candidate;
+    }
+    if (entry == null || !entry.canPair) return PairRequestResult.unavailable;
+    if (!entry.paired &&
+        paired.devices.length >= PairedDevicesStore.maxDevices) {
+      return PairRequestResult.tooManyPaired;
+    }
+    final target = _targetFor(fingerprint);
+    if (target == null) return PairRequestResult.unavailable;
+    return switch (coordinator.tryPair(target)) {
+      PairStart.started => PairRequestResult.started,
+      PairStart.busy => PairRequestResult.alreadyInProgress,
+    };
+  }
+
+  PairingTarget? _targetFor(String fingerprint) {
+    for (final device in _devices) {
+      if (device.info.fingerprint != fingerprint) continue;
+      for (final iface in _listening) {
+        if (iface.id != device.interfaceId) continue;
+        return PairingTarget(
+          fingerprint: fingerprint,
+          name: device.info.name,
+          address: device.address,
+          port: device.info.port,
+          interfaceId: device.interfaceId,
+          localAddress: iface.subnet.address,
+        );
+      }
+    }
+    return null;
+  }
+
+  Future<void> _setRelationLocked(
+    String fingerprint,
+    PeerRelation relation,
+  ) async {
+    final paired = _paired;
+    if (paired == null || !paired.isPaired(fingerprint)) return;
+    final saved = await paired.setRelation(fingerprint, relation);
+    if (!saved) _addNotice(NoticeKind.changeNotSaved);
+  }
+
+  Future<void> _unpairLocked(String fingerprint) async {
+    final paired = _paired;
+    if (paired == null) return;
+    final device = paired.deviceOf(fingerprint);
+    if (device == null) return;
+    final target = _targetFor(fingerprint);
+    final removal = paired.remove(fingerprint);
+    final server = _server;
+    if (server != null) {
+      await _guard('trust rebuild', server.rebuildTrust);
+    }
+    _scheduler?.clear(fingerprint);
+    _dropQuestionsAbout(fingerprint);
+    final coordinator = _coordinator;
+    if (target != null && coordinator != null) {
+      unawaited(
+        _guard('unpair notice', () => coordinator.notifyUnpaired(target)),
+      );
+    }
+    final saved = await removal;
+    if (!saved) {
+      _addNotice(
+        NoticeKind.unpairNotSaved,
+        deviceName: _labelOf(fingerprint, device.name),
+      );
+    }
+    _refresh();
+  }
+
+  void _runDueChecks() {
+    final scheduler = _scheduler;
+    final coordinator = _coordinator;
+    final paired = _paired;
+    if (_closing ||
+        scheduler == null ||
+        coordinator == null ||
+        paired == null) {
+      return;
+    }
+    final visible = <String, String>{};
+    for (final device in _devices) {
+      final fingerprint = device.info.fingerprint;
+      if (paired.isPaired(fingerprint)) {
+        visible[fingerprint] = device.address.address;
+      }
+    }
+    for (final fingerprint in scheduler.due(visible)) {
+      final target = _targetFor(fingerprint);
+      if (target == null) {
+        scheduler.finished(fingerprint, PeerStatus.unknown);
+        continue;
+      }
+      unawaited(
+        _checkPeer(
+          scheduler,
+          coordinator,
+          target,
+          _pairingRounds[fingerprint] ?? 0,
+        ),
+      );
+    }
+  }
+
+  Future<void> _checkPeer(
+    PeerCheckScheduler scheduler,
+    PairingCoordinator coordinator,
+    PairingTarget target,
+    int round,
+  ) async {
+    var status = PeerStatus.unknown;
+    try {
+      status = await coordinator.checkPeer(target);
+    } catch (e) {
+      _log('peer check failed: ${e.runtimeType}');
+    }
+    if (_closing || !identical(_scheduler, scheduler)) return;
+    if ((_pairingRounds[target.fingerprint] ?? 0) != round) {
+      status = PeerStatus.unknown;
+    }
+    scheduler.finished(target.fingerprint, status);
+    if (_paired?.isPaired(target.fingerprint) != true) {
+      scheduler.clear(target.fingerprint);
+    }
+    _refresh();
+  }
+
+  void _renameVisiblePaired(List<DiscoveredDevice> devices) {
+    final paired = _paired;
+    if (paired == null) return;
+    for (final device in devices) {
+      final name = device.info.name;
+      final saved = paired.deviceOf(device.info.fingerprint);
+      if (name == null || saved == null || saved.name == name) continue;
+      unawaited(_rename(paired, device.info.fingerprint, name));
+    }
+  }
+
+  Future<void> _rename(
+    PairedDevicesStore paired,
+    String fingerprint,
+    String name,
+  ) async {
+    try {
+      if (!await paired.rename(fingerprint, name)) _log('rename not saved');
+    } catch (e) {
+      _log('rename failed: ${e.runtimeType}');
+    }
+  }
+
+  void _onPairingEvent(PairingEvent event) {
+    switch (event) {
+      case PairingCompleted(:final fingerprint, :final isNew):
+        _pairingRounds[fingerprint] = (_pairingRounds[fingerprint] ?? 0) + 1;
+        _scheduler
+          ?..clear(fingerprint)
+          ..deferUntil(fingerprint, _now().add(Limits.peerCheckAfterPairing));
+        if (isNew) _askAbout(fingerprint);
+      case UnpairedByPeer(:final fingerprint, :final name, :final saved):
+        _scheduler?.clear(fingerprint);
+        _dropQuestionsAbout(fingerprint);
+        _addNotice(
+          NoticeKind.unpairedByPeer,
+          deviceName: _labelOf(fingerprint, name),
+        );
+        if (!saved) _addNotice(NoticeKind.changeNotSaved);
+      case PairingAttemptRejected(:final fingerprint, :final cause):
+        _addFailedAttempt(cause, shortFingerprint(fingerprint));
+      case PairingPaused(:final until):
+        _showPause(until);
+      case PairingNotSaved(:final fingerprint):
+        _addNotice(
+          NoticeKind.pairingNotSaved,
+          deviceName: _labelOf(fingerprint, _knownNameOf(fingerprint)),
+        );
+      case PairingFailed(:final fingerprint):
+        _addNotice(
+          NoticeKind.pairingFailed,
+          deviceName: _labelOf(fingerprint, _knownNameOf(fingerprint)),
+        );
+      case IgnoreNotSaved(:final fingerprint, :final name):
+        _addNotice(
+          NoticeKind.ignoreNotSaved,
+          deviceName: _labelOf(fingerprint, name),
+        );
+    }
+    _refresh();
+  }
+
+  void _askAbout(String fingerprint) {
+    final paired = _paired;
+    final device = paired?.deviceOf(fingerprint);
+    if (paired == null || device == null) return;
+    final label = _labelOf(fingerprint, device.name);
+    final old = findReplaced(
+      name: device.name,
+      excluding: fingerprint,
+      paired: paired.devices,
+      isVisible: _isVisible,
+    );
+    _questions = List.unmodifiable([
+      for (final question in _questions)
+        if (question.fingerprint != fingerprint) question,
+      if (old != null)
+        ReplaceQuestion(
+          fingerprint: fingerprint,
+          deviceName: label,
+          oldFingerprint: old.fingerprint,
+          oldName: _labelOf(old.fingerprint, old.name),
+        ),
+      MineQuestion(fingerprint: fingerprint, deviceName: label),
+    ]);
+  }
+
+  void _dropQuestionsAbout(String fingerprint) {
+    _questions = List.unmodifiable([
+      for (final question in _questions)
+        if (question.fingerprint != fingerprint &&
+            !(question is ReplaceQuestion &&
+                question.oldFingerprint == fingerprint))
+          question,
+    ]);
+  }
+
+  bool _isVisible(String fingerprint) {
+    return _devices.any((device) => device.info.fingerprint == fingerprint);
+  }
+
+  String? _knownNameOf(String fingerprint) {
+    for (final device in _devices) {
+      if (device.info.fingerprint == fingerprint) return device.info.name;
+    }
+    return _paired?.deviceOf(fingerprint)?.name;
+  }
+
+  String _labelOf(String fingerprint, String? name) {
+    final clean = name == null ? null : sanitizeDisplayName(name);
+    final short = shortFingerprint(fingerprint);
+    return clean == null ? short : '$clean · $short';
+  }
+
+  void _addFailedAttempt(AttemptCause cause, String short) {
+    final now = _now();
+    final last = _attemptsAt;
+    final fresh =
+        last != null && now.difference(last) < Limits.pairingGlobalWindow;
+    _attemptsAt = now;
+    final index = _notices.indexWhere(
+      (notice) =>
+          notice.kind == NoticeKind.attemptCancelled ||
+          notice.kind == NoticeKind.attemptDataMismatch,
+    );
+    if (index >= 0 && fresh) {
+      final current = _notices[index];
+      _notices = List.unmodifiable([
+        for (var i = 0; i < _notices.length; i++)
+          if (i == index)
+            Notice(
+              id: current.id,
+              kind: NoticeKind.attemptCancelled,
+              deviceName: short,
+              count: current.count + 1,
+            )
+          else
+            _notices[i],
+      ]);
+      return;
+    }
+    if (index >= 0) {
+      _notices = List.unmodifiable([
+        for (var i = 0; i < _notices.length; i++)
+          if (i != index) _notices[i],
+      ]);
+    }
+    _addNotice(
+      cause == AttemptCause.commitmentMismatch
+          ? NoticeKind.attemptDataMismatch
+          : NoticeKind.attemptCancelled,
+      deviceName: short,
+    );
+  }
+
+  void _showPause(DateTime until) {
+    _removePauseNotices();
+    _addNotice(NoticeKind.pairingPaused);
+    _pauseUntil = until;
+  }
+
+  void _expirePause() {
+    final until = _pauseUntil;
+    if (until == null || _now().isBefore(until)) return;
+    _enqueue('pause ended', () async {
+      final current = _pauseUntil;
+      if (current == null || _now().isBefore(current)) return;
+      _pauseUntil = null;
+      _removePauseNotices();
+      _emit();
+    });
+  }
+
+  void _removePauseNotices() {
+    _notices = List.unmodifiable([
+      for (final notice in _notices)
+        if (notice.kind != NoticeKind.pairingPaused) notice,
+    ]);
+  }
+
+  void _addNotice(NoticeKind kind, {String? deviceName}) {
+    final next = [
+      ..._notices,
+      Notice(id: _nextNoticeId++, kind: kind, deviceName: deviceName),
+    ];
+    _notices = List.unmodifiable(
+      next.length > _maxNotices
+          ? next.sublist(next.length - _maxNotices)
+          : next,
+    );
   }
 
   bool _refreshSuggest() {
@@ -616,6 +1224,13 @@ final class NexusNode {
       decisionNotSaved: _decisionNotSaved,
       deviceName: _deviceName,
       fingerprint: _fingerprint,
+      entries: _entries,
+      pairing: _coordinator?.view,
+      questions: _questions,
+      notices: _notices,
+      unsavedChanges:
+          (_paired?.hasUnsavedChanges ?? false) ||
+          (_ignored?.hasUnsavedChanges ?? false),
     );
     _state = next;
     final last = _lastEmitted;
@@ -634,6 +1249,11 @@ bool _sameState(NodeState a, NodeState b) {
       a.decisionNotSaved == b.decisionNotSaved &&
       a.deviceName == b.deviceName &&
       a.fingerprint == b.fingerprint &&
+      a.unsavedChanges == b.unsavedChanges &&
+      a.pairing == b.pairing &&
+      _sameList(a.entries, b.entries, (x, y) => x == y) &&
+      _sameList(a.questions, b.questions, (x, y) => x == y) &&
+      _sameList(a.notices, b.notices, (x, y) => x == y) &&
       _sameList(a.prompts, b.prompts, (x, y) => x == y) &&
       _sameList(a.pausedNetworks, b.pausedNetworks, (x, y) => x == y) &&
       _sameMap(a.displayNames, b.displayNames) &&
