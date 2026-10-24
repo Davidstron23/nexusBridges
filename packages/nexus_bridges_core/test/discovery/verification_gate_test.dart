@@ -91,6 +91,20 @@ void main() {
     job: jobs.job(_id(fingerprint, ip, reverse), ip),
   );
 
+  bool submitPort(
+    String fingerprint,
+    String ip,
+    int? port, {
+    bool reverse = false,
+  }) => gate.submit(
+    fingerprint: fingerprint,
+    ip: ip,
+    interfaceId: 'eth',
+    reverse: reverse,
+    port: port,
+    job: jobs.job('${_id(fingerprint, ip, reverse)}:$port', ip),
+  );
+
   List<bool> flood({int count = 100, int ips = 10}) => [
     for (var i = 0; i < count; i++) submit('fp$i', _ipOf(i % ips)),
   ];
@@ -241,6 +255,74 @@ void main() {
 
       expect(submit('fpA', '10.0.0.1'), isTrue);
       expect(gate.active, 1);
+    });
+  });
+
+  group('C129: key by port for paired devices and clearFailures (RF-44 of '
+      'the 002, N2)', () {
+    test('a failure on port 1 does not block the same fingerprint and IP on '
+        'port 53530, and port 1 stays blocked', () {
+      gate.markFailed('fpP', '10.0.0.2', port: 1);
+      at(const Duration(seconds: 5));
+
+      expect(submitPort('fpP', '10.0.0.2', 53530), isTrue);
+      expect(submitPort('fpP', '10.0.0.2', 1), isFalse);
+    });
+
+    test('clearFailures lets the blocked port in again at once', () {
+      gate.markFailed('fpP', '10.0.0.2', port: 1);
+      at(const Duration(seconds: 5));
+      expect(submitPort('fpP', '10.0.0.2', 1), isFalse);
+
+      gate.clearFailures('fpP');
+
+      expect(submitPort('fpP', '10.0.0.2', 1), isTrue);
+    });
+
+    test('without a port the key is fingerprint and IP as before: rejected '
+        'until 9 s, and clearFailures also clears it', () {
+      gate.markFailed('fpU', '10.0.0.3');
+      at(const Duration(seconds: 8, milliseconds: 999));
+      expect(submitPort('fpU', '10.0.0.3', null), isFalse);
+      at(const Duration(seconds: 9, milliseconds: 1));
+      expect(submitPort('fpU', '10.0.0.3', null), isTrue);
+
+      gate.markFailed('fpV', '10.0.0.4');
+      gate.clearFailures('fpV');
+      expect(submitPort('fpV', '10.0.0.4', null), isTrue);
+    });
+
+    test('a failure with a port does not touch the key without a port, nor '
+        'the other way round', () {
+      gate.markFailed('fpP', '10.0.0.2', port: 1);
+      gate.markFailed('fpQ', '10.0.0.2');
+
+      expect(submitPort('fpP', '10.0.0.2', null), isTrue);
+      expect(submitPort('fpQ', '10.0.0.2', 53530), isTrue);
+      expect(submitPort('fpQ', '10.0.0.2', null), isFalse);
+    });
+
+    test('the same job with two ports in flight is accepted twice: the keys '
+        'are different', () {
+      expect(submitPort('fpP', '10.0.0.2', 1), isTrue);
+      expect(submitPort('fpP', '10.0.0.2', 53530), isTrue);
+      expect(submitPort('fpP', '10.0.0.2', 53530), isFalse);
+      expect(gate.active + gate.queued, 2);
+    });
+
+    test('clearFailures empties both lanes for that fingerprint only, and '
+        'only for the exact fingerprint', () {
+      gate.markFailed('fpA', '10.0.0.1', port: 7);
+      gate.markFailed('fpA', '10.0.0.5', reverse: true, port: 7);
+      gate.markFailed('fpAB', '10.0.0.1', port: 7);
+      gate.markFailed('fpB', '10.0.0.1');
+
+      gate.clearFailures('fpA');
+
+      expect(submitPort('fpA', '10.0.0.1', 7), isTrue);
+      expect(submitPort('fpA', '10.0.0.5', 7, reverse: true), isTrue);
+      expect(submitPort('fpAB', '10.0.0.1', 7), isFalse);
+      expect(submitPort('fpB', '10.0.0.1', null), isFalse);
     });
   });
 

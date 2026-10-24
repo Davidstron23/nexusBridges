@@ -154,6 +154,18 @@ void main() {
       expect(Limits.maxPendingHandshakes, 128);
     });
 
+    test('C122: the peer expiry threshold is the pairing timeout minus one '
+        'message timeout, and the other v8 limits have the plan values', () {
+      expect(
+        Limits.pairingPeerExpiryAfter,
+        Limits.pairingTimeout - Limits.pairingMessageTimeout,
+      );
+      expect(Limits.pairingPeerExpiryAfter, const Duration(seconds: 50));
+      expect(Limits.replaceAfterAbsence, const Duration(minutes: 2));
+      expect(Limits.goodbyeCheckInterval, const Duration(seconds: 5));
+      expect(Limits.maxCombiningMarks, 4);
+    });
+
     test('protocolVersion is re-exported by the protocol module', () {
       expect(protocolVersion, '1.0');
     });
@@ -791,6 +803,91 @@ void main() {
       );
       expect(decoded, isNotNull);
       expect(decoded!.info.name, isNull);
+    });
+  });
+
+  group('C135, N5: blank lookalikes and stacked combining marks (v8)', () {
+    String char(int code) => String.fromCharCode(code);
+    String repeat(int code, int times) => char(code) * times;
+    const acute = 0x0301;
+    const blankBraille = 0x2800;
+
+    test('a name made only of blank braille is no name, and it is removed '
+        'next to visible text', () {
+      expect(sanitizeDisplayName(char(blankBraille)), isNull);
+      expect(sanitizeDisplayName(repeat(blankBraille, 3)), isNull);
+      expect(sanitizeDisplayName('PC${char(blankBraille)}'), 'PC');
+      expect(sanitizeDisplayName('${char(blankBraille)} PC'), 'PC');
+    });
+
+    test('the Egyptian format controls U+13430 to U+1343F and the Khitan '
+        'filler U+16FE4 are removed', () {
+      for (var code = 0x13430; code <= 0x1343F; code++) {
+        expect(
+          sanitizeDisplayName('Da${char(code)}vid'),
+          'David',
+          reason: code.toRadixString(16),
+        );
+      }
+      expect(sanitizeDisplayName('Da${char(0x16FE4)}vid'), 'David');
+      expect(sanitizeDisplayName(char(0x16FE4) + char(0x13430)), isNull);
+    });
+
+    test('ten marks on one letter keep four', () {
+      expect(
+        sanitizeDisplayName('e${repeat(acute, 10)}'),
+        'e${repeat(acute, 4)}',
+      );
+    });
+
+    test('marks with no letter before them are dropped', () {
+      expect(sanitizeDisplayName('${repeat(acute, 3)}PC'), 'PC');
+      expect(sanitizeDisplayName(repeat(acute, 6)), isNull);
+      expect(sanitizeDisplayName(' ${repeat(acute, 2)}'), isNull);
+    });
+
+    test('the count starts again at each letter', () {
+      expect(
+        sanitizeDisplayName('e${repeat(acute, 5)}a${repeat(acute, 5)}'),
+        'e${repeat(acute, 4)}a${repeat(acute, 4)}',
+      );
+    });
+
+    test('ordinary decomposed accents are kept as they are', () {
+      final decomposed = 'Porta${char(acute)}til';
+      final twoMarks = 'e${char(0x0323)}${char(0x0302)}';
+      expect(sanitizeDisplayName(decomposed), decomposed);
+      expect(sanitizeDisplayName(twoMarks), twoMarks);
+      expect(sanitizeDisplayName('Port${char(0x00E1)}til'), 'Portátil');
+    });
+
+    test('70 letters with 4 marks each are cut to 64 runes', () {
+      final raw = [for (var i = 0; i < 70; i++) 'x${repeat(acute, 4)}'].join();
+
+      final name = sanitizeDisplayName(raw)!;
+
+      expect(name.runes.length, Limits.maxNameLength);
+      expect(name, raw.substring(0, Limits.maxNameLength));
+    });
+
+    test('invisible characters are removed before counting, so one between '
+        'marks does not restart the count', () {
+      final raw = 'PC${repeat(acute, 3)}${char(0x200B)}${repeat(acute, 3)}';
+
+      expect(sanitizeDisplayName(raw), 'PC${repeat(acute, 4)}');
+    });
+
+    test('tryParse and tryDecode limit the marks the same way, and applying '
+        'it twice gives the same as once', () {
+      final raw = 'PC${repeat(acute, 9)}${char(blankBraille)}';
+      final parsed = DeviceInfo.tryParse(validInfoJson()..['name'] = raw);
+      expect(parsed?.name, 'PC${repeat(acute, 4)}');
+      final decoded = Announcement.tryDecode(
+        bytesOf(validAnnouncementJson()..['name'] = raw),
+      );
+      expect(decoded?.info.name, 'PC${repeat(acute, 4)}');
+      final once = sanitizeDisplayName(raw)!;
+      expect(sanitizeDisplayName(once), once);
     });
   });
 

@@ -53,12 +53,18 @@ List<DeviceEntry> _entries({
   List<PairedDevice> paired = const [],
   Set<String> ignored = const {},
   Set<String> mismatched = const {},
+  bool Function(String) isReplaceable = _always,
 }) => buildEntries(
   visible: visible,
   paired: paired,
   isIgnored: ignored.contains,
   mismatched: mismatched,
+  isReplaceable: isReplaceable,
 );
+
+bool _always(String _) => true;
+
+String _mark(int code) => String.fromCharCode(code);
 
 DeviceEntry _entryOf(List<DeviceEntry> entries, String prefix) =>
     entries.singleWhere((e) => e.fingerprint == _fp(prefix));
@@ -566,7 +572,7 @@ void main() {
         name: 'PC',
         excluding: _fp('99999999'),
         paired: paired,
-        isVisible: (_) => false,
+        isReplaceable: (_) => true,
       );
 
       expect(old?.fingerprint, _fp('22222222'));
@@ -577,7 +583,7 @@ void main() {
         name: 'PC',
         excluding: _fp('99999999'),
         paired: paired,
-        isVisible: (fp) => fp == _fp('22222222'),
+        isReplaceable: (fp) => fp != _fp('22222222'),
       );
 
       expect(old?.fingerprint, _fp('11111111'));
@@ -588,7 +594,7 @@ void main() {
         name: 'PC',
         excluding: _fp('22222222'),
         paired: paired,
-        isVisible: (_) => false,
+        isReplaceable: (_) => true,
       );
 
       expect(old?.fingerprint, _fp('11111111'));
@@ -600,7 +606,7 @@ void main() {
           name: null,
           excluding: _fp('99999999'),
           paired: paired,
-          isVisible: (_) => false,
+          isReplaceable: (_) => true,
         ),
         isNull,
       );
@@ -609,7 +615,7 @@ void main() {
           name: 'Tablet',
           excluding: _fp('99999999'),
           paired: paired,
-          isVisible: (_) => false,
+          isReplaceable: (_) => true,
         ),
         isNull,
       );
@@ -618,7 +624,7 @@ void main() {
           name: 'PC',
           excluding: _fp('99999999'),
           paired: paired,
-          isVisible: (_) => true,
+          isReplaceable: (_) => false,
         ),
         isNull,
       );
@@ -627,10 +633,138 @@ void main() {
           name: 'PC',
           excluding: _fp('99999999'),
           paired: const [],
-          isVisible: (_) => false,
+          isReplaceable: (_) => true,
         ),
         isNull,
       );
+    });
+  });
+
+  group('C125, RF-124: rows and findReplaced with isReplaceable (v8)', () {
+    test('an unpaired "PC" in sight and a paired "pc" out of sight warn only '
+        'when the paired one is replaceable', () {
+      final visible = [_visible('1A2B3C4D', name: 'PC')];
+      final paired = [_paired('9F8E7D6C', name: 'pc')];
+
+      final notYet = _entries(
+        visible: visible,
+        paired: paired,
+        isReplaceable: (_) => false,
+      );
+      final absent = _entries(
+        visible: visible,
+        paired: paired,
+        isReplaceable: (fp) => fp == _fp('9F8E7D6C'),
+      );
+
+      expect(_entryOf(notYet, '1A2B3C4D').possiblyReplaces, isNull);
+      expect(
+        _entryOf(absent, '1A2B3C4D').possiblyReplaces,
+        'pc $_dot 9F8E7D6C',
+      );
+    });
+
+    test('a paired one in sight never warns, even if it is replaceable', () {
+      final entries = _entries(
+        visible: [
+          _visible('1A2B3C4D', name: 'PC'),
+          _visible('9F8E7D6C', name: 'PC', address: '192.168.1.20'),
+        ],
+        paired: [_paired('9F8E7D6C', name: 'PC')],
+        isReplaceable: _always,
+      );
+
+      expect(_entryOf(entries, '1A2B3C4D').possiblyReplaces, isNull);
+    });
+
+    test('findReplaced returns the replaceable candidate even when it is the '
+        'oldest', () {
+      final paired = [
+        _paired('11111111', name: 'PC', pairedAt: DateTime.utc(2026, 9, 1)),
+        _paired('22222222', name: 'PC', pairedAt: DateTime.utc(2026, 10, 20)),
+      ];
+
+      final old = findReplaced(
+        name: 'pc',
+        excluding: _fp('99999999'),
+        paired: paired,
+        isReplaceable: (fp) => fp == _fp('11111111'),
+      );
+
+      expect(old?.fingerprint, _fp('11111111'));
+    });
+  });
+
+  group('C132, RF-83, RF-73: namesakeOf (v8)', () {
+    final paired = [
+      _paired('11111111', name: 'pc', pairedAt: DateTime.utc(2026, 9, 1)),
+      _paired('33333333', name: 'Portatil', pairedAt: DateTime.utc(2026, 9, 3)),
+    ];
+
+    test('"PC" against a paired "pc" with another fingerprint gives the '
+        'cleaned paired name', () {
+      expect(
+        namesakeOf(name: 'PC', excluding: _fp('99999999'), paired: paired),
+        'pc',
+      );
+    });
+
+    test('the same fingerprint, another name or no name give nothing', () {
+      expect(
+        namesakeOf(name: 'PC', excluding: _fp('11111111'), paired: paired),
+        isNull,
+      );
+      expect(
+        namesakeOf(name: 'Laptop', excluding: _fp('99999999'), paired: paired),
+        isNull,
+      );
+      expect(
+        namesakeOf(name: null, excluding: _fp('99999999'), paired: paired),
+        isNull,
+      );
+      expect(
+        namesakeOf(name: 'PC', excluding: _fp('99999999'), paired: const []),
+        isNull,
+      );
+    });
+
+    test('with two paired "PC", the most recently paired one, whatever its '
+        'visibility', () {
+      final two = [
+        ...paired,
+        _paired('22222222', name: ' PC ', pairedAt: DateTime.utc(2026, 10, 2)),
+      ];
+
+      expect(
+        namesakeOf(name: 'Pc', excluding: _fp('99999999'), paired: two),
+        'PC',
+      );
+    });
+
+    test('the paired name is returned cleaned of invisible characters', () {
+      final hidden = [
+        _paired(
+          '44444444',
+          name: '${_mark(0x202E)}PC${_mark(0x200B)}',
+          pairedAt: DateTime.utc(2026, 10, 9),
+        ),
+      ];
+
+      expect(
+        namesakeOf(name: 'pc', excluding: _fp('99999999'), paired: hidden),
+        'PC',
+      );
+    });
+  });
+
+  group('C135, R20: composed and decomposed accents are not the same name', () {
+    test('"Portátil" composed and decomposed are not sameName (documented '
+        'residual risk)', () {
+      final composed = 'Port${_mark(0x00E1)}til';
+      final decomposed = 'Porta${_mark(0x0301)}til';
+
+      expect(sameName(composed, decomposed), isFalse);
+      expect(sameName(decomposed, decomposed), isTrue);
     });
   });
 
@@ -645,6 +779,7 @@ void main() {
       expect(NoticeKind.values, [
         NoticeKind.attemptCancelled,
         NoticeKind.attemptDataMismatch,
+        NoticeKind.attemptLost,
         NoticeKind.unpairedByPeer,
         NoticeKind.unpairNotSaved,
         NoticeKind.changeNotSaved,
@@ -652,6 +787,7 @@ void main() {
         NoticeKind.pairingNotSaved,
         NoticeKind.pairingFailed,
         NoticeKind.pairingPaused,
+        NoticeKind.replaceWithdrawn,
       ]);
     });
 
@@ -770,6 +906,7 @@ void main() {
 
       expect(empty.entries, isEmpty);
       expect(empty.pairing, isNull);
+      expect(empty.pairingNamesake, isNull);
       expect(empty.questions, isEmpty);
       expect(empty.notices, isEmpty);
       expect(empty.unsavedChanges, isFalse);
@@ -784,6 +921,7 @@ void main() {
       final full = NodeState(
         entries: [_entry()],
         pairing: view,
+        pairingNamesake: 'pc',
         questions: const [MineQuestion(fingerprint: 'F', deviceName: 'PC')],
         notices: const [Notice(id: 1, kind: NoticeKind.attemptCancelled)],
         unsavedChanges: true,
@@ -791,6 +929,7 @@ void main() {
 
       expect(full.entries, [_entry()]);
       expect(full.pairing, view);
+      expect(full.pairingNamesake, 'pc');
       expect(full.questions.single, isA<MineQuestion>());
       expect(full.notices.single.kind, NoticeKind.attemptCancelled);
       expect(full.unsavedChanges, isTrue);

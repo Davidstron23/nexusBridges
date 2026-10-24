@@ -11,10 +11,11 @@ const int _reverseMaxQueuedPerIp = 2;
 
 const int _pruneThreshold = 256;
 
-String _pairKey(String fingerprint, String ip) => '$fingerprint@$ip';
+String _pairKey(String fingerprint, String ip, int? port) =>
+    port == null ? '$fingerprint@$ip' : '$fingerprint@$ip:$port';
 
 final class _Job {
-  _Job(this.fingerprint, this.ip, this.interfaceId, this.run);
+  _Job(this.fingerprint, this.ip, this.interfaceId, this.key, this.run);
 
   final String fingerprint;
 
@@ -22,9 +23,9 @@ final class _Job {
 
   final String interfaceId;
 
-  final Future<void> Function() run;
+  final String key;
 
-  String get pair => _pairKey(fingerprint, ip);
+  final Future<void> Function() run;
 }
 
 final class _Lane {
@@ -89,10 +90,11 @@ final class VerificationGate {
     required String interfaceId,
     required Future<void> Function() job,
     bool reverse = false,
+    int? port,
   }) {
     if (_cleared) return false;
     final lane = reverse ? _reverse : _normal;
-    final pair = _pairKey(fingerprint, ip);
+    final pair = _pairKey(fingerprint, ip, port);
     if (lane.pairs.contains(pair)) return false;
     final failedAt = lane.failedAt[pair];
     if (failedAt != null) {
@@ -107,12 +109,17 @@ final class VerificationGate {
       return false;
     }
     lane.pairs.add(pair);
-    lane.queue.add(_Job(fingerprint, ip, interfaceId, job));
+    lane.queue.add(_Job(fingerprint, ip, interfaceId, pair, job));
     _pump(lane);
     return true;
   }
 
-  void markFailed(String fingerprint, String ip, {bool reverse = false}) {
+  void markFailed(
+    String fingerprint,
+    String ip, {
+    bool reverse = false,
+    int? port,
+  }) {
     final lane = reverse ? _reverse : _normal;
     final now = _now();
     if (lane.failedAt.length > _pruneThreshold) {
@@ -120,14 +127,21 @@ final class VerificationGate {
         (_, failedAt) => now.difference(failedAt) >= _failureCooldown,
       );
     }
-    lane.failedAt[_pairKey(fingerprint, ip)] = now;
+    lane.failedAt[_pairKey(fingerprint, ip, port)] = now;
+  }
+
+  void clearFailures(String fingerprint) {
+    final prefix = '$fingerprint@';
+    for (final lane in [_normal, _reverse]) {
+      lane.failedAt.removeWhere((key, _) => key.startsWith(prefix));
+    }
   }
 
   void dropInterface(String interfaceId) {
     for (final lane in [_normal, _reverse]) {
       lane.queue.removeWhere((queued) {
         final drop = queued.interfaceId == interfaceId;
-        if (drop) lane.pairs.remove(queued.pair);
+        if (drop) lane.pairs.remove(queued.key);
         return drop;
       });
     }
@@ -137,7 +151,7 @@ final class VerificationGate {
     _cleared = true;
     for (final lane in [_normal, _reverse]) {
       for (final queued in lane.queue) {
-        lane.pairs.remove(queued.pair);
+        lane.pairs.remove(queued.key);
       }
       lane.queue.clear();
     }
@@ -174,7 +188,7 @@ final class VerificationGate {
       } else {
         lane.activePerIp[job.ip] = perIp;
       }
-      lane.pairs.remove(job.pair);
+      lane.pairs.remove(job.key);
       _pump(lane);
     }
   }

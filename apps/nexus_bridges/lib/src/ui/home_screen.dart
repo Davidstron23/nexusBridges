@@ -127,6 +127,8 @@ class HomeScreen extends StatelessWidget {
         notice.count == 1
             ? strings.noticeAttemptPeerCancelled(name)
             : strings.noticeAttemptsCancelled(notice.count),
+      NoticeKind.attemptLost => strings.noticeAttemptLost(name),
+      NoticeKind.replaceWithdrawn => strings.noticeReplaceWithdrawn(name),
       NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
       NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
       NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,

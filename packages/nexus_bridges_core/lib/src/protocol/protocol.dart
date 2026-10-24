@@ -66,6 +66,7 @@ abstract final class Limits {
   static const int maxRequestNameLength = 256;
   static const Duration pairingTimeout = Duration(seconds: 60);
   static const Duration pairingMessageTimeout = Duration(seconds: 10);
+  static const Duration pairingPeerExpiryAfter = Duration(seconds: 50);
   static const Duration pairingPollHold = Duration(seconds: 7);
   static const Duration pairingConfirmRetry = Duration(seconds: 1);
   static const Duration pairingRecordTtl = Duration(seconds: 30);
@@ -122,6 +123,9 @@ abstract final class Limits {
   static const int transferCancelsPerMinute = 30;
   static const int transferUploadsPerMinute = 12;
   static const int maxRelaxedConnections = 2;
+  static const Duration replaceAfterAbsence = Duration(minutes: 2);
+  static const Duration goodbyeCheckInterval = Duration(seconds: 5);
+  static const int maxCombiningMarks = 4;
 }
 
 final Stopwatch _monotonicWatch = Stopwatch()..start();
@@ -146,10 +150,12 @@ final RegExp _protocolPattern = RegExp(r'^\d+\.\d+$');
 final RegExp _invisibleCharacters = RegExp(
   r'[\u0000-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5'
   r'\u180B-\u180F\u2028\u2029\u200B-\u200F\u202A-\u202E\u2060-\u2064'
-  r'\u2066-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8'
-  r'\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0000}-\u{E0FFF}]',
+  r'\u2066-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF0-\uFFF8'
+  r'\u{1BCA0}-\u{1BCA3}\u{1D173}-\u{1D17A}\u{E0000}-\u{E0FFF}'
+  r'\u{13430}-\u{1343F}\u{16FE4}]',
   unicode: true,
 );
+final RegExp _combiningMark = RegExp(r'^\p{M}$', unicode: true);
 
 const Set<String> _deviceInfoKeys = {
   'name',
@@ -226,8 +232,28 @@ final class DeviceInfo {
   }
 }
 
+String _limitCombiningMarks(String text) {
+  final buffer = StringBuffer();
+  var marks = 0;
+  var hasBase = false;
+  for (final rune in text.runes) {
+    final character = String.fromCharCode(rune);
+    if (_combiningMark.hasMatch(character)) {
+      if (!hasBase || marks >= Limits.maxCombiningMarks) continue;
+      marks++;
+      buffer.write(character);
+    } else {
+      hasBase = true;
+      marks = 0;
+      buffer.write(character);
+    }
+  }
+  return buffer.toString();
+}
+
 String? sanitizeDisplayName(String raw) {
-  final cleaned = raw.replaceAll(_invisibleCharacters, '').trim();
+  final visible = raw.replaceAll(_invisibleCharacters, '').trim();
+  final cleaned = _limitCombiningMarks(visible).trim();
   final truncated = String.fromCharCodes(
     cleaned.runes.take(Limits.maxNameLength),
   );

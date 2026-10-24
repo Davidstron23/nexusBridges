@@ -102,7 +102,11 @@ void main() {
         (s) => _finishedWith(s, PairingOutcome.cancelledByPeer),
         reason: 'B cancelledByPeer',
       );
+      await b.until((s) => s.notices.isNotEmpty, reason: 'B notice');
       await pause(_settle);
+      expect(b.state.notices.single.kind, NoticeKind.attemptCancelled);
+      expect(b.state.notices.single.count, 1);
+      expect(b.noticesOf(NoticeKind.attemptLost), isEmpty);
       expect(a.state.pairing?.outcome, PairingOutcome.networkChanged);
       a.zone.run(() => a.node.answerCode(matches: true));
       b.zone.run(() => b.node.answerRequest(ReceiverAnswer.matches));

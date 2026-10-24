@@ -8,6 +8,8 @@ import '../l10n/app_strings.dart';
 
 const int _shortFingerprintLength = 8;
 
+const Duration dialogActivationDelay = Duration(milliseconds: 500);
+
 String formatCode(String code) {
   return '${code.substring(0, 3)} ${code.substring(3)}';
 }
@@ -190,10 +192,70 @@ class _PairingHostState extends State<PairingHost> {
   Widget build(BuildContext context) => widget.child;
 }
 
-class _PairingDialog extends StatelessWidget {
+class _PairingDialog extends StatefulWidget {
   const _PairingDialog(this.controller);
 
   final AppController controller;
+
+  @override
+  State<_PairingDialog> createState() => _PairingDialogState();
+}
+
+class _PairingDialogState extends State<_PairingDialog> {
+  Object? _contentKey;
+  bool _armed = false;
+  Timer? _timer;
+
+  AppController get controller => widget.controller;
+
+  Object _currentKey() {
+    final state = controller.state;
+    final view = state?.pairing;
+    return (
+      view?.role,
+      view?.phase,
+      view?.peerFingerprint,
+      view?.outcome,
+      view?.code,
+      view?.alreadyPaired,
+      state?.pairingNamesake,
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _contentKey = _currentKey();
+    _arm();
+    controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _arm() {
+    _timer?.cancel();
+    _timer = Timer(dialogActivationDelay, () {
+      if (mounted) setState(() => _armed = true);
+    });
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) return;
+    final next = _currentKey();
+    if (next == _contentKey) return;
+    setState(() {
+      _contentKey = next;
+      _armed = false;
+    });
+    _arm();
+  }
+
+  VoidCallback? _whenArmed(VoidCallback action) => _armed ? action : null;
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +282,7 @@ class _PairingDialog extends StatelessWidget {
         content: Text(_outcomeText(strings, view.outcome, name)),
         actions: [
           FilledButton(
-            onPressed: controller.dismissPairing,
+            onPressed: _whenArmed(controller.dismissPairing),
             child: Text(strings.closeButton),
           ),
         ],
@@ -245,7 +307,7 @@ class _PairingDialog extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: controller.cancelPairing,
+            onPressed: _whenArmed(controller.cancelPairing),
             child: Text(strings.cancelButton),
           ),
         ],
@@ -253,6 +315,10 @@ class _PairingDialog extends StatelessWidget {
     }
     final comparing = view.phase == PairingPhase.comparing;
     final code = view.code;
+    final namesake = controller.state?.pairingNamesake;
+    final showNamesake =
+        namesake != null &&
+        (comparing || view.phase == PairingPhase.waitingPeer);
     return AlertDialog(
       scrollable: true,
       title: Text(
@@ -267,6 +333,11 @@ class _PairingDialog extends StatelessWidget {
           if (!isInitiator && comparing)
             Text(
               strings.fingerprintLine(_shortFingerprint(view.peerFingerprint)),
+            ),
+          if (showNamesake)
+            Text(
+              strings.namesakeWarning(namesake),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           if (comparing) Text(strings.compareCode(name)),
           if (code != null && code.length > 3)
@@ -292,26 +363,32 @@ class _PairingDialog extends StatelessWidget {
       actions: [
         if (comparing && isInitiator)
           TextButton(
-            onPressed: controller.cancelPairing,
+            onPressed: _whenArmed(controller.cancelPairing),
             child: Text(strings.cancelButton),
           ),
         if (comparing && !isInitiator && !view.alreadyPaired)
           TextButton(
-            onPressed: () => controller.answerRequest(ReceiverAnswer.ignore),
+            onPressed: _whenArmed(
+              () => controller.answerRequest(ReceiverAnswer.ignore),
+            ),
             child: Text(strings.ignoreDeviceButton),
           ),
         if (comparing)
           TextButton(
-            onPressed: () => isInitiator
-                ? controller.answerCode(matches: false)
-                : controller.answerRequest(ReceiverAnswer.mismatch),
+            onPressed: _whenArmed(
+              () => isInitiator
+                  ? controller.answerCode(matches: false)
+                  : controller.answerRequest(ReceiverAnswer.mismatch),
+            ),
             child: Text(strings.doesNotMatchButton),
           ),
         if (comparing)
           FilledButton(
-            onPressed: () => isInitiator
-                ? controller.answerCode(matches: true)
-                : controller.answerRequest(ReceiverAnswer.matches),
+            onPressed: _whenArmed(
+              () => isInitiator
+                  ? controller.answerCode(matches: true)
+                  : controller.answerRequest(ReceiverAnswer.matches),
+            ),
             child: Text(strings.matchesButton),
           ),
       ],
@@ -338,15 +415,40 @@ class _PairingDialog extends StatelessWidget {
   }
 }
 
-class _QuestionDialog extends StatelessWidget {
+class _QuestionDialog extends StatefulWidget {
   const _QuestionDialog(this.question);
 
   final PairingQuestion question;
 
   @override
+  State<_QuestionDialog> createState() => _QuestionDialogState();
+}
+
+class _QuestionDialogState extends State<_QuestionDialog> {
+  bool _armed = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(dialogActivationDelay, () {
+      if (mounted) setState(() => _armed = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  VoidCallback? _answer(bool value) =>
+      _armed ? () => Navigator.of(context).pop(value) : null;
+
+  @override
   Widget build(BuildContext context) {
     final strings = AppStringsDelegate.of(context);
-    final question = this.question;
+    final question = widget.question;
     return switch (question) {
       ReplaceQuestion() => AlertDialog(
         scrollable: true,
@@ -356,11 +458,11 @@ class _QuestionDialog extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: _answer(false),
             child: Text(strings.keepBothButton),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: _answer(true),
             child: Text(strings.replaceButton),
           ),
         ],
@@ -371,11 +473,11 @@ class _QuestionDialog extends StatelessWidget {
         content: Text(strings.mineBody),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: _answer(false),
             child: Text(strings.mineNoButton),
           ),
           FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: _answer(true),
             child: Text(strings.mineYesButton),
           ),
         ],

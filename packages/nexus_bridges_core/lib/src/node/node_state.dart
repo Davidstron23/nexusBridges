@@ -14,6 +14,7 @@ enum PairRequestResult {
 enum NoticeKind {
   attemptCancelled,
   attemptDataMismatch,
+  attemptLost,
   unpairedByPeer,
   unpairNotSaved,
   changeNotSaved,
@@ -21,6 +22,7 @@ enum NoticeKind {
   pairingNotSaved,
   pairingFailed,
   pairingPaused,
+  replaceWithdrawn,
 }
 
 final class NetworkPrompt {
@@ -192,6 +194,7 @@ final class NodeState {
     this.fingerprint = '',
     this.entries = const [],
     this.pairing,
+    this.pairingNamesake,
     this.questions = const [],
     this.notices = const [],
     this.unsavedChanges = false,
@@ -212,6 +215,7 @@ final class NodeState {
   final String fingerprint;
   final List<DeviceEntry> entries;
   final PairingView? pairing;
+  final String? pairingNamesake;
   final List<PairingQuestion> questions;
   final List<Notice> notices;
   final bool unsavedChanges;

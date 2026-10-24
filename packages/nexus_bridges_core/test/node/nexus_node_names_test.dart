@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:nexus_bridges_core/src/node/node.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart'
-    show Announcement, AnnouncementKind, protocolVersion;
+    show Announcement, AnnouncementKind, Limits, protocolVersion;
 import 'package:test/test.dart';
 
 import 'two_nodes_harness.dart';
@@ -87,7 +87,7 @@ void main() {
   group('names only change through a verification (RF-128, D12)', () {
     test('a forged hello from the address of B with another name changes '
         'neither the row nor the saved name (control: a bye from there is '
-        'heard)', () async {
+        'heard and makes A check B, which stays)', () async {
       final (a, b) = await twoNodes(nameB: 'Laptop');
       await meet(a, b);
       await pairNodes(a, b);
@@ -113,15 +113,19 @@ void main() {
       expect(a.entryOf(b.fingerprint)!.displayName, 'Laptop');
       expect(await _savedNameOf(a, b), 'Laptop');
 
+      expect(a.timers.createdBy('_verifyGoodbye'), 0);
       socket.send(
         Announcement(AnnouncementKind.bye, b.info).encode(),
         hostA,
         a.udpPort,
       );
-      await a.until(
-        (s) => !a.sees(b),
+      await eventually(
+        () => a.timers.createdBy('_verifyGoodbye') > 0,
         reason: 'control: datagrams from that address do arrive',
       );
+      await pause();
+      expect(a.sees(b), isTrue);
+      expect(a.entryOf(b.fingerprint)!.displayName, 'Laptop');
     }, timeout: twoNodesTimeout);
 
     test('a new name that cannot be saved is still shown, is only logged '
@@ -173,6 +177,7 @@ void main() {
       await Directory('${b.dataDir.path}${sep}identity')
           .delete(recursive: true);
       await _forget(a, b);
+      a.advance(Limits.replaceAfterAbsence);
       await b.restart();
       expect(b.fingerprint, isNot(old));
       expect(b.state.identityStatus, IdentityStatus.reset);
@@ -185,6 +190,10 @@ void main() {
         'certificate is refused while the old one stays paired', () async {
       final (a, b, old) = await reinstalled();
 
+      await a.until(
+        (s) => a.entryOf(b.fingerprint)?.possiblyReplaces != null,
+        reason: 'warning on the row of the new identity',
+      );
       final entry = a.entryOf(b.fingerprint)!;
       expect(entry.paired, isFalse);
       expect(entry.visible, isTrue);

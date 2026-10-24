@@ -16,12 +16,12 @@ PairedDevice? findReplaced({
   required String? name,
   required String excluding,
   required List<PairedDevice> paired,
-  required bool Function(String) isVisible,
+  required bool Function(String) isReplaceable,
 }) {
   if (name == null) return null;
   PairedDevice? newest;
   for (final other in paired) {
-    if (other.fingerprint == excluding || isVisible(other.fingerprint)) {
+    if (other.fingerprint == excluding || !isReplaceable(other.fingerprint)) {
       continue;
     }
     if (!sameName(name, other.name)) continue;
@@ -30,6 +30,25 @@ PairedDevice? findReplaced({
     }
   }
   return newest;
+}
+
+String? namesakeOf({
+  required String? name,
+  required String excluding,
+  required List<PairedDevice> paired,
+}) {
+  if (name == null) return null;
+  PairedDevice? newest;
+  for (final other in paired) {
+    if (other.fingerprint == excluding || !sameName(name, other.name)) {
+      continue;
+    }
+    if (newest == null || other.pairedAt.isAfter(newest.pairedAt)) {
+      newest = other;
+    }
+  }
+  final found = newest?.name;
+  return found == null ? null : sanitizeDisplayName(found);
 }
 
 final class _Row {
@@ -49,6 +68,7 @@ List<DeviceEntry> buildEntries({
   required List<PairedDevice> paired,
   required bool Function(String) isIgnored,
   required Set<String> mismatched,
+  required bool Function(String) isReplaceable,
 }) {
   final storedBy = {for (final device in paired) device.fingerprint: device};
   final visibleBy = <String, DiscoveredDevice>{};
@@ -82,7 +102,13 @@ List<DeviceEntry> buildEntries({
             row.device != null &&
             row.stored != null &&
             mismatched.contains(row.fingerprint),
-        possiblyReplaces: _possiblyReplaces(row, paired, visibleBy, names),
+        possiblyReplaces: _possiblyReplaces(
+          row,
+          paired,
+          visibleBy,
+          names,
+          isReplaceable,
+        ),
       ),
   ];
   entries.sort((a, b) {
@@ -99,13 +125,15 @@ String? _possiblyReplaces(
   List<PairedDevice> paired,
   Map<String, DiscoveredDevice> visibleBy,
   Map<String, String> names,
+  bool Function(String) isReplaceable,
 ) {
   if (row.device == null || row.stored != null) return null;
   final old = findReplaced(
     name: row.name,
     excluding: row.fingerprint,
     paired: paired,
-    isVisible: visibleBy.containsKey,
+    isReplaceable: (fingerprint) =>
+        !visibleBy.containsKey(fingerprint) && isReplaceable(fingerprint),
   );
   return old == null ? null : names[old.fingerprint];
 }

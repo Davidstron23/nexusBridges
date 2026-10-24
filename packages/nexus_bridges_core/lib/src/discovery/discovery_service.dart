@@ -58,6 +58,7 @@ final class DiscoveryService {
   final Map<String, ActiveInterface> _active = {};
   final Map<String, AbortSignal> _aborts = {};
   final Map<String, DateTime> _lastReplies = {};
+  final Map<String, DateTime> _goodbyeChecks = {};
   final Set<String> _presenting = {};
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
@@ -160,9 +161,14 @@ final class DiscoveryService {
       )) {
         final signal = signals[iface.id];
         if (_stopped || signal == null || signal.aborted) continue;
-        if (_registry.onVerified(info, address, iface.id, fromScan: true)) {
-          _emitIfChanged();
-        }
+        final changed = _registry.onVerified(
+          info,
+          address,
+          iface.id,
+          fromScan: true,
+        );
+        _gate.clearFailures(info.fingerprint);
+        if (changed) _emitIfChanged();
       }
     } catch (e) {
       _log('rescan failed: ${e.runtimeType}');
@@ -185,6 +191,7 @@ final class DiscoveryService {
     }
     _gate.clear();
     _lastReplies.clear();
+    _goodbyeChecks.clear();
     _announceTimer?.cancel();
     _presentTimer?.cancel();
     _expireTimer?.cancel();
@@ -230,6 +237,8 @@ final class DiscoveryService {
           }
         case Verify(:final info, :final address, :final interfaceId):
           _submit(info, address, interfaceId, reverse: reverse);
+        case VerifyGoodbye(:final info, :final address, :final interfaceId):
+          _submitGoodbye(info, address, interfaceId);
       }
     } catch (e) {
       _log('announcement failed: ${e.runtimeType}');
@@ -244,13 +253,68 @@ final class DiscoveryService {
   }) {
     final abort = _aborts[interfaceId];
     if (abort == null) return;
+    final port = _paired.isPaired(info.fingerprint) ? info.port : null;
     _gate.submit(
       fingerprint: info.fingerprint,
       ip: address.address,
       interfaceId: interfaceId,
       reverse: reverse,
-      job: () => _verify(info, address, interfaceId, abort, reverse),
+      port: port,
+      job: () => _verify(info, address, interfaceId, abort, reverse, port),
     );
+  }
+
+  void _submitGoodbye(
+    DeviceInfo info,
+    InternetAddress address,
+    String interfaceId,
+  ) {
+    final abort = _aborts[interfaceId];
+    if (abort == null) return;
+    final fingerprint = info.fingerprint;
+    final now = _now();
+    final last = _goodbyeChecks[fingerprint];
+    if (last != null && !_goodbyeExpired(now, last)) return;
+    _goodbyeChecks[fingerprint] = now;
+    _gate.submit(
+      fingerprint: fingerprint,
+      ip: address.address,
+      interfaceId: interfaceId,
+      port: info.port,
+      job: () => _verifyGoodbye(info, address, interfaceId, abort),
+    );
+  }
+
+  Future<void> _verifyGoodbye(
+    DeviceInfo info,
+    InternetAddress address,
+    String interfaceId,
+    AbortSignal abort,
+  ) async {
+    DeviceInfo? verified;
+    try {
+      verified = await _verifier.register(
+        address: address,
+        port: info.port,
+        expectedFingerprint: info.fingerprint,
+        self: _selfInfo(),
+        abort: abort,
+      );
+    } catch (e) {
+      _log('goodbye verification failed: ${e.runtimeType}');
+    }
+    if (_stopped || abort.aborted) return;
+    if (verified != null &&
+        verified.fingerprint == info.fingerprint &&
+        _active.containsKey(interfaceId)) {
+      final changed = _registry.onVerified(verified, address, interfaceId);
+      _gate.clearFailures(info.fingerprint);
+      if (changed) _emitIfChanged();
+      return;
+    }
+    if (_registry.onGoodbyeFailed(info.fingerprint, address)) {
+      _emitIfChanged();
+    }
   }
 
   Future<void> _verify(
@@ -259,6 +323,7 @@ final class DiscoveryService {
     String interfaceId,
     AbortSignal abort,
     bool reverse,
+    int? port,
   ) async {
     DeviceInfo? verified;
     try {
@@ -276,12 +341,17 @@ final class DiscoveryService {
     if (verified != null &&
         verified.fingerprint == info.fingerprint &&
         _active.containsKey(interfaceId)) {
-      if (_registry.onVerified(verified, address, interfaceId)) {
-        _emitIfChanged();
-      }
+      final changed = _registry.onVerified(verified, address, interfaceId);
+      _gate.clearFailures(info.fingerprint);
+      if (changed) _emitIfChanged();
       return;
     }
-    _gate.markFailed(info.fingerprint, address.address, reverse: reverse);
+    _gate.markFailed(
+      info.fingerprint,
+      address.address,
+      reverse: reverse,
+      port: port,
+    );
   }
 
   void _presentToScanned() {
@@ -317,14 +387,14 @@ final class DiscoveryService {
       if (verified != null &&
           verified.fingerprint == fingerprint &&
           _active.containsKey(device.interfaceId)) {
-        if (_registry.onVerified(
+        final changed = _registry.onVerified(
           verified,
           device.address,
           device.interfaceId,
           fromScan: true,
-        )) {
-          _emitIfChanged();
-        }
+        );
+        _gate.clearFailures(fingerprint);
+        if (changed) _emitIfChanged();
       }
     } catch (e) {
       _log('presentation failed: ${e.runtimeType}');
@@ -364,10 +434,16 @@ final class DiscoveryService {
     return age.isNegative || age >= _replyInterval;
   }
 
+  static bool _goodbyeExpired(DateTime now, DateTime last) {
+    final age = now.difference(last);
+    return age.isNegative || age >= Limits.goodbyeCheckInterval;
+  }
+
   void _expire() {
     if (_stopped) return;
     final now = _now();
     _lastReplies.removeWhere((_, last) => _replyExpired(now, last));
+    _goodbyeChecks.removeWhere((_, last) => _goodbyeExpired(now, last));
     try {
       if (_registry.expire().isNotEmpty) _emitIfChanged();
     } catch (e) {
