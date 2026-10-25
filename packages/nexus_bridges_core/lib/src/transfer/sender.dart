@@ -1,0 +1,814 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+
+import '../identity/identity.dart' show DeviceIdentity;
+import '../pairing/pairing.dart' show PairedDevicesStore;
+import '../protocol/protocol.dart' show ApiPaths, Limits, sanitizeDisplayName;
+import '../transport/transport.dart'
+    show
+        AbortSignal,
+        HttpsResponse,
+        StreamPostAnswered,
+        StreamPostFailed,
+        StreamPostFailure;
+import 'hashing.dart';
+import 'link.dart';
+import 'messages.dart';
+import 'names.dart'
+    show baseName, isBlockedType, isProgram, isValidFileName, visibleFileName;
+import 'platform.dart';
+import 'transfer.dart';
+
+const Duration _pollMargin = Duration(seconds: 3);
+
+const Duration _retryDelay = Duration(seconds: 1);
+
+String _randomHex32() {
+  final random = Random.secure();
+  final buffer = StringBuffer();
+  for (var i = 0; i < 16; i++) {
+    buffer.write(random.nextInt(256).toRadixString(16).padLeft(2, '0'));
+  }
+  return buffer.toString();
+}
+
+final class _OutSession {
+  _OutSession({
+    required this.target,
+    required this.link,
+    required this.path,
+    required this.name,
+    required this.peerName,
+    required this.isProgram,
+    required this.typeCheck,
+  });
+
+  final SendTarget target;
+
+  final TransferLink link;
+
+  final String path;
+
+  final String name;
+
+  final String? peerName;
+
+  final Future<bool> typeCheck;
+
+  final AbortSignal abort = AbortSignal();
+
+  bool isProgram;
+
+  OutgoingPhase phase = OutgoingPhase.preparing;
+
+  int size = 0;
+
+  int sentBytes = 0;
+
+  bool cancelling = false;
+
+  bool stopping = false;
+
+  bool consulting = false;
+
+  bool done = false;
+
+  String? id;
+
+  String? permit;
+
+  Duration? waitingSince;
+
+  Duration? lastAnswerAt;
+
+  Duration counted = Duration.zero;
+
+  bool lastPicker = false;
+
+  Duration? lastByteAt;
+
+  Duration? lastRenewAt;
+
+  Duration? lastProgressAt;
+}
+
+final class TransferSender {
+  TransferSender({
+    required this._identity,
+    required this._paired,
+    required this._picker,
+    required this._fs,
+    required this._clock,
+    required this._pollHold,
+    required this._idleTimeout,
+    required this._confirmTimeout,
+    required this._onChanged,
+    required this._log,
+    this._onFilePicker,
+  });
+
+  final DeviceIdentity _identity;
+
+  final PairedDevicesStore _paired;
+
+  final FilePicker _picker;
+
+  final FileSystemPlatform _fs;
+
+  final Duration Function() _clock;
+
+  final Duration _pollHold;
+
+  final Duration _idleTimeout;
+
+  final Duration _confirmTimeout;
+
+  final void Function() _onChanged;
+
+  final void Function(String) _log;
+
+  final void Function(bool open)? _onFilePicker;
+
+  final Set<Future<Object?>> _cancels = {};
+
+  _OutSession? _active;
+
+  TransferResultView? _lastSent;
+
+  bool _filePickerOpen = false;
+
+  bool _closed = false;
+
+  bool get sending => _active != null || _filePickerOpen;
+
+  TransferResultView? get lastSent => _lastSent;
+
+  OutgoingTransferView? get outgoing {
+    final session = _active;
+    if (session == null) return null;
+    return OutgoingTransferView(
+      peerFingerprint: session.target.fingerprint,
+      peerName: session.peerName,
+      fileName: visibleFileName(session.name),
+      size: session.size,
+      isProgram: session.isProgram,
+      phase: session.phase,
+      sentBytes: session.sentBytes,
+      cancelling: session.cancelling,
+    );
+  }
+
+  Future<SendStart> sendFile(
+    SendTarget target, {
+    required SendTarget? Function() refresh,
+  }) async {
+    if (_closed) return SendStart.nothingChosen;
+    if (sending) return SendStart.alreadySending;
+    _filePickerOpen = true;
+    _onFilePicker?.call(true);
+    _onChanged();
+    String? path;
+    try {
+      path = await _picker.pickFile();
+    } catch (e) {
+      _log('file picker failed: ${e.runtimeType}');
+    } finally {
+      _filePickerOpen = false;
+      _onFilePicker?.call(false);
+    }
+    if (path == null || path.isEmpty || _closed) {
+      _onChanged();
+      return SendStart.nothingChosen;
+    }
+    _begin(target, path, refresh);
+    return SendStart.started;
+  }
+
+  void cancelOutgoing() {
+    final session = _active;
+    if (session == null || session.done || session.stopping) return;
+    switch (session.phase) {
+      case OutgoingPhase.preparing:
+        _finish(session, TransferOutcome.cancelledHere);
+      case OutgoingPhase.requesting || OutgoingPhase.waiting:
+        unawaited(
+          _sendCancel(
+            session,
+            CancelReason.cancelled,
+            Limits.transferCancelTimeout,
+          ),
+        );
+        _finish(session, TransferOutcome.cancelledHere);
+      case OutgoingPhase.uploading || OutgoingPhase.verifying:
+        unawaited(_cancelUpload(session));
+    }
+  }
+
+  void interfacesChanged(Set<String> activeInterfaceIds) {
+    final session = _active;
+    if (session == null ||
+        session.done ||
+        activeInterfaceIds.contains(session.target.interfaceId)) {
+      return;
+    }
+    unawaited(
+      _sendCancel(
+        session,
+        CancelReason.cancelled,
+        Limits.transferCloseCancelTimeout,
+      ),
+    );
+    _finish(session, TransferOutcome.interfaceDown);
+  }
+
+  void pairedChanged() {
+    final session = _active;
+    if (session == null ||
+        session.done ||
+        _paired.deviceOf(session.target.fingerprint) != null) {
+      return;
+    }
+    unawaited(
+      _sendCancel(
+        session,
+        CancelReason.cancelled,
+        Limits.transferCloseCancelTimeout,
+      ),
+    );
+    _finish(session, TransferOutcome.unpaired);
+  }
+
+  Future<void> peerUnpaired(String fingerprint) async {
+    final session = _active;
+    if (session == null ||
+        session.done ||
+        session.target.fingerprint != fingerprint) {
+      return;
+    }
+    switch (session.phase) {
+      case OutgoingPhase.preparing:
+        _finish(session, TransferOutcome.unpaired);
+      case OutgoingPhase.requesting ||
+          OutgoingPhase.waiting ||
+          OutgoingPhase.uploading ||
+          OutgoingPhase.verifying:
+        final pending = _sendCancel(
+          session,
+          CancelReason.cancelled,
+          Limits.transferCancelTimeout,
+        );
+        _finish(session, TransferOutcome.unpaired);
+        await pending;
+    }
+  }
+
+  void tick() {
+    try {
+      _tickSession();
+    } catch (e) {
+      _log('send tick failed: ${e.runtimeType}');
+    }
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    final session = _active;
+    if (session != null && !session.done) {
+      switch (session.phase) {
+        case OutgoingPhase.uploading || OutgoingPhase.verifying:
+          session.stopping = true;
+          await _sendCancel(
+            session,
+            CancelReason.cancelled,
+            Limits.transferCloseCancelTimeout,
+          );
+        default:
+          unawaited(
+            _sendCancel(
+              session,
+              CancelReason.cancelled,
+              Limits.transferCloseCancelTimeout,
+            ),
+          );
+      }
+      _finish(session, TransferOutcome.cancelledHere);
+    }
+    if (_cancels.isEmpty) return;
+    await Future.wait(
+      _cancels.toList(),
+    ).timeout(Limits.transferCancelTimeout, onTimeout: () => const <Object?>[]);
+  }
+
+  void _begin(SendTarget target, String path, SendTarget? Function() refresh) {
+    final name = baseName(path);
+    final device = _paired.deviceOf(target.fingerprint);
+    final peerName = device == null ? null : sanitizeDisplayName(device.name);
+    SendTarget? current;
+    try {
+      current = refresh();
+    } catch (e) {
+      _log('send target refresh failed: ${e.runtimeType}');
+    }
+    if (device == null) {
+      _record(target.fingerprint, peerName, name, TransferOutcome.unpaired);
+      return;
+    }
+    if (current == null || current.fingerprint != target.fingerprint) {
+      _record(target.fingerprint, peerName, name, TransferOutcome.noContact);
+      return;
+    }
+    if (!isValidFileName(name)) {
+      _record(target.fingerprint, peerName, name, TransferOutcome.invalidName);
+      return;
+    }
+    if (isBlockedType(name)) {
+      _record(target.fingerprint, peerName, name, TransferOutcome.blockedType);
+      return;
+    }
+    final session = _OutSession(
+      target: current,
+      link: TransferLink(identity: _identity, target: current),
+      path: path,
+      name: name,
+      peerName: peerName,
+      isProgram: isProgram(name),
+      typeCheck: isProgramHere(name, _fs),
+    );
+    _active = session;
+    _onChanged();
+    unawaited(_run(session, path));
+  }
+
+  void _record(
+    String fingerprint,
+    String? peerName,
+    String name,
+    TransferOutcome outcome,
+  ) {
+    _lastSent = TransferResultView(
+      direction: TransferDirection.outgoing,
+      peerFingerprint: fingerprint,
+      peerName: peerName,
+      fileName: visibleFileName(name),
+      isProgram: isProgram(name),
+      outcome: outcome,
+      canReveal: false,
+    );
+    _onChanged();
+  }
+
+  Future<void> _run(_OutSession session, String path) async {
+    try {
+      await _prepareAndRequest(session, path);
+    } catch (e) {
+      _log('send failed: ${e.runtimeType}');
+      await _conclude(session, TransferOutcome.noContact);
+    }
+  }
+
+  Future<void> _prepareAndRequest(_OutSession session, String path) async {
+    unawaited(
+      session.typeCheck.then((value) {
+        if (session.done || value == session.isProgram) return;
+        session.isProgram = value;
+        _onChanged();
+      }),
+    );
+    FileDigest? digest;
+    try {
+      digest = await hashFile(path, abort: session.abort);
+    } on FileSystemException catch (e) {
+      _log('send source unreadable: ${e.runtimeType}');
+      await _conclude(session, TransferOutcome.unreadable);
+      return;
+    }
+    if (session.done) return;
+    if (digest == null) {
+      await _conclude(session, TransferOutcome.cancelledHere);
+      return;
+    }
+    session.isProgram = await session.typeCheck;
+    if (session.done) return;
+    final id = _randomHex32();
+    session
+      ..id = id
+      ..size = digest.size
+      ..phase = OutgoingPhase.requesting;
+    _onChanged();
+    final offer = OfferRequest(
+      transfer: id,
+      name: session.name,
+      size: digest.size,
+      sha256: digest.sha256,
+    );
+    final reply = await session.link.post(
+      ApiPaths.transferOffer,
+      offer.toJson(),
+      abort: session.abort,
+    );
+    if (session.done) return;
+    if (reply == null) {
+      unawaited(
+        _sendCancel(
+          session,
+          CancelReason.noContact,
+          Limits.transferCloseCancelTimeout,
+        ),
+      );
+      _finish(session, TransferOutcome.noContact);
+      return;
+    }
+    final (status, json) = reply;
+    final state = status == 200 || status == 202
+        ? RemoteState.tryParse(json)
+        : null;
+    if (status == 200 && state != null) {
+      final permit = state.permit;
+      if (state.status == RemoteStatus.accepted && permit != null) {
+        await _accept(session, permit);
+        return;
+      }
+    }
+    if (status == 202 &&
+        state != null &&
+        state.status == RemoteStatus.waiting) {
+      await _awaitDecision(session, id, picker: state.picker ?? false);
+      return;
+    }
+    _finish(
+      session,
+      status == 200 || status == 202
+          ? TransferOutcome.noContact
+          : offerOutcome(status, json),
+    );
+  }
+
+  Future<void> _awaitDecision(
+    _OutSession session,
+    String id, {
+    required bool picker,
+  }) async {
+    final now = _clock();
+    session
+      ..phase = OutgoingPhase.waiting
+      ..waitingSince = now
+      ..lastAnswerAt = now
+      ..counted = Duration.zero
+      ..lastPicker = picker;
+    _onChanged();
+    final poll = WaitRequest(transfer: id).toJson();
+    while (!session.done) {
+      final sentAt = _clock();
+      final reply = await session.link.post(
+        ApiPaths.transferWait,
+        poll,
+        timeout: _pollHold + _pollMargin,
+        abort: session.abort,
+      );
+      if (session.done) return;
+      if (reply == null || reply.$1 == 429) {
+        await _pause(session, _retryDelay);
+        continue;
+      }
+      final (status, json) = reply;
+      final state = status == 200 ? RemoteState.tryParse(json) : null;
+      if (state == null) {
+        _finish(session, TransferOutcome.noContact);
+        return;
+      }
+      switch (state.status) {
+        case RemoteStatus.waiting:
+          final answeredAt = _clock();
+          final previous = session.lastAnswerAt;
+          if (!session.lastPicker && previous != null) {
+            session.counted += answeredAt - previous;
+          }
+          session
+            ..lastAnswerAt = answeredAt
+            ..lastPicker = state.picker ?? false;
+          await _keepGap(session, sentAt);
+        case RemoteStatus.accepted:
+          final permit = state.permit;
+          if (permit == null) {
+            _finish(session, TransferOutcome.noContact);
+          } else {
+            await _accept(session, permit);
+          }
+          return;
+        default:
+          _finish(session, outcomeOfRemote(state) ?? TransferOutcome.noContact);
+          return;
+      }
+    }
+  }
+
+  Future<void> _accept(_OutSession session, String permit) async {
+    session
+      ..permit = permit
+      ..phase = OutgoingPhase.uploading;
+    _onChanged();
+    await _upload(session);
+  }
+
+  Future<void> _upload(_OutSession session) async {
+    final id = session.id;
+    final permit = session.permit;
+    if (id == null || permit == null) {
+      _finish(session, TransferOutcome.noContact);
+      return;
+    }
+    final result = await session.link.upload(
+      transfer: id,
+      permit: permit,
+      filePath: session.path,
+      size: session.size,
+      onProgress: (sent) => _progress(session, sent),
+      onBodySent: () => _bodySent(session),
+      idleTimeout: _idleTimeout,
+      answerTimeout: Limits.transferConfirmCap,
+      abort: session.abort,
+    );
+    if (session.done) return;
+    if (session.stopping) {
+      final outcome = result is StreamPostAnswered
+          ? _outcomeOfUpload(result.response)
+          : null;
+      if (outcome != null && outcome.kind == TransferResultKind.saved) {
+        _finish(session, outcome);
+      }
+      return;
+    }
+    switch (result) {
+      case StreamPostAnswered(:final response):
+        final outcome = _outcomeOfUpload(response);
+        if (outcome != null) {
+          _finish(session, outcome);
+          return;
+        }
+        await _finishAfterConsult(session, TransferOutcome.uploadNotStarted);
+      case StreamPostFailed(:final failure):
+        switch (failure) {
+          case StreamPostFailure.notConnected:
+            unawaited(
+              _sendCancel(
+                session,
+                CancelReason.cancelled,
+                Limits.transferCloseCancelTimeout,
+              ),
+            );
+            _finish(session, TransferOutcome.uploadNotStarted);
+          case StreamPostFailure.sourceError:
+            session.stopping = true;
+            await _sendCancel(
+              session,
+              CancelReason.unreadable,
+              Limits.transferCancelTimeout,
+            );
+            _finish(session, TransferOutcome.unreadable);
+          case StreamPostFailure.stalled:
+            await _finishAfterConsult(session, TransferOutcome.idle);
+          case StreamPostFailure.connectionLost:
+            await _finishAfterConsult(
+              session,
+              session.lastByteAt != null
+                  ? TransferOutcome.unconfirmed
+                  : TransferOutcome.connectionLost,
+            );
+          case StreamPostFailure.noAnswer:
+            _finish(session, TransferOutcome.unconfirmed);
+          case StreamPostFailure.aborted:
+            break;
+        }
+    }
+  }
+
+  TransferOutcome? _outcomeOfUpload(HttpsResponse response) {
+    if (response.status != 200) return null;
+    final json = decodeJsonObject(response.body);
+    final state = json == null ? null : RemoteState.tryParse(json);
+    return state == null ? null : outcomeOfRemote(state);
+  }
+
+  Future<void> _finishAfterConsult(
+    _OutSession session,
+    TransferOutcome fallback,
+  ) async {
+    final queried = await _consult(session);
+    if (session.done || session.stopping) return;
+    _finish(session, queried ?? fallback);
+  }
+
+  Future<TransferOutcome?> _consult(_OutSession session) async {
+    session.consulting = true;
+    final id = session.id;
+    if (id == null) return null;
+    final start = session.lastByteAt ?? _clock();
+    final poll = WaitRequest(transfer: id).toJson();
+    while (!session.done &&
+        !session.stopping &&
+        _clock() - start < _confirmTimeout) {
+      final sentAt = _clock();
+      final reply = await session.link.post(
+        ApiPaths.transferWait,
+        poll,
+        timeout: _pollHold + _pollMargin,
+        abort: session.abort,
+      );
+      if (session.done || session.stopping) return null;
+      if (reply == null || reply.$1 == 429) {
+        await _pause(session, _retryDelay);
+        continue;
+      }
+      final state = reply.$1 == 200 ? RemoteState.tryParse(reply.$2) : null;
+      if (state == null) return null;
+      if (state.status == RemoteStatus.uploading ||
+          state.status == RemoteStatus.saving) {
+        await _keepGap(session, sentAt);
+        continue;
+      }
+      return outcomeOfRemote(state);
+    }
+    return null;
+  }
+
+  void _progress(_OutSession session, int sent) {
+    if (session.done) return;
+    session.sentBytes = min(sent, session.size);
+    final now = _clock();
+    final lastAt = session.lastProgressAt;
+    if (session.sentBytes >= session.size ||
+        lastAt == null ||
+        now - lastAt >= Limits.transferProgressInterval) {
+      session.lastProgressAt = now;
+      _onChanged();
+    }
+  }
+
+  void _bodySent(_OutSession session) {
+    if (session.done) return;
+    final now = _clock();
+    session
+      ..sentBytes = session.size
+      ..phase = OutgoingPhase.verifying
+      ..lastByteAt = now
+      ..lastRenewAt = now;
+    _onChanged();
+    if (!session.stopping) unawaited(_renew(session));
+  }
+
+  Future<void> _renew(_OutSession session) async {
+    final id = session.id;
+    if (id == null) return;
+    final poll = WaitRequest(transfer: id).toJson();
+    try {
+      while (!session.done &&
+          !session.stopping &&
+          !session.consulting &&
+          session.phase == OutgoingPhase.verifying) {
+        final sentAt = _clock();
+        final reply = await session.link.post(
+          ApiPaths.transferWait,
+          poll,
+          timeout: _pollHold + _pollMargin,
+          abort: session.abort,
+        );
+        if (session.done || session.stopping || session.consulting) return;
+        final state = reply != null && reply.$1 == 200
+            ? RemoteState.tryParse(reply.$2)
+            : null;
+        if (state != null &&
+            (state.status == RemoteStatus.uploading ||
+                state.status == RemoteStatus.saving)) {
+          session.lastRenewAt = _clock();
+          await _keepGap(session, sentAt);
+          continue;
+        }
+        await _pause(session, _retryDelay);
+      }
+    } catch (e) {
+      _log('send renewal failed: ${e.runtimeType}');
+    }
+  }
+
+  Future<void> _cancelUpload(_OutSession session) async {
+    session.stopping = true;
+    session.cancelling = true;
+    TransferOutcome? outcome;
+    try {
+      _onChanged();
+      final reply = await _sendCancel(
+        session,
+        CancelReason.cancelled,
+        Limits.transferCancelTimeout,
+      );
+      final state = reply != null && reply.$1 == 200
+          ? RemoteState.tryParse(reply.$2)
+          : null;
+      if (state != null && state.status == RemoteStatus.saved) {
+        outcome = outcomeOfRemote(state);
+      }
+    } catch (e) {
+      _log('send cancel failed: ${e.runtimeType}');
+    }
+    _finish(session, outcome ?? TransferOutcome.cancelledHere);
+  }
+
+  void _tickSession() {
+    final session = _active;
+    if (session == null || session.done || session.stopping) return;
+    if (session.phase == OutgoingPhase.verifying) {
+      _tickVerifying(session);
+      return;
+    }
+    if (session.phase != OutgoingPhase.waiting) return;
+    final since = session.waitingSince;
+    final lastAnswerAt = session.lastAnswerAt;
+    if (since == null || lastAnswerAt == null) return;
+    final now = _clock();
+    final counted =
+        session.counted +
+        (session.lastPicker ? Duration.zero : now - lastAnswerAt);
+    if (counted >= Limits.transferDecisionTimeout ||
+        now - since >= Limits.transferDecisionCap) {
+      unawaited(
+        _sendCancel(
+          session,
+          CancelReason.cancelled,
+          Limits.transferCancelTimeout,
+        ),
+      );
+      _finish(session, TransferOutcome.unanswered);
+    }
+  }
+
+  void _tickVerifying(_OutSession session) {
+    final lastByteAt = session.lastByteAt;
+    final lastRenewAt = session.lastRenewAt;
+    if (lastByteAt == null || lastRenewAt == null) return;
+    final now = _clock();
+    if (now - lastRenewAt >= _confirmTimeout ||
+        now - lastByteAt >= Limits.transferConfirmCap) {
+      _finish(session, TransferOutcome.unconfirmed);
+    }
+  }
+
+  Future<(int, Map<String, Object?>)?> _sendCancel(
+    _OutSession session,
+    CancelReason reason,
+    Duration timeout,
+  ) {
+    final transfer = session.id;
+    if (transfer == null) return Future.value();
+    final pending = session.link.post(
+      ApiPaths.transferCancel,
+      CancelRequest(transfer: transfer, reason: reason).toJson(),
+      timeout: timeout,
+    );
+    _cancels.add(pending);
+    unawaited(pending.whenComplete(() => _cancels.remove(pending)));
+    return pending;
+  }
+
+  Future<void> _conclude(_OutSession session, TransferOutcome outcome) async {
+    if (session.done) return;
+    session.isProgram = await session.typeCheck;
+    _finish(session, outcome);
+  }
+
+  void _finish(_OutSession session, TransferOutcome outcome) {
+    if (session.done) return;
+    session.done = true;
+    session.abort.abort();
+    if (identical(_active, session)) _active = null;
+    _lastSent = TransferResultView(
+      direction: TransferDirection.outgoing,
+      peerFingerprint: session.target.fingerprint,
+      peerName: session.peerName,
+      fileName: visibleFileName(session.name),
+      isProgram: session.isProgram,
+      outcome: outcome,
+      canReveal: false,
+    );
+    _onChanged();
+  }
+
+  Future<void> _keepGap(_OutSession session, Duration sentAt) {
+    final elapsed = _clock() - sentAt;
+    if (elapsed >= _retryDelay) return Future.value();
+    return _pause(session, _retryDelay - elapsed);
+  }
+
+  Future<void> _pause(_OutSession session, Duration span) {
+    final elapsed = Completer<void>();
+    final timer = Timer(span, () {
+      if (!elapsed.isCompleted) elapsed.complete();
+    });
+    final remove = session.abort.onAbort(() {
+      timer.cancel();
+      if (!elapsed.isCompleted) elapsed.complete();
+    });
+    return elapsed.future.whenComplete(remove);
+  }
+}

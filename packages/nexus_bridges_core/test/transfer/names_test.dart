@@ -91,6 +91,9 @@ const List<String> programExtensions = [
   '.jar',
   '.reg',
   '.appx',
+  '.dll',
+  '.sys',
+  '.application',
 ];
 
 void main() {
@@ -354,6 +357,16 @@ void main() {
         'informe.pdf',
         'x.lnk',
       ]) {
+        expect(isProgram(name), isFalse, reason: name);
+      }
+    });
+
+    test('plan point 66: ".dll", ".sys" and ".application" are programs, '
+        'their near names are not', () {
+      for (final name in ['x.dll', 'DRIVER.SYS', 'app.Application']) {
+        expect(isProgram(name), isTrue, reason: name);
+      }
+      for (final name in ['x.dl', 'x.dlls', 'x.system', 'x.applications']) {
         expect(isProgram(name), isFalse, reason: name);
       }
     });
