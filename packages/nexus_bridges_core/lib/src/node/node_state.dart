@@ -216,6 +216,7 @@ final class NodeState {
     this.lastReceived,
     this.transferInProgress = false,
     this.pickerOpen = false,
+    this.incomingNamesake,
   });
 
   final IdentityStatus identityStatus;
@@ -243,4 +244,5 @@ final class NodeState {
   final TransferResultView? lastReceived;
   final bool transferInProgress;
   final bool pickerOpen;
+  final String? incomingNamesake;
 }

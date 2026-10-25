@@ -1692,6 +1692,7 @@ final class NexusNode {
     final view = _coordinator?.view;
     final paired = _paired;
     final transfers = _transfers;
+    final incoming = transfers?.incoming;
     final next = NodeState(
       identityStatus: _identityStatus,
       identityError: _identityError,
@@ -1721,11 +1722,18 @@ final class NexusNode {
           (_ignored?.hasUnsavedChanges ?? false),
       scanning: _scanning,
       outgoing: transfers?.outgoing,
-      incoming: transfers?.incoming,
+      incoming: incoming,
       lastSent: transfers?.lastSent,
       lastReceived: transfers?.lastReceived,
       transferInProgress: transfers?.busy ?? false,
       pickerOpen: transfers?.pickerOpen ?? false,
+      incomingNamesake: incoming == null || paired == null
+          ? null
+          : namesakeOf(
+              name: incoming.peerName,
+              excluding: incoming.peerFingerprint,
+              paired: paired.devices,
+            ),
     );
     _state = next;
     final last = _lastEmitted;
@@ -1752,6 +1760,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.lastReceived == b.lastReceived &&
       a.transferInProgress == b.transferInProgress &&
       a.pickerOpen == b.pickerOpen &&
+      a.incomingNamesake == b.incomingNamesake &&
       a.pairing == b.pairing &&
       a.pairingNamesake == b.pairingNamesake &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&
