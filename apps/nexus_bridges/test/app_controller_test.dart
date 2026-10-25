@@ -593,6 +593,142 @@ void main() {
     });
   });
 
+  group('transfer methods (T2 of 005, point 92)', () {
+    final unknown = 'CD' * 32;
+    const session = 'no-such-session';
+
+    test('without a node, sendFile and revealLastReceived are unavailable '
+        'and the rest do nothing nor throw', () async {
+      final controller = controllerFor();
+
+      expect(await controller.sendFile(unknown), SendFileResult.unavailable);
+      expect(await controller.revealLastReceived(), RevealResult.unavailable);
+      controller.cancelSending();
+      controller.cancelReceiving(session);
+      controller.answerIncoming(session, accept: true);
+      controller.answerIncoming(session, accept: false);
+      await controller.useProposedFolder(session);
+      await controller.chooseOtherFolder(session);
+      controller.useFolderAnyway(session);
+      controller.cancelFolderQuestion(session);
+      await controller.rememberFolderAfterEnd(session, remember: true);
+      await controller.rememberFolderAfterEnd(session, remember: false);
+      controller.dismissFolderPanel(session);
+
+      expect(harness.startCalls, 0);
+      expect(controller.state, isNull);
+    });
+
+    test(
+      'after a failed start, the transfer methods still have no node',
+      () async {
+        harness.failuresLeft = 1;
+        final controller = controllerFor();
+        await controller.init();
+        expect(controller.startFailed, isTrue);
+
+        expect(await controller.sendFile(unknown), SendFileResult.unavailable);
+        expect(await controller.revealLastReceived(), RevealResult.unavailable);
+        await controller.useProposedFolder(session);
+        await controller.chooseOtherFolder(session);
+        await controller.rememberFolderAfterEnd(session, remember: true);
+        expect(controller.state, isNull);
+      },
+    );
+
+    test('with a node, sendFile of a device that is not in the list goes to '
+        'the node and is unavailable, without a send', () async {
+      final controller = controllerFor();
+      await controller.init();
+
+      expect(
+        await controller.sendFile(unknown).timeout(const Duration(seconds: 5)),
+        SendFileResult.unavailable,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      final state = controller.state!;
+      expect(state.outgoing, isNull);
+      expect(state.lastSent, isNull);
+      expect(state.transferInProgress, isFalse);
+      expect(state.pickerOpen, isFalse);
+    });
+
+    test('with a node and nothing received, revealLastReceived goes to the '
+        'node and is unavailable', () async {
+      final controller = controllerFor();
+      await controller.init();
+
+      expect(
+        await controller.revealLastReceived().timeout(
+          const Duration(seconds: 5),
+        ),
+        RevealResult.unavailable,
+      );
+      expect(controller.state!.lastReceived, isNull);
+    });
+
+    test('with a node, the methods on a session that does not exist go to '
+        'the node, complete and change nothing', () async {
+      final controller = controllerFor();
+      await controller.init();
+      final before = controller.state!;
+      final budget = const Duration(seconds: 5);
+
+      controller.cancelSending();
+      controller.cancelReceiving(session);
+      controller.answerIncoming(session, accept: true);
+      controller.answerIncoming(session, accept: false);
+      await controller.useProposedFolder(session).timeout(budget);
+      await controller.chooseOtherFolder(session).timeout(budget);
+      controller.useFolderAnyway(session);
+      controller.cancelFolderQuestion(session);
+      await controller
+          .rememberFolderAfterEnd(session, remember: true)
+          .timeout(budget);
+      await controller
+          .rememberFolderAfterEnd(session, remember: false)
+          .timeout(budget);
+      controller.dismissFolderPanel(session);
+      await controller.rescan().timeout(budget);
+
+      final after = controller.state!;
+      expect(after.entries, before.entries);
+      expect(after.outgoing, isNull);
+      expect(after.incoming, isNull);
+      expect(after.lastSent, isNull);
+      expect(after.lastReceived, isNull);
+      expect(after.transferInProgress, isFalse);
+      expect(after.pickerOpen, isFalse);
+      expect(after.incomingNamesake, isNull);
+      expect(
+        after.notices.where(
+          (notice) => notice.kind != NoticeKind.changeNotSaved,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('after shutdown, sendFile and revealLastReceived are unavailable and '
+        'the rest do nothing', () async {
+      final controller = controllerFor();
+      await controller.init();
+      await controller.shutdown();
+
+      expect(await controller.sendFile(unknown), SendFileResult.unavailable);
+      expect(await controller.revealLastReceived(), RevealResult.unavailable);
+      controller.cancelSending();
+      controller.cancelReceiving(session);
+      controller.answerIncoming(session, accept: true);
+      await controller.useProposedFolder(session);
+      await controller.chooseOtherFolder(session);
+      controller.useFolderAnyway(session);
+      controller.cancelFolderQuestion(session);
+      await controller.rememberFolderAfterEnd(session, remember: true);
+      controller.dismissFolderPanel(session);
+    });
+  });
+
   group('dismissIdentityWarning', () {
     test('sets the flag and notifies', () {
       final controller = controllerFor();

@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/l10n/app_strings_en.dart';
 import 'package:nexus_bridges/src/l10n/app_strings_es.dart';
+import 'package:nexus_bridges_core/nexus_bridges_core.dart'
+    show TransferOutcome;
 
 typedef _Text = String Function(AppStrings strings);
 
@@ -96,6 +100,527 @@ final Map<String, _Text> _texts = {
   'namesakeWarning': (s) => s.namesakeWarning(_sampleName),
   'noticeAttemptLost': (s) => s.noticeAttemptLost(_sampleShort),
   'noticeReplaceWithdrawn': (s) => s.noticeReplaceWithdrawn(_sampleOldName),
+  'sendFileButton': (s) => s.sendFileButton,
+  'sendNeedsVisible': (s) => s.sendNeedsVisible,
+  'sendNeedsPairAgain': (s) => s.sendNeedsPairAgain,
+  'alreadySending': (s) => s.alreadySending,
+  'sendUnavailable': (s) => s.sendUnavailable,
+  'searchingDevices': (s) => s.searchingDevices,
+  'sendingToTitle': (s) => s.sendingToTitle(_sampleName),
+  'fileLine': (s) => s.fileLine(_sampleFile, _sampleSize),
+  'programLabel': (s) => s.programLabel,
+  'preparingFile': (s) => s.preparingFile(_sampleFile),
+  'contactingPeer': (s) => s.contactingPeer(_sampleName),
+  'waitingAcceptance': (s) => s.waitingAcceptance(_sampleName),
+  'progressLine': (s) =>
+      s.progressLine(_samplePercent, _sampleDone, _sampleSize),
+  'peerCheckingFile': (s) => s.peerCheckingFile(_sampleName),
+  'cancellingTransfer': (s) => s.cancellingTransfer,
+  'incomingRequestTitle': (s) => s.incomingRequestTitle(_sampleName),
+  'withoutMarkNote': (s) => s.withoutMarkNote,
+  'acceptButton': (s) => s.acceptButton,
+  'rejectButton': (s) => s.rejectButton,
+  'folderQuestionTitle': (s) => s.folderQuestionTitle(_sampleName),
+  'folderFirstTimeBody': (s) => s.folderFirstTimeBody,
+  'folderThisTimeBody': (s) => s.folderThisTimeBody,
+  'proposedFolderLine': (s) => s.proposedFolderLine(_samplePath),
+  'useThisFolderButton': (s) => s.useThisFolderButton,
+  'chooseOtherFolderButton': (s) => s.chooseOtherFolderButton,
+  'pickerOpenNote': (s) => s.pickerOpenNote,
+  'folderForbidden': (s) => s.folderForbidden(_samplePath),
+  'folderCannotUse': (s) => s.folderCannotUse(_samplePath),
+  'folderStillUnavailable': (s) => s.folderStillUnavailable(_samplePath),
+  'folderUnknownVolume': (s) => s.folderUnknownVolume(_samplePath),
+  'folderAdminShare': (s) => s.folderAdminShare(_samplePath),
+  'checkingFolder': (s) => s.checkingFolder,
+  'cautionNoMark': (s) => s.cautionNoMark(_samplePath),
+  'cautionRemote': (s) => s.cautionRemote(_samplePath),
+  'useAnywayButton': (s) => s.useAnywayButton,
+  'transferAlreadyEnded': (s) => s.transferAlreadyEnded,
+  'folderRememberedNote': (s) => s.folderRememberedNote(_samplePath),
+  'folderNotUsable': (s) => s.folderNotUsable(_samplePath),
+  'rememberAnywayButton': (s) => s.rememberAnywayButton,
+  'dontRememberButton': (s) => s.dontRememberButton,
+  'receivingFromTitle': (s) => s.receivingFromTitle(_sampleName),
+  'waitingForData': (s) => s.waitingForData,
+  'checkingFile': (s) => s.checkingFile,
+  'lastSentTitle': (s) => s.lastSentTitle,
+  'lastReceivedTitle': (s) => s.lastReceivedTitle,
+  'toPeer': (s) => s.toPeer(_sampleName),
+  'fromPeer': (s) => s.fromPeer(_sampleName),
+  'showInFolderButton': (s) => s.showInFolderButton,
+  'revealFolderOnly': (s) => s.revealFolderOnly,
+  'folderUnavailable': (s) => s.folderUnavailable,
+  'closeDuringTransferTitle': (s) => s.closeDuringTransferTitle,
+  'closeDuringTransferBody': (s) => s.closeDuringTransferBody,
+  'keepOpenButton': (s) => s.keepOpenButton,
+  'closeAndCancelButton': (s) => s.closeAndCancelButton,
+};
+
+const String _sampleFile = 'informe anual.pdf';
+const String _sampleSize = '1,5 KB';
+const String _sampleDone = '700 bytes';
+const int _samplePercent = 42;
+const String _samplePath = r'C:\Users\Ana\Downloads\NexusBridges';
+
+final String _dots = String.fromCharCode(0x2026);
+final String _middleDot = String.fromCharCode(0x00B7);
+
+const Set<String> _withPath = {
+  'proposedFolderLine',
+  'folderForbidden',
+  'folderCannotUse',
+  'folderStillUnavailable',
+  'folderUnknownVolume',
+  'folderAdminShare',
+  'cautionNoMark',
+  'cautionRemote',
+  'folderRememberedNote',
+  'folderNotUsable',
+};
+
+const Set<String> _withFile = {'fileLine', 'preparingFile'};
+
+final Map<String, String Function(AppStrings, String)> _byArgument = {
+  'sendingToTitle': (s, v) => s.sendingToTitle(v),
+  'fileLine': (s, v) => s.fileLine(v, _sampleSize),
+  'preparingFile': (s, v) => s.preparingFile(v),
+  'contactingPeer': (s, v) => s.contactingPeer(v),
+  'waitingAcceptance': (s, v) => s.waitingAcceptance(v),
+  'peerCheckingFile': (s, v) => s.peerCheckingFile(v),
+  'incomingRequestTitle': (s, v) => s.incomingRequestTitle(v),
+  'folderQuestionTitle': (s, v) => s.folderQuestionTitle(v),
+  'proposedFolderLine': (s, v) => s.proposedFolderLine(v),
+  'folderForbidden': (s, v) => s.folderForbidden(v),
+  'folderCannotUse': (s, v) => s.folderCannotUse(v),
+  'folderStillUnavailable': (s, v) => s.folderStillUnavailable(v),
+  'folderUnknownVolume': (s, v) => s.folderUnknownVolume(v),
+  'folderAdminShare': (s, v) => s.folderAdminShare(v),
+  'cautionNoMark': (s, v) => s.cautionNoMark(v),
+  'cautionRemote': (s, v) => s.cautionRemote(v),
+  'folderRememberedNote': (s, v) => s.folderRememberedNote(v),
+  'folderNotUsable': (s, v) => s.folderNotUsable(v),
+  'receivingFromTitle': (s, v) => s.receivingFromTitle(v),
+  'toPeer': (s, v) => s.toPeer(v),
+  'fromPeer': (s, v) => s.fromPeer(v),
+};
+
+final Map<String, (String, String)> _expectedTransfer = {
+  'sendFileButton': ('Send file', 'Enviar archivo'),
+  'sendNeedsVisible': (
+    'It has to be visible to send it files.',
+    'Tiene que estar a la vista para enviarle archivos.',
+  ),
+  'sendNeedsPairAgain': (
+    'Pair it again before sending it files.',
+    'Vuelve a vincularlo antes de enviarle archivos.',
+  ),
+  'alreadySending': (
+    'Wait for the current send to finish.',
+    'Espera a que termine el envío actual.',
+  ),
+  'sendUnavailable': (
+    "You can't send files to this device right now.",
+    'Ahora no se pueden enviar archivos a este equipo.',
+  ),
+  'searchingDevices': (
+    'Searching for devices$_dots',
+    'Buscando dispositivos$_dots',
+  ),
+  'sendingToTitle': ('Sending to $_sampleName', 'Enviando a $_sampleName'),
+  'fileLine': (
+    'File: $_sampleFile ($_sampleSize)',
+    'Archivo: $_sampleFile ($_sampleSize)',
+  ),
+  'programLabel': ("It's a program", 'Es un programa'),
+  'preparingFile': (
+    'Preparing $_sampleFile$_dots',
+    'Preparando $_sampleFile$_dots',
+  ),
+  'contactingPeer': (
+    'Contacting $_sampleName$_dots',
+    'Contactando con $_sampleName$_dots',
+  ),
+  'waitingAcceptance': (
+    'Waiting for $_sampleName to accept$_dots',
+    'Esperando a que $_sampleName acepte$_dots',
+  ),
+  'progressLine': (
+    '$_samplePercent% $_middleDot $_sampleDone of $_sampleSize',
+    '$_samplePercent % $_middleDot $_sampleDone de $_sampleSize',
+  ),
+  'peerCheckingFile': (
+    '$_sampleName is checking the file$_dots',
+    '$_sampleName está comprobando el archivo$_dots',
+  ),
+  'cancellingTransfer': ('Cancelling$_dots', 'Cancelando$_dots'),
+  'incomingRequestTitle': (
+    '$_sampleName wants to send you a file',
+    '$_sampleName quiere enviarte un archivo',
+  ),
+  'withoutMarkNote': (
+    'It will be saved without the mark that tells Windows it comes from '
+        "another device, because that drive doesn't support it.",
+    'Se guardará sin la marca que indica a Windows que viene de otro '
+        'equipo, porque esa unidad no la admite.',
+  ),
+  'acceptButton': ('Accept', 'Aceptar'),
+  'rejectButton': ('Reject', 'Rechazar'),
+  'folderQuestionTitle': (
+    '$_sampleName is sending you a file',
+    '$_sampleName te está enviando un archivo',
+  ),
+  'folderFirstTimeBody': (
+    'Choose where to save the files you receive. It will be remembered for '
+        'next time.',
+    'Elige dónde guardar los archivos que recibas. Se recordará para las '
+        'próximas veces.',
+  ),
+  'folderThisTimeBody': (
+    "The usual folder isn't available right now. Choose where to save this "
+        'file; next time the usual one will be used again.',
+    'La carpeta de siempre no está disponible ahora. Elige dónde guardar '
+        'este archivo; la próxima vez se volverá a usar la de siempre.',
+  ),
+  'proposedFolderLine': ('Folder: $_samplePath', 'Carpeta: $_samplePath'),
+  'useThisFolderButton': ('Use this one', 'Usar esta'),
+  'chooseOtherFolderButton': ('Choose another', 'Elegir otra'),
+  'pickerOpenNote': (
+    'Choose a folder in the Windows window$_dots',
+    'Elige una carpeta en la ventana de Windows$_dots',
+  ),
+  'folderForbidden': (
+    "Received files can't be saved in $_samplePath. Choose another folder.",
+    'En $_samplePath no se pueden guardar archivos recibidos. Elige otra '
+        'carpeta.',
+  ),
+  'folderCannotUse': (
+    "$_samplePath can't be created or written to. Choose another folder.",
+    'No se puede crear $_samplePath o no se puede escribir en ella. Elige '
+        'otra carpeta.',
+  ),
+  'folderStillUnavailable': (
+    '$_samplePath is still not available. Choose another folder.',
+    '$_samplePath sigue sin estar disponible. Elige otra carpeta.',
+  ),
+  'folderUnknownVolume': (
+    "Windows doesn't identify the drive of $_samplePath, so it can't be "
+        'used to receive files. Choose another folder.',
+    'Windows no identifica la unidad de $_samplePath, así que no se puede '
+        'usar para recibir archivos. Elige otra carpeta.',
+  ),
+  'folderAdminShare': (
+    "$_samplePath is in an administrative share of Windows, so it can't be "
+        'used to receive files. Choose another folder.',
+    '$_samplePath está en un recurso compartido administrativo de Windows, '
+        'así que no se puede usar para recibir archivos. Elige otra carpeta.',
+  ),
+  'checkingFolder': (
+    'Checking the folder$_dots',
+    'Comprobando la carpeta$_dots',
+  ),
+  'cautionNoMark': (
+    "Files saved in $_samplePath won't carry the mark that tells Windows "
+        "they come from another device, so Windows won't warn you before "
+        'opening a received program.',
+    'Los archivos que se guarden en $_samplePath no llevarán la marca que '
+        'indica a Windows que vienen de otro equipo, así que Windows no '
+        'avisará antes de abrir un programa recibido.',
+  ),
+  'cautionRemote': (
+    '$_samplePath is on a network drive or in a folder synced with the '
+        'cloud: what you receive may be uploaded to the cloud or depend on '
+        'the network.',
+    '$_samplePath está en una unidad de red o en una carpeta sincronizada '
+        'con la nube: lo que recibas puede subirse a la nube o depender de la '
+        'red.',
+  ),
+  'useAnywayButton': ('Use it anyway', 'Usarla igualmente'),
+  'transferAlreadyEnded': (
+    'That send has already ended.',
+    'Ese envío ya ha terminado.',
+  ),
+  'folderRememberedNote': (
+    'Files you receive will be saved in $_samplePath.',
+    'Los archivos que recibas se guardarán en $_samplePath.',
+  ),
+  'folderNotUsable': (
+    "$_samplePath can't be used, so it hasn't been remembered.",
+    '$_samplePath no se puede usar, así que no se ha recordado.',
+  ),
+  'rememberAnywayButton': ('Remember it anyway', 'Recordarla igualmente'),
+  'dontRememberButton': ("Don't remember it", 'No recordarla'),
+  'receivingFromTitle': (
+    'Receiving from $_sampleName',
+    'Recibiendo de $_sampleName',
+  ),
+  'waitingForData': ('Waiting for the data$_dots', 'Esperando los datos$_dots'),
+  'checkingFile': ('Checking the file$_dots', 'Comprobando el archivo$_dots'),
+  'lastSentTitle': ('Last send', 'Último envío'),
+  'lastReceivedTitle': ('Last received', 'Última recepción'),
+  'toPeer': ('To $_sampleName', 'Para $_sampleName'),
+  'fromPeer': ('From $_sampleName', 'De $_sampleName'),
+  'showInFolderButton': ('Show in folder', 'Mostrar en la carpeta'),
+  'revealFolderOnly': (
+    "The folder was opened, but the file couldn't be selected. It may have "
+        'been moved, renamed or deleted.',
+    'Se ha abierto la carpeta, pero no se ha podido seleccionar el archivo. '
+        'Puede que se haya movido, cambiado de nombre o borrado.',
+  ),
+  'folderUnavailable': (
+    "That folder isn't available.",
+    'Esa carpeta no está disponible.',
+  ),
+  'closeDuringTransferTitle': (
+    'A send is in progress',
+    'Hay un envío en curso',
+  ),
+  'closeDuringTransferBody': (
+    'If you close the app now, the send will be cancelled.',
+    'Si cierras la app ahora, el envío se cancelará.',
+  ),
+  'keepOpenButton': ('Keep open', 'No cerrar'),
+  'closeAndCancelButton': ('Close and cancel', 'Cerrar y cancelar'),
+};
+
+final Map<TransferOutcome, (String, String)> _expectedSent = {
+  TransferOutcome.saved: ('It arrived intact.', 'Ha llegado intacto.'),
+  TransferOutcome.savedWithoutMark: (
+    'It arrived intact, but it was saved without the mark that tells Windows '
+        'it comes from another device.',
+    'Ha llegado intacto, pero se ha guardado sin la marca que indica a '
+        'Windows que viene de otro equipo.',
+  ),
+  TransferOutcome.declined: (
+    "The other device didn't accept it. You can try again in a minute.",
+    'El otro equipo no lo ha aceptado. Puedes volver a intentarlo dentro de '
+        'un minuto.',
+  ),
+  TransferOutcome.busy: (
+    'The other device is busy with another send. Try again in a moment.',
+    'El otro equipo está ocupado con otro envío. Inténtalo dentro de un '
+        'momento.',
+  ),
+  TransferOutcome.unanswered: (
+    "The other device didn't respond.",
+    'El otro equipo no ha respondido.',
+  ),
+  TransferOutcome.invalidName: (
+    "The other device doesn't accept that file name.",
+    'El otro equipo no admite ese nombre de archivo.',
+  ),
+  TransferOutcome.blockedType: (
+    "The other device doesn't accept that type of file.",
+    'El otro equipo no admite ese tipo de archivo.',
+  ),
+  TransferOutcome.incompatible: (
+    "Your request isn't compatible with the other device.",
+    'Tu petición no es compatible con el otro equipo.',
+  ),
+  TransferOutcome.noSpace: (
+    "There isn't enough space on the other device.",
+    'En el otro equipo no hay espacio suficiente.',
+  ),
+  TransferOutcome.noFolder: (
+    "The other device hasn't chosen where to save the files.",
+    'El otro equipo no ha elegido dónde guardar los archivos.',
+  ),
+  TransferOutcome.pathTooLong: (
+    'The path where the other device would save it is too long for Windows.',
+    'La ruta donde lo guardaría el otro equipo es demasiado larga para '
+        'Windows.',
+  ),
+  TransferOutcome.cancelledHere: ('You cancelled it.', 'Lo has cancelado.'),
+  TransferOutcome.cancelledByPeer: (
+    'The other device cancelled it.',
+    'El otro equipo lo ha cancelado.',
+  ),
+  TransferOutcome.unpaired: (
+    "It was cancelled because you're no longer paired.",
+    'Se ha cancelado porque ya no estáis vinculados.',
+  ),
+  TransferOutcome.unreadable: (
+    "The file couldn't be read.",
+    'No se ha podido leer el archivo.',
+  ),
+  TransferOutcome.noContact: (
+    "Couldn't contact the other device.",
+    'No se ha podido contactar con el otro equipo.',
+  ),
+  TransferOutcome.uploadNotStarted: (
+    "It didn't complete: the transfer didn't start in time.",
+    'No se ha completado: la transferencia no empezó a tiempo.',
+  ),
+  TransferOutcome.connectionLost: (
+    'The connection was cut before it finished.',
+    'Se ha cortado la conexión antes de terminar.',
+  ),
+  TransferOutcome.idle: (
+    'It was cut because no data moved for 30 seconds.',
+    'Se ha cortado porque no se movieron datos durante 30 segundos.',
+  ),
+  TransferOutcome.tooManyBytes: (
+    'It was cut because more data arrived than announced.',
+    'Se ha cortado porque llegaron más datos de los anunciados.',
+  ),
+  TransferOutcome.writeFailed: (
+    "The other device couldn't write it (for example, because its disk is "
+        'full).',
+    'El otro equipo no ha podido escribirlo (por ejemplo, porque se ha '
+        'llenado el disco).',
+  ),
+  TransferOutcome.diskFull: (
+    "The other device's disk filled up while receiving it, so it was "
+        'deleted.',
+    'Se ha llenado el disco del otro equipo mientras lo recibía, así que se '
+        'ha borrado.',
+  ),
+  TransferOutcome.damaged: (
+    'It arrived damaged, so it was deleted. If the file changed while it was '
+        'being sent, send it again.',
+    'Ha llegado dañado, así que se ha borrado. Si el archivo cambió mientras '
+        'se enviaba, vuelve a enviarlo.',
+  ),
+  TransferOutcome.markFailed: (
+    "It couldn't be marked as coming from another device, so it was "
+        'deleted.',
+    'No se ha podido marcar como venido de otro equipo, así que se ha '
+        'borrado.',
+  ),
+  TransferOutcome.moveFailed: (
+    "It couldn't be moved to the folder, so it was deleted.",
+    'No se ha podido mover a la carpeta, así que se ha borrado.',
+  ),
+  TransferOutcome.noFreeName: (
+    "There was no free name for it in the folder, so it wasn't saved.",
+    'No quedaba ningún nombre libre en la carpeta, así que no se ha '
+        'guardado.',
+  ),
+  TransferOutcome.interfaceDown: (
+    'It was cut because the network connection changed.',
+    'Se ha cortado porque ha cambiado la conexión de red.',
+  ),
+  TransferOutcome.unconfirmed: (
+    "Everything was sent, but the other device didn't confirm it: it's not "
+        'known whether it arrived.',
+    'Se ha enviado todo, pero el otro equipo no lo ha confirmado: no se sabe '
+        'si ha llegado.',
+  ),
+};
+
+final Map<TransferOutcome, (String, String)> _expectedReceived = {
+  TransferOutcome.saved: ('Saved.', 'Guardado.'),
+  TransferOutcome.savedWithoutMark: (
+    'Saved without the mark that tells Windows it comes from another device.',
+    'Guardado sin la marca que indica a Windows que viene de otro equipo.',
+  ),
+  TransferOutcome.declined: ('You rejected it.', 'Lo has rechazado.'),
+  TransferOutcome.busy: (
+    'It was rejected because another send was in progress.',
+    'Se ha rechazado porque había otro envío en curso.',
+  ),
+  TransferOutcome.unanswered: (
+    'It expired without an answer.',
+    'Ha caducado sin respuesta.',
+  ),
+  TransferOutcome.invalidName: (
+    "It was rejected because its name isn't valid.",
+    'Se ha rechazado porque su nombre no es válido.',
+  ),
+  TransferOutcome.blockedType: (
+    "It was rejected because that type of file isn't accepted.",
+    'Se ha rechazado porque no se admite ese tipo de archivo.',
+  ),
+  TransferOutcome.incompatible: (
+    "It was rejected because the request wasn't compatible.",
+    'Se ha rechazado porque la petición no era compatible.',
+  ),
+  TransferOutcome.noSpace: (
+    "It was rejected because there isn't enough space: the file size plus "
+        '1 GB must be free.',
+    'Se ha rechazado porque no hay espacio: tiene que quedar libre el tamaño '
+        'del archivo más 1 GB.',
+  ),
+  TransferOutcome.noFolder: (
+    "It was rejected because you didn't choose where to save it.",
+    'Se ha rechazado porque no elegiste dónde guardarlo.',
+  ),
+  TransferOutcome.pathTooLong: (
+    'It was rejected because the path where it would be saved is too long '
+        'for Windows.',
+    'Se ha rechazado porque la ruta donde se guardaría es demasiado larga '
+        'para Windows.',
+  ),
+  TransferOutcome.cancelledHere: ('You cancelled it.', 'Lo has cancelado.'),
+  TransferOutcome.cancelledByPeer: (
+    'The other device cancelled it.',
+    'El otro equipo lo ha cancelado.',
+  ),
+  TransferOutcome.unpaired: (
+    "It was cancelled because you're no longer paired.",
+    'Se ha cancelado porque ya no estáis vinculados.',
+  ),
+  TransferOutcome.unreadable: (
+    'The other device could no longer read the file.',
+    'El otro equipo ha dejado de poder leer el archivo.',
+  ),
+  TransferOutcome.noContact: (
+    "Couldn't contact the other device.",
+    'No se ha podido contactar con el otro equipo.',
+  ),
+  TransferOutcome.uploadNotStarted: (
+    "It didn't complete: the transfer didn't start in time.",
+    'No se ha completado: la transferencia no empezó a tiempo.',
+  ),
+  TransferOutcome.connectionLost: (
+    'The connection was cut before it finished.',
+    'Se ha cortado la conexión antes de terminar.',
+  ),
+  TransferOutcome.idle: (
+    'It was cut because no data moved for 30 seconds.',
+    'Se ha cortado porque no se movieron datos durante 30 segundos.',
+  ),
+  TransferOutcome.tooManyBytes: (
+    'It was cut because more data arrived than announced.',
+    'Se ha cortado porque llegaron más datos de los anunciados.',
+  ),
+  TransferOutcome.writeFailed: (
+    "It couldn't be written (for example, because the disk is full), so it "
+        'was deleted.',
+    'No se ha podido escribir (por ejemplo, porque se ha llenado el disco), '
+        'así que se ha borrado.',
+  ),
+  TransferOutcome.diskFull: (
+    'The disk filled up while receiving it, so it was deleted.',
+    'Se ha llenado el disco mientras se recibía, así que se ha borrado.',
+  ),
+  TransferOutcome.damaged: (
+    'It arrived damaged, so it was deleted.',
+    'Ha llegado dañado, así que se ha borrado.',
+  ),
+  TransferOutcome.markFailed: (
+    "It couldn't be marked as coming from another device, so it was "
+        'deleted.',
+    'No se ha podido marcar como venido de otro equipo, así que se ha '
+        'borrado.',
+  ),
+  TransferOutcome.moveFailed: (
+    "It couldn't be moved to the folder, so it was deleted.",
+    'No se ha podido mover a la carpeta, así que se ha borrado.',
+  ),
+  TransferOutcome.noFreeName: (
+    "There was no free name for it in the folder, so it wasn't saved.",
+    'No quedaba ningún nombre libre en la carpeta, así que no se ha '
+        'guardado.',
+  ),
+  TransferOutcome.interfaceDown: (
+    'It was cut because the network connection changed.',
+    'Se ha cortado porque ha cambiado la conexión de red.',
+  ),
+  TransferOutcome.unconfirmed: (
+    "Everything was sent, but it wasn't confirmed.",
+    'Se ha enviado todo, pero no se ha confirmado.',
+  ),
 };
 
 const String _sampleShort = 'ABCD1234';
@@ -127,6 +652,15 @@ const Set<String> _withName = {
   'noticePairingNotSaved',
   'noticePairingFailed',
   'namesakeWarning',
+  'sendingToTitle',
+  'contactingPeer',
+  'waitingAcceptance',
+  'peerCheckingFile',
+  'incomingRequestTitle',
+  'folderQuestionTitle',
+  'receivingFromTitle',
+  'toPeer',
+  'fromPeer',
 };
 
 const Set<String> _withShort = {
@@ -406,17 +940,87 @@ void main() {
   final spanish = AppStringsEs();
 
   group('RF-62: every text exists in both languages', () {
-    test('the table covers the 84 texts of the plans of 001, 002 and 003', () {
-      expect(_texts.length, 84);
+    test('the table covers the 138 texts of the plans of 001 to 005: the 84 '
+        'of 001, 002 and 003 and the 54 of the transfer (E145)', () {
+      expect(_texts.length, 138);
+      expect(_expectedTransfer.length, 54);
       expect(
         _expected.keys.toSet().intersection(_expectedPairing.keys.toSet()),
+        isEmpty,
+      );
+      expect(
+        _expectedTransfer.keys.toSet().intersection({
+          ..._expected.keys,
+          ..._expectedPairing.keys,
+          ..._meaningOnly,
+        }),
         isEmpty,
       );
       expect({
         ..._expected.keys,
         ..._expectedPairing.keys,
+        ..._expectedTransfer.keys,
         ..._meaningOnly,
       }, _texts.keys.toSet());
+    });
+
+    for (final entry in _expectedTransfer.entries) {
+      test('${entry.key} matches the exact text of the plan of 004 and 005 '
+          '(E145)', () {
+        final text = _texts[entry.key]!;
+        expect(text(english), entry.value.$1);
+        expect(text(spanish), entry.value.$2);
+      });
+    }
+
+    test('the transfer texts differ from each other in each language '
+        '(E145)', () {
+      for (final strings in [english, spanish]) {
+        final seen = <String, String>{};
+        for (final key in _expectedTransfer.keys) {
+          final text = _texts[key]!(strings);
+          expect(seen[text], isNull, reason: '$key repeats ${seen[text]}');
+          seen[text] = key;
+        }
+      }
+    });
+
+    test('the transfer texts reuse no older key with the same text '
+        '(E145)', () {
+      for (final strings in [english, spanish]) {
+        final older = {
+          for (final key in [..._expected.keys, ..._expectedPairing.keys])
+            _texts[key]!(strings),
+        };
+        for (final key in _expectedTransfer.keys) {
+          expect(older, isNot(contains(_texts[key]!(strings))), reason: key);
+        }
+      }
+    });
+
+    test('fileNoLongerThere is gone and revealFolderOnly takes its place '
+        '(point 97)', () {
+      for (final name in [
+        'app_strings.dart',
+        'app_strings_en.dart',
+        'app_strings_es.dart',
+      ]) {
+        final source = File(
+          'lib${Platform.pathSeparator}src${Platform.pathSeparator}l10n'
+          '${Platform.pathSeparator}$name',
+        ).readAsStringSync();
+        expect(source, isNot(contains('fileNoLongerThere')), reason: name);
+        expect(source, contains('revealFolderOnly'), reason: name);
+      }
+    });
+
+    test('folderThisTimeBody takes no path and does not name the usual '
+        'folder (point 99)', () {
+      for (final strings in [english, spanish]) {
+        expect(strings.folderThisTimeBody, isNot(contains(_samplePath)));
+        expect(strings.folderThisTimeBody, isNot(contains(r'\')));
+        expect(strings.folderThisTimeBody, isNot(contains('(')));
+      }
     });
 
     for (final entry in _expectedPairing.entries) {
@@ -637,6 +1241,145 @@ void main() {
         );
       });
     }
+  });
+
+  group('E145: transfer texts with arguments', () {
+    const odd = 'Equipo «raro» 5G';
+
+    for (final strings in [english, spanish]) {
+      final language = strings is AppStringsEs ? 'es' : 'en';
+
+      for (final key in _withPath) {
+        test('$key includes the path ($language)', () {
+          expect(_texts[key]!(strings), contains(_samplePath));
+        });
+      }
+
+      for (final key in _withFile) {
+        test('$key includes the file name ($language)', () {
+          expect(_texts[key]!(strings), contains(_sampleFile));
+        });
+      }
+
+      for (final entry in _byArgument.entries) {
+        test('${entry.key} changes with its argument and keeps it whole '
+            '($language)', () {
+          expect(entry.value(strings, odd), contains(odd));
+          expect(entry.value(strings, 'A1'), isNot(entry.value(strings, 'B2')));
+        });
+      }
+
+      test('fileLine includes the size and changes with it ($language)', () {
+        expect(strings.fileLine(_sampleFile, '150 MB'), contains('150 MB'));
+        expect(
+          strings.fileLine(_sampleFile, '1 byte'),
+          isNot(strings.fileLine(_sampleFile, '2 bytes')),
+        );
+      });
+
+      test('progressLine includes the percent, the done bytes and the total, '
+          'each in its place ($language)', () {
+        final line = strings.progressLine(37, '5,0 GB', '9,5 GB');
+        expect(line, contains('37'));
+        expect(line, contains('5,0 GB'));
+        expect(line, contains('9,5 GB'));
+        expect(line.indexOf('37'), lessThan(line.indexOf('5,0 GB')));
+        expect(line.indexOf('5,0 GB'), lessThan(line.indexOf('9,5 GB')));
+        expect(
+          strings.progressLine(100, '0 bytes', '0 bytes'),
+          contains('100'),
+        );
+        expect(
+          strings.progressLine(1, 'x', 'y'),
+          isNot(strings.progressLine(2, 'x', 'y')),
+        );
+      });
+
+      test('the transfer texts with a name and with a path keep the same '
+          'placeholders as the other language ($language)', () {
+        final other = strings is AppStringsEs ? english : spanish;
+        for (final entry in _byArgument.entries) {
+          expect(entry.value(other, odd), contains(odd), reason: entry.key);
+          expect(entry.value(strings, odd), isNot(entry.value(other, odd)));
+        }
+      });
+    }
+  });
+
+  group('E145: sentOutcome and receivedOutcome', () {
+    test('the plan tables cover the 28 values of TransferOutcome', () {
+      expect(TransferOutcome.values, hasLength(28));
+      expect(_expectedSent.keys.toSet(), TransferOutcome.values.toSet());
+      expect(_expectedReceived.keys.toSet(), TransferOutcome.values.toSet());
+    });
+
+    for (final outcome in TransferOutcome.values) {
+      test('sentOutcome(${outcome.name}) matches the plan', () {
+        expect(english.sentOutcome(outcome), _expectedSent[outcome]!.$1);
+        expect(spanish.sentOutcome(outcome), _expectedSent[outcome]!.$2);
+      });
+
+      test('receivedOutcome(${outcome.name}) matches the plan', () {
+        expect(
+          english.receivedOutcome(outcome),
+          _expectedReceived[outcome]!.$1,
+        );
+        expect(
+          spanish.receivedOutcome(outcome),
+          _expectedReceived[outcome]!.$2,
+        );
+      });
+
+      test('${outcome.name} is not empty, differs between languages and '
+          'has no long dashes nor placeholders', () {
+        for (final text in [
+          english.sentOutcome(outcome),
+          spanish.sentOutcome(outcome),
+          english.receivedOutcome(outcome),
+          spanish.receivedOutcome(outcome),
+        ]) {
+          expect(text.trim(), isNotEmpty);
+          expect(text, isNot(contains(String.fromCharCode(0x2014))));
+          expect(text, isNot(contains(String.fromCharCode(0x2013))));
+          expect(text, isNot(contains(r'$')));
+          expect(text, isNot(contains('{')));
+        }
+        expect(
+          english.sentOutcome(outcome),
+          isNot(spanish.sentOutcome(outcome)),
+        );
+        expect(
+          english.receivedOutcome(outcome),
+          isNot(spanish.receivedOutcome(outcome)),
+        );
+      });
+    }
+
+    test('within each side, every outcome has its own text', () {
+      for (final strings in [english, spanish]) {
+        expect({
+          for (final o in TransferOutcome.values) strings.sentOutcome(o),
+        }, hasLength(28));
+        expect({
+          for (final o in TransferOutcome.values) strings.receivedOutcome(o),
+        }, hasLength(28));
+      }
+    });
+
+    test('declined and damaged differ between the sender and the receiver '
+        '(points 96 and 98)', () {
+      for (final strings in [english, spanish]) {
+        for (final outcome in [
+          TransferOutcome.declined,
+          TransferOutcome.damaged,
+        ]) {
+          expect(
+            strings.sentOutcome(outcome),
+            isNot(strings.receivedOutcome(outcome)),
+          );
+        }
+      }
+    });
   });
 
   group('RF-63/64: stringsFor', () {
