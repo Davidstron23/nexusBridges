@@ -14,6 +14,7 @@ import 'package:nexus_bridges_core/src/transfer/journal.dart';
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_file_system.dart';
+import 'package:nexus_bridges_core/src/transfer/writer.dart' show writeAllBytes;
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
@@ -53,10 +54,13 @@ final class RawReply {
 
 final class FakeClock {
   Duration now = const Duration(hours: 3);
+  Stopwatch? _follow;
 
-  Duration call() => now;
+  Duration call() => now + (_follow?.elapsed ?? Duration.zero);
 
   void advance(Duration span) => now += span;
+
+  void followRealTime() => _follow ??= Stopwatch()..start();
 }
 
 final class TransferPlatform implements FileSystemPlatform {
@@ -74,6 +78,8 @@ final class TransferPlatform implements FileSystemPlatform {
   VolumeFacts? Function(String path, VolumeFacts? facts)? adjustFacts;
   bool Function(String path)? cloudFor;
   Future<void> Function(String method, String path)? hold;
+  Future<bool> Function(String filePath)? mark;
+  Future<FreeNameMove> Function(String from, String folder, String name)? move;
   final List<String> dangerousAsked = [];
   final List<String> calls = [];
   int volumeCalls = 0;
@@ -142,15 +148,18 @@ final class TransferPlatform implements FileSystemPlatform {
       realFs.moveNoReplace(from, to);
 
   @override
-  Future<FreeNameMove> moveToFreeName(
-    String from,
-    String folder,
-    String name,
-  ) => realFs.moveToFreeName(from, folder, name);
+  Future<FreeNameMove> moveToFreeName(String from, String folder, String name) {
+    final fake = move;
+    return fake == null
+        ? realFs.moveToFreeName(from, folder, name)
+        : fake(from, folder, name);
+  }
 
   @override
-  Future<bool> markFromInternet(String filePath) =>
-      realFs.markFromInternet(filePath);
+  Future<bool> markFromInternet(String filePath) {
+    final fake = mark;
+    return fake == null ? realFs.markFromInternet(filePath) : fake(filePath);
+  }
 
   @override
   Future<bool> isDangerousType(String extension) {
@@ -367,6 +376,8 @@ final class ReceiverStack {
     ReceiveFolderStore Function(String dataDir)? storeIn,
     List<ApiRoute> Function(ReceiverStack stack)? routesOverride,
     Completer<void>? holdLoad,
+    Duration idleTimeout = Limits.transferIdleTimeout,
+    Future<void> Function(RandomAccessFile file, List<int> bytes)? writeBytes,
   }) async {
     final root = await _temporaryDirectory();
     final base = (await realFs.realPath(root.path))!;
@@ -427,6 +438,8 @@ final class ReceiverStack {
       clock: stack.clock.call,
       tickInterval: tickInterval,
       pollHold: pollHold,
+      idleTimeout: idleTimeout,
+      writeBytes: writeBytes ?? writeAllBytes,
       log: stack.logs.add,
     );
     stack.coordinator.changes.listen((_) {
@@ -443,6 +456,10 @@ final class ReceiverStack {
         for (final route
             in routesOverride?.call(stack) ?? stack.coordinator.routes)
           stack._wrap(route),
+      ],
+      uploadRoutes: [
+        for (final route in stack.coordinator.uploadRoutes)
+          stack._wrapUpload(route),
       ],
       selfInfo: () => selfInfoOf(identity),
       onRegistered: (_, _, _) {},
@@ -471,6 +488,37 @@ final class ReceiverStack {
       handled.update(route.path, (n) => n + 1, ifAbsent: () => 1);
       return route.handle(call);
     },
+  );
+
+  ApiUploadRoute _wrapUpload(ApiUploadRoute route) => ApiUploadRoute(
+    path: route.path,
+    limit: route.limit,
+    handle: (upload) {
+      handled.update(route.path, (n) => n + 1, ifAbsent: () => 1);
+      return route.handle(upload);
+    },
+  );
+
+  Future<StreamPostResult> postUpload(
+    DeviceIdentity from, {
+    required Map<String, String> headers,
+    required int contentLength,
+    required Stream<List<int>> body,
+    SecurityContext? context,
+    Duration timeout = const Duration(seconds: 20),
+  }) => postStream(
+    address: loopback,
+    port: port,
+    path: ApiPaths.transferUpload,
+    headers: headers,
+    contentLength: contentLength,
+    body: body,
+    context: context ?? from.clientContext(presentCertificate: true),
+    acceptServer: (certificate) =>
+        certificateMatches(certificate, identity.fingerprint),
+    sourceAddress: loopback,
+    idleTimeout: timeout,
+    answerTimeout: timeout,
   );
 
   void sampleViews() {

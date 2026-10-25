@@ -4,11 +4,12 @@ import 'dart:io';
 import '../identity/identity.dart' show DeviceIdentity;
 import '../pairing/pairing.dart' show PairedDevicesStore;
 import '../protocol/protocol.dart' show Limits, monotonicClock;
-import '../server/server.dart' show ApiRoute;
+import '../server/server.dart' show ApiRoute, ApiUploadRoute;
 import 'journal.dart' show TempJournal;
 import 'pickers.dart' show PickerTracker;
 import 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
 import 'receiver.dart' show TransferReceiver;
+import 'sender.dart' show TransferSender;
 import 'windows_file_system.dart' show WindowsFileSystemPlatform;
 import 'writer.dart' show writeAllBytes;
 
@@ -396,10 +397,25 @@ final class TransferCoordinator {
       dataDirPath: dataDirPath,
       clock: clock,
       pollHold: pollHold,
+      writeBytes: writeBytes,
+      idleTimeout: idleTimeout,
       picker: picker,
       pickers: _pickers,
       onChanged: _notify,
       emit: _emit,
+      log: _log,
+    );
+    _sender = TransferSender(
+      identity: identity,
+      paired: paired,
+      picker: picker,
+      fs: fileSystem,
+      clock: clock,
+      pollHold: pollHold,
+      idleTimeout: idleTimeout,
+      confirmTimeout: confirmTimeout,
+      onChanged: _notify,
+      onFilePicker: (open) => open ? _pickers.open() : _pickers.close(),
       log: _log,
     );
   }
@@ -412,6 +428,8 @@ final class TransferCoordinator {
 
   late final PickerTracker _pickers;
 
+  late final TransferSender _sender;
+
   final StreamController<void> _changes = StreamController<void>.broadcast();
 
   final StreamController<TransferEvent> _events =
@@ -423,20 +441,25 @@ final class TransferCoordinator {
 
   bool _closed = false;
 
-  (IncomingTransferView?, TransferResultView?, bool, bool)? _lastNotified = (
-    null,
-    null,
-    false,
-    false,
-  );
+  (
+    IncomingTransferView?,
+    TransferResultView?,
+    OutgoingTransferView?,
+    TransferResultView?,
+    bool,
+    bool,
+  )?
+  _lastNotified = (null, null, null, null, false, false);
 
   List<ApiRoute> get routes => _receiver.routes;
+
+  List<ApiUploadRoute> get uploadRoutes => _receiver.uploadRoutes;
 
   IncomingTransferView? get incoming => _receiver.incoming;
 
   TransferResultView? get lastReceived => _receiver.lastReceived;
 
-  bool get busy => _receiver.busy;
+  bool get busy => _receiver.busy || _sender.sending;
 
   bool get pickerOpen => _pickers.isOpen;
 
@@ -478,18 +501,34 @@ final class TransferCoordinator {
   void dismissFolderPanel(String sessionId) =>
       _receiver.dismissFolderPanel(sessionId);
 
+  void interfacesChanged(Set<String> activeInterfaceIds) {
+    _receiver.interfacesChanged(activeInterfaceIds);
+    _sender.interfacesChanged(activeInterfaceIds);
+  }
+
+  void pairedChanged() {
+    _receiver.pairedChanged();
+    _sender.pairedChanged();
+  }
+
+  Future<void> peerUnpaired(String fingerprint) async {
+    _receiver.peerUnpaired(fingerprint);
+    await _sender.peerUnpaired(fingerprint);
+  }
+
   Future<void> close() => _closing ??= _close();
 
   Future<void> _close() async {
     _timer?.cancel();
     _timer = null;
-    await _receiver.close();
+    await Future.wait([_receiver.close(), _sender.close()]);
     _closed = true;
     await _changes.close();
     await _events.close();
   }
 
   void _tick() {
+    _sender.tick();
     try {
       _receiver.tick();
     } catch (e) {
@@ -499,7 +538,14 @@ final class TransferCoordinator {
 
   void _notify() {
     if (_closed) return;
-    final current = (incoming, lastReceived, busy, pickerOpen);
+    final current = (
+      incoming,
+      lastReceived,
+      outgoing,
+      lastSent,
+      busy,
+      pickerOpen,
+    );
     if (current == _lastNotified) return;
     _lastNotified = current;
     _changes.add(null);
@@ -509,4 +555,17 @@ final class TransferCoordinator {
     if (_closed) return;
     _events.add(event);
   }
+
+  OutgoingTransferView? get outgoing => _sender.outgoing;
+
+  TransferResultView? get lastSent => _sender.lastSent;
+
+  bool get sending => _sender.sending;
+
+  Future<SendStart> sendFile(
+    SendTarget target, {
+    required SendTarget? Function() refresh,
+  }) => _sender.sendFile(target, refresh: refresh);
+
+  void cancelOutgoing() => _sender.cancelOutgoing();
 }

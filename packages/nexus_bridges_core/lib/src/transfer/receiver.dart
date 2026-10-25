@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import '../pairing/pairing.dart'
     show PairedDevicesStore, PeerRelation, Permission;
@@ -17,8 +18,11 @@ import 'pickers.dart';
 import 'platform.dart';
 import 'recent_rejections.dart';
 import 'transfer.dart';
+import 'writer.dart';
 
 const Duration _closeHeldGrace = Duration(seconds: 1);
+
+const Duration _closeFinishingGrace = Duration(seconds: 2);
 
 const ApiReply _unauthorized = ApiReply(401, {'error': 'unauthorized'});
 
@@ -44,6 +48,8 @@ const ApiReply _notFound = ApiReply(404, {'error': 'not_found'});
 
 const ApiReply _internal = ApiReply(500, {'error': 'internal'});
 
+const ApiReply _uploadForbidden = ApiReply(403, {'error': 'forbidden'});
+
 const RouteLimit _offerLimit = RouteLimit(
   maxPerWindow: Limits.transferOffersPerMinute,
   window: Duration(minutes: 1),
@@ -62,6 +68,40 @@ const RouteLimit _cancelLimit = RouteLimit(
   block: Limits.routeBlock,
 );
 
+const RouteLimit _uploadLimit = RouteLimit(
+  maxPerWindow: Limits.transferUploadsPerMinute,
+  window: Duration(minutes: 1),
+  block: Limits.routeBlock,
+);
+
+final RegExp _permitPattern = RegExp(r'^[0-9a-f]{32}$');
+
+final Uint8List _noPermit = Uint8List(16);
+
+Uint8List? _permitBytes(String? value) {
+  if (value == null || !_permitPattern.hasMatch(value)) return null;
+  final bytes = Uint8List(16);
+  for (var i = 0; i < 16; i++) {
+    bytes[i] = int.parse(value.substring(i * 2, i * 2 + 2), radix: 16);
+  }
+  return bytes;
+}
+
+bool _permitMatches(String? presented, String? expected) {
+  final given = _permitBytes(presented);
+  final wanted = _permitBytes(expected);
+  var difference = given == null || wanted == null ? 1 : 0;
+  final left = given ?? _noPermit;
+  final right = wanted ?? _noPermit;
+  for (var i = 0; i < 16; i++) {
+    difference |= left[i] ^ right[i];
+  }
+  return difference == 0;
+}
+
+String _joinPath(String folder, String name) =>
+    folder.endsWith(r'\') ? '$folder$name' : '$folder\\$name';
+
 bool _exceedsFinalPath(String folderPath, String name) {
   final separator = folderPath.endsWith(r'\') ? 0 : 1;
   return folderPath.length + separator + name.length > Limits.maxFinalPathChars;
@@ -76,7 +116,15 @@ String _randomHex32() {
   return buffer.toString();
 }
 
-enum _InPhase { checking, warning, folderQuestion, accepted, ended }
+enum _InPhase {
+  checking,
+  warning,
+  folderQuestion,
+  accepted,
+  uploading,
+  finishing,
+  ended,
+}
 
 final class _InSession {
   _InSession({
@@ -150,11 +198,31 @@ final class _InSession {
 
   Duration? lastPollAt;
 
+  bool permitUsed = false;
+
+  Duration? lastDataAt;
+
+  Duration? progressAt;
+
+  bool writing = false;
+
+  int received = 0;
+
+  bool bodyFailed = false;
+
+  ApiUpload? upload;
+
+  IncomingFileWriter? writer;
+
+  Completer<void>? bodyEnded;
+
   int held = 0;
 
   TransferOutcome? outcome;
 
   Completer<void> changed = Completer<void>();
+
+  final Completer<void> finished = Completer<void>();
 }
 
 final class _FolderAsk {
@@ -261,6 +329,8 @@ final class TransferReceiver {
     required this._onChanged,
     required this._emit,
     required this._log,
+    this._writeBytes = writeAllBytes,
+    this._idleTimeout = Limits.transferIdleTimeout,
   });
 
   final PairedDevicesStore _paired;
@@ -287,6 +357,11 @@ final class TransferReceiver {
 
   final void Function(String) _log;
 
+  final Future<void> Function(RandomAccessFile file, List<int> bytes)
+  _writeBytes;
+
+  final Duration _idleTimeout;
+
   late final RecentRejections _recentRejections = RecentRejections(
     clock: _clock,
   );
@@ -298,6 +373,8 @@ final class TransferReceiver {
   _InSession? _active;
 
   TransferResultView? _lastReceived;
+
+  String? _lastReceivedPath;
 
   bool _closed = false;
 
@@ -351,9 +428,19 @@ final class TransferReceiver {
     ),
   ]);
 
+  late final List<ApiUploadRoute> uploadRoutes = List.unmodifiable([
+    ApiUploadRoute(
+      path: ApiPaths.transferUpload,
+      handle: _handleUpload,
+      limit: _uploadLimit,
+    ),
+  ]);
+
   bool get busy => _active != null || _folderPickerAsk != null;
 
   TransferResultView? get lastReceived => _lastReceived;
+
+  String? get lastReceivedPath => _lastReceivedPath;
 
   IncomingTransferView? get incoming {
     final session = _active;
@@ -362,6 +449,8 @@ final class TransferReceiver {
         _InPhase.warning => IncomingStage.warning,
         _InPhase.folderQuestion => IncomingStage.folderQuestion,
         _InPhase.accepted => IncomingStage.waitingData,
+        _InPhase.uploading => IncomingStage.receiving,
+        _InPhase.finishing => IncomingStage.verifying,
         _InPhase.checking || _InPhase.ended => null,
       };
       if (stage != null) {
@@ -377,6 +466,7 @@ final class TransferReceiver {
           folder: session.phase == _InPhase.folderQuestion
               ? session.ask?.view
               : null,
+          receivedBytes: session.received,
         );
       }
     }
@@ -432,10 +522,35 @@ final class TransferReceiver {
         session == null ||
         session.localId != sessionId ||
         !session.exposed ||
-        session.phase != _InPhase.accepted) {
+        (session.phase != _InPhase.accepted &&
+            session.phase != _InPhase.uploading)) {
       return;
     }
     _end(session, TransferOutcome.cancelledHere);
+  }
+
+  void interfacesChanged(Set<String> activeInterfaceIds) {
+    final session = _active;
+    if (_closed || session == null) return;
+    if (session.phase == _InPhase.finishing) return;
+    if (activeInterfaceIds.contains(session.via)) return;
+    _end(session, TransferOutcome.interfaceDown);
+  }
+
+  void pairedChanged() {
+    final session = _active;
+    if (_closed || session == null) return;
+    if (session.phase == _InPhase.finishing) return;
+    if (_paired.deviceOf(session.fingerprint) != null) return;
+    _end(session, TransferOutcome.unpaired);
+  }
+
+  void peerUnpaired(String fingerprint) {
+    final session = _active;
+    if (_closed || session == null) return;
+    if (session.phase == _InPhase.finishing) return;
+    if (session.fingerprint != fingerprint) return;
+    _end(session, TransferOutcome.unpaired);
   }
 
   void tick() {
@@ -453,6 +568,7 @@ final class TransferReceiver {
     if (_closed) return;
     _closed = true;
     final session = _active;
+    _InSession? finishing;
     if (session != null) {
       switch (session.phase) {
         case _InPhase.checking:
@@ -461,8 +577,10 @@ final class TransferReceiver {
           _end(session, TransferOutcome.declined);
         case _InPhase.folderQuestion:
           _end(session, TransferOutcome.noFolder);
-        case _InPhase.accepted:
+        case _InPhase.accepted || _InPhase.uploading:
           _end(session, TransferOutcome.cancelledHere);
+        case _InPhase.finishing:
+          finishing = session;
         case _InPhase.ended:
           break;
       }
@@ -472,6 +590,13 @@ final class TransferReceiver {
     }
     final panel = _panel;
     if (panel != null) _dropPanel(panel);
+    if (finishing != null) {
+      await finishing.finished.future.timeout(
+        _closeFinishingGrace,
+        onTimeout: () {},
+      );
+      _signal(finishing);
+    }
     if (_held != 0) {
       final drained = Completer<void>();
       _drained = drained;
@@ -1152,7 +1277,10 @@ final class TransferReceiver {
           ..lastPollAt = now;
       case _InPhase.accepted:
         session.acceptedAt = now;
-      case _InPhase.checking || _InPhase.ended:
+      case _InPhase.checking ||
+          _InPhase.uploading ||
+          _InPhase.finishing ||
+          _InPhase.ended:
         break;
     }
     _signal(session);
@@ -1206,6 +1334,248 @@ final class TransferReceiver {
     return _stateOf(session);
   }
 
+  Future<ApiReply> _handleUpload(ApiUpload upload) async {
+    _InSession? session;
+    try {
+      session = _claimUpload(upload);
+      if (session == null) return _uploadForbidden;
+      return await _runUpload(session, upload);
+    } catch (e) {
+      _log('transfer upload failed: ${e.runtimeType}');
+      if (session == null) return _internal;
+      return _stopUpload(session, TransferOutcome.writeFailed);
+    }
+  }
+
+  _InSession? _claimUpload(ApiUpload upload) {
+    final session = _active;
+    final permitOk = _permitMatches(
+      upload.headers[TransferHeaders.permit],
+      session?.permit,
+    );
+    if (_closed || session == null) return null;
+    final idOk = upload.headers[TransferHeaders.transfer] == session.id;
+    final fingerprintOk = upload.clientFingerprint == session.fingerprint;
+    final viaOk = upload.via.id == session.via;
+    final phaseOk = session.phase == _InPhase.accepted && !session.permitUsed;
+    if (!(permitOk & idOk & fingerprintOk & viaOk & phaseOk)) return null;
+    session
+      ..permitUsed = true
+      ..permit = null
+      ..phase = _InPhase.uploading
+      ..lastDataAt = _clock()
+      ..upload = upload;
+    if (session.exposed) {
+      _signal(session);
+      _onChanged();
+    } else {
+      _expose(session);
+    }
+    return session;
+  }
+
+  ApiReply _uploadReply(_InSession session) =>
+      ApiReply(200, _stateOf(session).toJson());
+
+  ApiReply _stopUpload(_InSession session, TransferOutcome outcome) {
+    _end(session, outcome, cut: false);
+    return _uploadReply(session);
+  }
+
+  Future<ApiReply> _runUpload(_InSession session, ApiUpload upload) async {
+    if (upload.contentLength > session.size) {
+      return _stopUpload(session, TransferOutcome.tooManyBytes);
+    }
+    if (upload.contentLength < session.size || !upload.keepAlive()) {
+      return _stopUpload(session, TransferOutcome.connectionLost);
+    }
+    final target = session.target;
+    if (target == null) {
+      return _stopUpload(session, TransferOutcome.writeFailed);
+    }
+    final writer = await _openWriter(session, target);
+    if (writer == null) return _uploadReply(session);
+    session
+      ..writer = writer
+      ..tempPath = writer.tempPath;
+    if (session.size > 0) {
+      final ended = session.bodyEnded = Completer<void>();
+      upload.body.listen(
+        onData: (chunk) =>
+            unawaited(_receiveChunk(session, writer, upload, chunk)),
+        onDone: () {
+          if (!ended.isCompleted) ended.complete();
+        },
+        onError: (Object e) {
+          _log('upload body failed: ${e.runtimeType}');
+          session.bodyFailed = true;
+          if (!ended.isCompleted) ended.complete();
+        },
+      );
+      await ended.future;
+    }
+    if (session.phase != _InPhase.uploading) return _uploadReply(session);
+    if (session.bodyFailed || session.received < session.size) {
+      return _stopUpload(session, TransferOutcome.connectionLost);
+    }
+    return _finishUpload(session, writer, target);
+  }
+
+  Future<IncomingFileWriter?> _openWriter(
+    _InSession session,
+    ReceiveTarget target,
+  ) async {
+    final guard = Completer<void>();
+    _track(() => guard.future);
+    try {
+      try {
+        await _journal.add(
+          ReceiveFolder(path: target.path, volumeId: target.volumeId),
+        );
+      } catch (e) {
+        _log('temp journal add failed: ${e.runtimeType}');
+        _end(session, TransferOutcome.writeFailed, cut: false);
+        return null;
+      }
+      if (session.phase != _InPhase.uploading) {
+        await _forgetJournal(target);
+        return null;
+      }
+      final IncomingFileWriter writer;
+      try {
+        writer = await IncomingFileWriter.open(
+          target: target,
+          size: session.size,
+          fs: _fs,
+          writeBytes: _writeBytes,
+        );
+      } catch (e) {
+        _log('incoming file open failed: ${e.runtimeType}');
+        await _forgetJournal(target);
+        _end(session, TransferOutcome.writeFailed, cut: false);
+        return null;
+      }
+      if (session.phase != _InPhase.uploading) {
+        await writer.discard();
+        await _forgetJournal(target);
+        return null;
+      }
+      return writer;
+    } finally {
+      guard.complete();
+    }
+  }
+
+  Future<void> _receiveChunk(
+    _InSession session,
+    IncomingFileWriter writer,
+    ApiUpload upload,
+    Uint8List chunk,
+  ) async {
+    upload.body.pause();
+    session.writing = true;
+    try {
+      if (session.phase != _InPhase.uploading) return;
+      await writer.add(chunk);
+      if (session.phase != _InPhase.uploading) return;
+      final now = _clock();
+      session
+        ..received += chunk.length
+        ..lastDataAt = now;
+      final reportedAt = session.progressAt;
+      if (reportedAt == null ||
+          now - reportedAt >= Limits.transferProgressInterval) {
+        session.progressAt = now;
+        _onChanged();
+      }
+    } on TooManyBytesException {
+      _end(session, TransferOutcome.tooManyBytes);
+    } on DiskFullException {
+      _end(session, TransferOutcome.diskFull);
+    } catch (e) {
+      _log('incoming file write failed: ${e.runtimeType}');
+      _end(session, TransferOutcome.writeFailed);
+    } finally {
+      session.writing = false;
+      upload.body.resume();
+    }
+  }
+
+  Future<ApiReply> _finishUpload(
+    _InSession session,
+    IncomingFileWriter writer,
+    ReceiveTarget target,
+  ) async {
+    session.phase = _InPhase.finishing;
+    _signal(session);
+    _onChanged();
+    WriteResult result;
+    try {
+      result = await writer.finish(
+        name: session.name,
+        expectedSha256: session.sha256,
+      );
+    } catch (e) {
+      _log('incoming file finish failed: ${e.runtimeType}');
+      result = const WriteFailed(TransferOutcome.writeFailed);
+    }
+    await _forgetJournal(target);
+    switch (result) {
+      case WriteSaved(:final finalName, :final finalPath, :final marked):
+        _end(
+          session,
+          marked ? TransferOutcome.saved : TransferOutcome.savedWithoutMark,
+          cut: false,
+          finalName: finalName,
+          finalPath: finalPath,
+        );
+      case WriteFailed(:final outcome):
+        _end(session, outcome, cut: false);
+    }
+    return _uploadReply(session);
+  }
+
+  void _releaseUpload(
+    _InSession session,
+    _InPhase previous, {
+    required bool cut,
+  }) {
+    final upload = session.upload;
+    final writer = session.writer;
+    session
+      ..upload = null
+      ..writer = null;
+    final ended = session.bodyEnded;
+    if (ended != null && !ended.isCompleted) ended.complete();
+    if (previous != _InPhase.uploading) return;
+    if (cut && upload != null) {
+      try {
+        upload.cut();
+      } catch (e) {
+        _log('upload cut failed: ${e.runtimeType}');
+      }
+    }
+    final target = session.target;
+    if (writer != null && target != null) {
+      _track(() async {
+        await writer.discard();
+        await _forgetJournal(target);
+      });
+    }
+  }
+
+  Future<void> _forgetJournal(ReceiveTarget target) async {
+    try {
+      final sub = _joinPath(target.path, tempFolderName);
+      final kind = await FileSystemEntity.type(sub, followLinks: false);
+      if (kind == FileSystemEntityType.notFound) {
+        await _journal.remove(target.path);
+      }
+    } catch (e) {
+      _log('temp journal update failed: ${e.runtimeType}');
+    }
+  }
+
   Future<ApiReply> _handleWait(ApiCall call) async {
     if (_closed) return _notFound;
     try {
@@ -1227,7 +1597,7 @@ final class TransferReceiver {
       return record == null ? _notFound : ApiReply(200, record.state.toJson());
     }
     session.lastPollAt = _clock();
-    if (_isUndecided(session)) {
+    if (_holdsWait(session)) {
       session.held++;
       _held++;
       try {
@@ -1251,14 +1621,14 @@ final class TransferReceiver {
   Future<ApiReply> _handleCancel(ApiCall call) async {
     if (_closed) return _notFound;
     try {
-      return _cancel(call);
+      return await _cancel(call);
     } catch (e) {
       _log('transfer cancel failed: ${e.runtimeType}');
       return _internal;
     }
   }
 
-  ApiReply _cancel(ApiCall call) {
+  Future<ApiReply> _cancel(ApiCall call) async {
     final request = CancelRequest.tryParse(call.json);
     if (request == null) return _incompatible;
     final fingerprint = call.clientFingerprint;
@@ -1293,6 +1663,15 @@ final class TransferReceiver {
                 : TransferOutcome.cancelledByPeer,
           );
         }
+      case _InPhase.uploading:
+        _end(
+          session,
+          request.reason == CancelReason.unreadable
+              ? TransferOutcome.unreadable
+              : TransferOutcome.cancelledByPeer,
+        );
+      case _InPhase.finishing:
+        await session.finished.future;
       case _InPhase.ended:
         break;
     }
@@ -1303,7 +1682,10 @@ final class TransferReceiver {
     switch (session.phase) {
       case _InPhase.checking || _InPhase.warning || _InPhase.folderQuestion:
         _withdrawByPeer(session);
-      case _InPhase.accepted || _InPhase.ended:
+      case _InPhase.accepted ||
+          _InPhase.uploading ||
+          _InPhase.finishing ||
+          _InPhase.ended:
         break;
     }
   }
@@ -1327,7 +1709,7 @@ final class TransferReceiver {
             ),
           );
         }
-      case _InPhase.ended:
+      case _InPhase.uploading || _InPhase.finishing || _InPhase.ended:
         break;
     }
   }
@@ -1361,7 +1743,14 @@ final class TransferReceiver {
             now - acceptedAt >= Limits.transferUploadStartTimeout) {
           _end(session, TransferOutcome.uploadNotStarted);
         }
-      case _InPhase.checking || _InPhase.ended:
+      case _InPhase.uploading:
+        final lastDataAt = session.lastDataAt;
+        if (!session.writing &&
+            lastDataAt != null &&
+            now - lastDataAt >= _idleTimeout) {
+          _end(session, TransferOutcome.idle);
+        }
+      case _InPhase.checking || _InPhase.finishing || _InPhase.ended:
         break;
     }
   }
@@ -1370,13 +1759,19 @@ final class TransferReceiver {
     _InSession session,
     TransferOutcome outcome, {
     bool register = true,
+    bool cut = true,
+    String? finalName,
+    String? finalPath,
   }) {
     if (session.phase == _InPhase.ended) return;
+    final previous = session.phase;
     session
       ..phase = _InPhase.ended
       ..outcome = outcome
-      ..permit = null;
+      ..permit = null
+      ..tempPath = null;
     if (identical(_active, session)) _active = null;
+    _releaseUpload(session, previous, cut: cut);
     final ask = session.ask;
     if (ask != null) {
       final created = ask.takeCreatedPending();
@@ -1388,11 +1783,12 @@ final class TransferReceiver {
         direction: TransferDirection.incoming,
         peerFingerprint: session.fingerprint,
         peerName: session.peerName,
-        fileName: visibleFileName(session.name),
+        fileName: visibleFileName(finalName ?? session.name),
         isProgram: session.isProgram,
         outcome: outcome,
-        canReveal: false,
+        canReveal: finalPath != null,
       );
+      _lastReceivedPath = finalPath;
     }
     _addRecord(
       _Record(
@@ -1404,6 +1800,7 @@ final class TransferReceiver {
       ),
     );
     _signal(session);
+    if (!session.finished.isCompleted) session.finished.complete();
     _onChanged();
   }
 
@@ -1416,6 +1813,10 @@ final class TransferReceiver {
         return permit == null
             ? const RemoteState.cancelled()
             : RemoteState.accepted(permit: permit);
+      case _InPhase.uploading:
+        return const RemoteState.uploading();
+      case _InPhase.finishing:
+        return const RemoteState.saving();
       case _InPhase.ended:
         final outcome = session.outcome;
         return (outcome == null ? null : remoteOf(outcome)) ??
@@ -1423,8 +1824,12 @@ final class TransferReceiver {
     }
   }
 
-  bool _isUndecided(_InSession session) => switch (session.phase) {
-    _InPhase.checking || _InPhase.warning || _InPhase.folderQuestion => true,
+  bool _holdsWait(_InSession session) => switch (session.phase) {
+    _InPhase.checking ||
+    _InPhase.warning ||
+    _InPhase.folderQuestion ||
+    _InPhase.uploading ||
+    _InPhase.finishing => true,
     _InPhase.accepted || _InPhase.ended => false,
   };
 
