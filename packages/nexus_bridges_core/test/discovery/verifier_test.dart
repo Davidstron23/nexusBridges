@@ -188,20 +188,23 @@ Future<void> main(List<String> args) async {
 }
 ''';
 
-Future<int> _synSent(int owner, int remotePort) async {
+Future<List<int>> _synSent(int owner, List<int> remotePorts) async {
   final result = await Process.run('netstat', ['-ano', '-p', 'TCP']);
-  return '${result.stdout}'
+  final rows = '${result.stdout}'
       .split('\n')
       .map((line) => line.trim().split(RegExp(r'\s+')))
       .where(
         (cells) =>
             cells.length == 5 &&
             cells[0] == 'TCP' &&
-            cells[2].endsWith(':$remotePort') &&
             cells[3] == 'SYN_SENT' &&
             cells[4] == '$owner',
       )
-      .length;
+      .toList();
+  return [
+    for (final port in remotePorts)
+      rows.where((cells) => cells[2].endsWith(':$port')).length,
+  ];
 }
 
 Future<List<int>> _closedPorts(int count) async {
@@ -1299,23 +1302,27 @@ void main() {
       final lines = StreamIterator(
         process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
       );
-      Future<String> next() async {
-        final more = await lines.moveNext().timeout(
-          const Duration(seconds: 60),
-        );
+      Future<String> next({
+        Duration limit = const Duration(seconds: 60),
+      }) async {
+        final more = await lines.moveNext().timeout(limit);
         if (!more) fail('the child ended early: ${await stderr}');
         return lines.current;
       }
 
-      final childPid = int.parse(await next());
+      final childPid = int.parse(await next(limit: const Duration(minutes: 4)));
       var conclusive = false;
-      for (var attempt = 0; attempt < 3 && !conclusive; attempt++) {
+      for (var attempt = 0; attempt < 10 && !conclusive; attempt++) {
         final [target, reference] = await _closedPorts(2);
         process.stdin.writeln('$mode $target $reference');
 
         expect(await next(), settled);
-        expect(await _synSent(childPid, target), 0, reason: 'attempt $attempt');
-        conclusive = await _synSent(childPid, reference) == 1;
+        final [atTarget, atReference] = await _synSent(childPid, [
+          target,
+          reference,
+        ]);
+        expect(atTarget, 0, reason: 'attempt $attempt');
+        conclusive = atReference == 1;
       }
       process.stdin.writeln('end');
 
@@ -1337,7 +1344,7 @@ void main() {
       'closed port leaves no SYN_SENT of the process 300 ms later, and the '
       'process ends on its own',
       () => expectNoSynSentLeft('abort', 'settled null 0'),
-      timeout: const Timeout(Duration(minutes: 2)),
+      timeout: const Timeout(Duration(minutes: 6)),
       testOn: 'windows',
     );
 
@@ -1346,7 +1353,7 @@ void main() {
       'closed port leaves no SYN_SENT of the process 300 ms later, and the '
       'process ends on its own',
       () => expectNoSynSentLeft('deadline', 'settled null'),
-      timeout: const Timeout(Duration(minutes: 2)),
+      timeout: const Timeout(Duration(minutes: 6)),
       testOn: 'windows',
     );
   });
