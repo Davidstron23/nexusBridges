@@ -1,3 +1,6 @@
+import 'package:nexus_bridges_core/nexus_bridges_core.dart'
+    show TransferOutcome;
+
 import 'app_strings.dart';
 
 final class AppStringsEs implements AppStrings {
@@ -312,4 +315,318 @@ final class AppStringsEs implements AppStrings {
 
   @override
   String noticePeerCancelledTransfer(String name) => '$name canceló el envío.';
+
+  @override
+  String get sendFileButton => 'Enviar archivo';
+
+  @override
+  String get sendNeedsVisible =>
+      'Tiene que estar a la vista para enviarle archivos.';
+
+  @override
+  String get sendNeedsPairAgain =>
+      'Vuelve a vincularlo antes de enviarle archivos.';
+
+  @override
+  String get alreadySending => 'Espera a que termine el envío actual.';
+
+  @override
+  String get sendUnavailable =>
+      'Ahora no se pueden enviar archivos a este equipo.';
+
+  @override
+  String get searchingDevices => 'Buscando dispositivos…';
+
+  @override
+  String sendingToTitle(String name) => 'Enviando a $name';
+
+  @override
+  String fileLine(String file, String size) => 'Archivo: $file ($size)';
+
+  @override
+  String get programLabel => 'Es un programa';
+
+  @override
+  String preparingFile(String file) => 'Preparando $file…';
+
+  @override
+  String contactingPeer(String name) => 'Contactando con $name…';
+
+  @override
+  String waitingAcceptance(String name) => 'Esperando a que $name acepte…';
+
+  @override
+  String progressLine(int percent, String done, String total) =>
+      '$percent % · $done de $total';
+
+  @override
+  String peerCheckingFile(String name) => '$name está comprobando el archivo…';
+
+  @override
+  String get cancellingTransfer => 'Cancelando…';
+
+  @override
+  String incomingRequestTitle(String name) =>
+      '$name quiere enviarte un archivo';
+
+  @override
+  String get withoutMarkNote =>
+      'Se guardará sin la marca que indica a Windows que viene de otro '
+      'equipo, porque esa unidad no la admite.';
+
+  @override
+  String get acceptButton => 'Aceptar';
+
+  @override
+  String get rejectButton => 'Rechazar';
+
+  @override
+  String folderQuestionTitle(String name) =>
+      '$name te está enviando un archivo';
+
+  @override
+  String get folderFirstTimeBody =>
+      'Elige dónde guardar los archivos que recibas. '
+      'Se recordará para las próximas veces.';
+
+  @override
+  String get folderThisTimeBody =>
+      'La carpeta de siempre no está disponible ahora. Elige dónde guardar '
+      'este archivo; la próxima vez se volverá a usar la de siempre.';
+
+  @override
+  String proposedFolderLine(String path) => 'Carpeta: $path';
+
+  @override
+  String get useThisFolderButton => 'Usar esta';
+
+  @override
+  String get chooseOtherFolderButton => 'Elegir otra';
+
+  @override
+  String get pickerOpenNote => 'Elige una carpeta en la ventana de Windows…';
+
+  @override
+  String folderForbidden(String path) =>
+      'En $path no se pueden guardar archivos recibidos. Elige otra carpeta.';
+
+  @override
+  String folderCannotUse(String path) =>
+      'No se puede crear $path o no se puede escribir en ella. '
+      'Elige otra carpeta.';
+
+  @override
+  String folderStillUnavailable(String path) =>
+      '$path sigue sin estar disponible. Elige otra carpeta.';
+
+  @override
+  String folderUnknownVolume(String path) =>
+      'Windows no identifica la unidad de $path, así que no se puede usar '
+      'para recibir archivos. Elige otra carpeta.';
+
+  @override
+  String folderAdminShare(String path) =>
+      '$path está en un recurso compartido administrativo de Windows, así '
+      'que no se puede usar para recibir archivos. Elige otra carpeta.';
+
+  @override
+  String get checkingFolder => 'Comprobando la carpeta…';
+
+  @override
+  String cautionNoMark(String path) =>
+      'Los archivos que se guarden en $path no llevarán la marca que indica a '
+      'Windows que vienen de otro equipo, así que Windows no avisará antes '
+      'de abrir un programa recibido.';
+
+  @override
+  String cautionRemote(String path) =>
+      '$path está en una unidad de red o en una carpeta sincronizada con la '
+      'nube: lo que recibas puede subirse a la nube o depender de la red.';
+
+  @override
+  String get useAnywayButton => 'Usarla igualmente';
+
+  @override
+  String get transferAlreadyEnded => 'Ese envío ya ha terminado.';
+
+  @override
+  String folderRememberedNote(String path) =>
+      'Los archivos que recibas se guardarán en $path.';
+
+  @override
+  String folderNotUsable(String path) =>
+      '$path no se puede usar, así que no se ha recordado.';
+
+  @override
+  String get rememberAnywayButton => 'Recordarla igualmente';
+
+  @override
+  String get dontRememberButton => 'No recordarla';
+
+  @override
+  String receivingFromTitle(String name) => 'Recibiendo de $name';
+
+  @override
+  String get waitingForData => 'Esperando los datos…';
+
+  @override
+  String get checkingFile => 'Comprobando el archivo…';
+
+  @override
+  String get lastSentTitle => 'Último envío';
+
+  @override
+  String get lastReceivedTitle => 'Última recepción';
+
+  @override
+  String toPeer(String name) => 'Para $name';
+
+  @override
+  String fromPeer(String name) => 'De $name';
+
+  @override
+  String get showInFolderButton => 'Mostrar en la carpeta';
+
+  @override
+  String get revealFolderOnly =>
+      'Se ha abierto la carpeta, pero no se ha podido seleccionar el '
+      'archivo. Puede que se haya movido, cambiado de nombre o borrado.';
+
+  @override
+  String get folderUnavailable => 'Esa carpeta no está disponible.';
+
+  @override
+  String sentOutcome(TransferOutcome outcome) => switch (outcome) {
+    TransferOutcome.saved => 'Ha llegado intacto.',
+    TransferOutcome.savedWithoutMark =>
+      'Ha llegado intacto, pero se ha guardado sin la marca que indica a '
+          'Windows que viene de otro equipo.',
+    TransferOutcome.declined =>
+      'El otro equipo no lo ha aceptado. Puedes volver a intentarlo dentro '
+          'de un minuto.',
+    TransferOutcome.busy =>
+      'El otro equipo está ocupado con otro envío. Inténtalo dentro de un '
+          'momento.',
+    TransferOutcome.unanswered => 'El otro equipo no ha respondido.',
+    TransferOutcome.invalidName =>
+      'El otro equipo no admite ese nombre de archivo.',
+    TransferOutcome.blockedType =>
+      'El otro equipo no admite ese tipo de archivo.',
+    TransferOutcome.incompatible =>
+      'Tu petición no es compatible con el otro equipo.',
+    TransferOutcome.noSpace => 'En el otro equipo no hay espacio suficiente.',
+    TransferOutcome.noFolder =>
+      'El otro equipo no ha elegido dónde guardar los archivos.',
+    TransferOutcome.pathTooLong =>
+      'La ruta donde lo guardaría el otro equipo es demasiado larga para '
+          'Windows.',
+    TransferOutcome.cancelledHere => 'Lo has cancelado.',
+    TransferOutcome.cancelledByPeer => 'El otro equipo lo ha cancelado.',
+    TransferOutcome.unpaired =>
+      'Se ha cancelado porque ya no estáis vinculados.',
+    TransferOutcome.unreadable => 'No se ha podido leer el archivo.',
+    TransferOutcome.noContact =>
+      'No se ha podido contactar con el otro equipo.',
+    TransferOutcome.uploadNotStarted =>
+      'No se ha completado: la transferencia no empezó a tiempo.',
+    TransferOutcome.connectionLost =>
+      'Se ha cortado la conexión antes de terminar.',
+    TransferOutcome.idle =>
+      'Se ha cortado porque no se movieron datos durante 30 segundos.',
+    TransferOutcome.tooManyBytes =>
+      'Se ha cortado porque llegaron más datos de los anunciados.',
+    TransferOutcome.writeFailed =>
+      'El otro equipo no ha podido escribirlo (por ejemplo, porque se ha '
+          'llenado el disco).',
+    TransferOutcome.diskFull =>
+      'Se ha llenado el disco del otro equipo mientras lo recibía, así que '
+          'se ha borrado.',
+    TransferOutcome.damaged =>
+      'Ha llegado dañado, así que se ha borrado. Si el archivo cambió '
+          'mientras se enviaba, vuelve a enviarlo.',
+    TransferOutcome.markFailed =>
+      'No se ha podido marcar como venido de otro equipo, así que se ha '
+          'borrado.',
+    TransferOutcome.moveFailed =>
+      'No se ha podido mover a la carpeta, así que se ha borrado.',
+    TransferOutcome.noFreeName =>
+      'No quedaba ningún nombre libre en la carpeta, así que no se ha '
+          'guardado.',
+    TransferOutcome.interfaceDown =>
+      'Se ha cortado porque ha cambiado la conexión de red.',
+    TransferOutcome.unconfirmed =>
+      'Se ha enviado todo, pero el otro equipo no lo ha confirmado: no se '
+          'sabe si ha llegado.',
+  };
+
+  @override
+  String receivedOutcome(TransferOutcome outcome) => switch (outcome) {
+    TransferOutcome.saved => 'Guardado.',
+    TransferOutcome.savedWithoutMark =>
+      'Guardado sin la marca que indica a Windows que viene de otro equipo.',
+    TransferOutcome.declined => 'Lo has rechazado.',
+    TransferOutcome.busy => 'Se ha rechazado porque había otro envío en curso.',
+    TransferOutcome.unanswered => 'Ha caducado sin respuesta.',
+    TransferOutcome.invalidName =>
+      'Se ha rechazado porque su nombre no es válido.',
+    TransferOutcome.blockedType =>
+      'Se ha rechazado porque no se admite ese tipo de archivo.',
+    TransferOutcome.incompatible =>
+      'Se ha rechazado porque la petición no era compatible.',
+    TransferOutcome.noSpace =>
+      'Se ha rechazado porque no hay espacio: tiene que quedar libre el '
+          'tamaño del archivo más 1 GB.',
+    TransferOutcome.noFolder =>
+      'Se ha rechazado porque no elegiste dónde guardarlo.',
+    TransferOutcome.pathTooLong =>
+      'Se ha rechazado porque la ruta donde se guardaría es demasiado larga '
+          'para Windows.',
+    TransferOutcome.cancelledHere => 'Lo has cancelado.',
+    TransferOutcome.cancelledByPeer => 'El otro equipo lo ha cancelado.',
+    TransferOutcome.unpaired =>
+      'Se ha cancelado porque ya no estáis vinculados.',
+    TransferOutcome.unreadable =>
+      'El otro equipo ha dejado de poder leer el archivo.',
+    TransferOutcome.noContact =>
+      'No se ha podido contactar con el otro equipo.',
+    TransferOutcome.uploadNotStarted =>
+      'No se ha completado: la transferencia no empezó a tiempo.',
+    TransferOutcome.connectionLost =>
+      'Se ha cortado la conexión antes de terminar.',
+    TransferOutcome.idle =>
+      'Se ha cortado porque no se movieron datos durante 30 segundos.',
+    TransferOutcome.tooManyBytes =>
+      'Se ha cortado porque llegaron más datos de los anunciados.',
+    TransferOutcome.writeFailed =>
+      'No se ha podido escribir (por ejemplo, porque se ha llenado el '
+          'disco), así que se ha borrado.',
+    TransferOutcome.diskFull =>
+      'Se ha llenado el disco mientras se recibía, así que se ha borrado.',
+    TransferOutcome.damaged => 'Ha llegado dañado, así que se ha borrado.',
+    TransferOutcome.markFailed =>
+      'No se ha podido marcar como venido de otro equipo, así que se ha '
+          'borrado.',
+    TransferOutcome.moveFailed =>
+      'No se ha podido mover a la carpeta, así que se ha borrado.',
+    TransferOutcome.noFreeName =>
+      'No quedaba ningún nombre libre en la carpeta, así que no se ha '
+          'guardado.',
+    TransferOutcome.interfaceDown =>
+      'Se ha cortado porque ha cambiado la conexión de red.',
+    TransferOutcome.unconfirmed =>
+      'Se ha enviado todo, pero no se ha confirmado.',
+  };
+
+  @override
+  String get closeDuringTransferTitle => 'Hay un envío en curso';
+
+  @override
+  String get closeDuringTransferBody =>
+      'Si cierras la app ahora, el envío se cancelará.';
+
+  @override
+  String get keepOpenButton => 'No cerrar';
+
+  @override
+  String get closeAndCancelButton => 'Cerrar y cancelar';
 }

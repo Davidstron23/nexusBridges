@@ -133,6 +133,76 @@ class FakeAppController extends AppController {
   void dismissNotice(int id) {
     calls.add('dismissNotice $id');
   }
+
+  SendFileResult sendFileResult = SendFileResult.started;
+  RevealResult revealResult = RevealResult.shown;
+  Future<void> Function() shutdownResult = () async {};
+
+  @override
+  Future<SendFileResult> sendFile(String fingerprint) async {
+    calls.add('sendFile $fingerprint');
+    return sendFileResult;
+  }
+
+  @override
+  void cancelSending() {
+    calls.add('cancelSending');
+  }
+
+  @override
+  void cancelReceiving(String sessionId) {
+    calls.add('cancelReceiving $sessionId');
+  }
+
+  @override
+  void answerIncoming(String sessionId, {required bool accept}) {
+    calls.add('answerIncoming $sessionId $accept');
+  }
+
+  @override
+  Future<void> useProposedFolder(String sessionId) async {
+    calls.add('useProposedFolder $sessionId');
+  }
+
+  @override
+  Future<void> chooseOtherFolder(String sessionId) async {
+    calls.add('chooseOtherFolder $sessionId');
+  }
+
+  @override
+  void useFolderAnyway(String sessionId) {
+    calls.add('useFolderAnyway $sessionId');
+  }
+
+  @override
+  void cancelFolderQuestion(String sessionId) {
+    calls.add('cancelFolderQuestion $sessionId');
+  }
+
+  @override
+  Future<void> rememberFolderAfterEnd(
+    String sessionId, {
+    required bool remember,
+  }) async {
+    calls.add('rememberFolderAfterEnd $sessionId $remember');
+  }
+
+  @override
+  void dismissFolderPanel(String sessionId) {
+    calls.add('dismissFolderPanel $sessionId');
+  }
+
+  @override
+  Future<RevealResult> revealLastReceived() async {
+    calls.add('revealLastReceived');
+    return revealResult;
+  }
+
+  @override
+  Future<void> shutdown() {
+    calls.add('shutdown');
+    return shutdownResult();
+  }
 }
 
 Future<void> pumpHome(

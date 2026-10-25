@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:nexus_bridges_core/nexus_bridges_core.dart'
+    show TransferOutcome;
 
 import 'app_strings_en.dart';
 import 'app_strings_es.dart';
@@ -96,6 +98,69 @@ abstract class AppStrings {
   String noticePairingFailed(String who);
   String noticeReceiveFolderNotSaved(String path);
   String noticePeerCancelledTransfer(String name);
+
+  String get sendFileButton;
+  String get sendNeedsVisible;
+  String get sendNeedsPairAgain;
+  String get alreadySending;
+  String get sendUnavailable;
+  String get searchingDevices;
+
+  String sendingToTitle(String name);
+  String fileLine(String file, String size);
+  String get programLabel;
+  String preparingFile(String file);
+  String contactingPeer(String name);
+  String waitingAcceptance(String name);
+  String progressLine(int percent, String done, String total);
+  String peerCheckingFile(String name);
+  String get cancellingTransfer;
+
+  String incomingRequestTitle(String name);
+  String get withoutMarkNote;
+  String get acceptButton;
+  String get rejectButton;
+
+  String folderQuestionTitle(String name);
+  String get folderFirstTimeBody;
+  String get folderThisTimeBody;
+  String proposedFolderLine(String path);
+  String get useThisFolderButton;
+  String get chooseOtherFolderButton;
+  String get pickerOpenNote;
+  String folderForbidden(String path);
+  String folderCannotUse(String path);
+  String folderStillUnavailable(String path);
+  String folderUnknownVolume(String path);
+  String folderAdminShare(String path);
+  String get checkingFolder;
+  String cautionNoMark(String path);
+  String cautionRemote(String path);
+  String get useAnywayButton;
+  String get transferAlreadyEnded;
+  String folderRememberedNote(String path);
+  String folderNotUsable(String path);
+  String get rememberAnywayButton;
+  String get dontRememberButton;
+
+  String receivingFromTitle(String name);
+  String get waitingForData;
+  String get checkingFile;
+
+  String get lastSentTitle;
+  String get lastReceivedTitle;
+  String toPeer(String name);
+  String fromPeer(String name);
+  String get showInFolderButton;
+  String get revealFolderOnly;
+  String get folderUnavailable;
+  String sentOutcome(TransferOutcome outcome);
+  String receivedOutcome(TransferOutcome outcome);
+
+  String get closeDuringTransferTitle;
+  String get closeDuringTransferBody;
+  String get keepOpenButton;
+  String get closeAndCancelButton;
 }
 
 AppStrings stringsFor(String languageCode) {
