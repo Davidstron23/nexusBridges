@@ -305,7 +305,12 @@ Future<void> eventually(
   String reason = 'condition',
 }) async {
   final stopwatch = Stopwatch()..start();
-  while (!condition()) {
+  while (true) {
+    try {
+      if (condition()) return;
+    } on FileSystemException {
+      if (stopwatch.elapsed > limit) rethrow;
+    }
     if (stopwatch.elapsed > limit) fail('$reason not met within $limit');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
