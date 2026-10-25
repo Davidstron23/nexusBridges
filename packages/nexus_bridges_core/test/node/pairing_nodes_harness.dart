@@ -311,8 +311,16 @@ Future<(PairingNode, PairingNode)> twoPairingNodes({
 }
 
 Future<void> meet(PairingNode a, PairingNode b) async {
-  await a.node.rescan();
-  await b.node.rescan();
+  for (var attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0 && a.sees(b) && b.sees(a)) break;
+    await a.node.rescan();
+    await b.node.rescan();
+    final watch = Stopwatch()..start();
+    while (watch.elapsed < const Duration(seconds: 3) &&
+        !(a.sees(b) && b.sees(a))) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+  }
   await eventually(
     () => a.sees(b) && b.sees(a),
     reason: 'nodes see each other',

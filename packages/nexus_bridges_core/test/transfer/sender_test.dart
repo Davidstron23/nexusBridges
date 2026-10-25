@@ -363,14 +363,21 @@ void main() {
       'a name with U+202E is refused as invalid without reading it',
       () async {
         final (a, b) = await pairOfStacks();
-        final path = await a.sourceFile('factura${rlo}fdp.exe', bytesOf(64));
+        final path = await a.sourceFile('informe${rlo}txt.pdf', bytesOf(64));
         await lockExclusively(path);
         expect(await a.send(b, path), SendStart.started);
         final result = a.lastSent!;
         expect(result.outcome, TransferOutcome.invalidName);
-        expect(result.fileName, 'factura${replacement}fdp.exe');
+        expect(result.fileName, 'informe${replacement}txt.pdf');
         expect(result.fileName, isNot(contains(rlo)));
-        expect(result.isProgram, isTrue);
+        expect(result.isProgram, isFalse);
+        expect(a.outgoing, isNull);
+        final disguised = '${a.sourceDir}\\factura${rlo}fdp.exe';
+        expect(await a.send(b, disguised), SendStart.started);
+        final program = a.lastSent!;
+        expect(program.outcome, TransferOutcome.invalidName);
+        expect(program.fileName, 'factura${replacement}fdp.exe');
+        expect(program.isProgram, isTrue);
         expect(a.outgoing, isNull);
         await settle();
         expect(a.outgoingSeen, isEmpty);

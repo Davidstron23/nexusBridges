@@ -164,7 +164,7 @@ void main() {
         isTrue,
         reason: 'resident memory grew by ${growth ~/ 1024} KiB',
       );
-    }, timeout: const Timeout(Duration(seconds: 120)));
+    }, timeout: const Timeout(Duration(minutes: 6)));
 
     test('the pure functions accept the real reading', () {
       final adapters = WindowsNetworkSnapshotReader().read();

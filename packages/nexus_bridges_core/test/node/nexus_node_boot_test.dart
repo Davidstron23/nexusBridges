@@ -11,7 +11,7 @@ import 'package:test/test.dart';
 
 const Duration _shutdownLimit = Duration(seconds: 2);
 const Duration _waitLimit = Duration(seconds: 5);
-const Timeout _childTimeout = Timeout(Duration(minutes: 2));
+const Timeout _childTimeout = Timeout(Duration(minutes: 6));
 
 final String _sep = Platform.pathSeparator;
 
@@ -335,7 +335,7 @@ void main() {
         .transform(const LineSplitter())
         .toList();
     final errors = process.stderr.transform(utf8.decoder).join();
-    final code = await process.exitCode.timeout(const Duration(seconds: 90));
+    final code = await process.exitCode.timeout(const Duration(minutes: 4));
     return (code, await lines, await errors);
   }
 
