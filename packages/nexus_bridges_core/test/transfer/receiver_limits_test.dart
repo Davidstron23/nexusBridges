@@ -10,7 +10,6 @@ import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transfer/folders.dart';
-import 'package:nexus_bridges_core/src/transfer/journal.dart';
 import 'package:nexus_bridges_core/src/transfer/messages.dart'
     show offerOutcome;
 import 'package:nexus_bridges_core/src/transfer/platform.dart';

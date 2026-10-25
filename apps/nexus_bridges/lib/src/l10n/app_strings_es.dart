@@ -304,4 +304,12 @@ final class AppStringsEs implements AppStrings {
   @override
   String noticePairingFailed(String who) =>
       'No se ha podido completar la vinculación con $who.';
+
+  @override
+  String noticeReceiveFolderNotSaved(String path) =>
+      'Los archivos se guardarán en $path hasta que cierres la app, pero '
+      'no se ha podido recordar.';
+
+  @override
+  String noticePeerCancelledTransfer(String name) => '$name canceló el envío.';
 }

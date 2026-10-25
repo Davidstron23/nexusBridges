@@ -195,6 +195,25 @@ void main() {
         '../network/network.dart',
         '../identity/identity.dart',
         '../pairing_flow/pairing_flow.dart',
+        '../transfer/transfer.dart',
+      });
+    });
+
+    test('from transfer it only shows the view types of the app', () {
+      expect(exports['../transfer/transfer.dart'], {
+        'OutgoingTransferView',
+        'OutgoingPhase',
+        'IncomingTransferView',
+        'IncomingStage',
+        'FolderQuestionView',
+        'FolderQuestionKind',
+        'FolderProblem',
+        'AfterEndResult',
+        'TransferResultView',
+        'TransferDirection',
+        'TransferOutcome',
+        'TransferResultKind',
+        'RevealResult',
       });
     });
 

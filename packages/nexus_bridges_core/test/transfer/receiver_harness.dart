@@ -10,11 +10,8 @@ import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/settings/settings.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
-import 'package:nexus_bridges_core/src/transfer/journal.dart';
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
-import 'package:nexus_bridges_core/src/transfer/windows_file_system.dart';
-import 'package:nexus_bridges_core/src/transfer/writer.dart' show writeAllBytes;
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 

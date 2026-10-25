@@ -94,6 +94,8 @@ abstract class AppStrings {
   String noticeIgnoreNotSaved(String name);
   String noticePairingNotSaved(String who);
   String noticePairingFailed(String who);
+  String noticeReceiveFolderNotSaved(String path);
+  String noticePeerCancelledTransfer(String name);
 }
 
 AppStrings stringsFor(String languageCode) {

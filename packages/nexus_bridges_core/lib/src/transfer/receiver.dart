@@ -10,7 +10,6 @@ import '../server/server.dart';
 import '../transport/transport.dart' show AbortSignal;
 import 'decision.dart';
 import 'folders.dart';
-import 'journal.dart' show TempJournal;
 import 'messages.dart';
 import 'names.dart'
     show isBlockedType, isProgram, isValidFileName, visibleFileName;

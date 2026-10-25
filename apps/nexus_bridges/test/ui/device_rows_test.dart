@@ -1162,6 +1162,7 @@ void main() {
                     ? peerShort
                     : _mineName,
                 count: kind == NoticeKind.attemptCancelled ? 3 : 1,
+                detail: _mineName,
               ),
             const Notice(
               id: 99,
