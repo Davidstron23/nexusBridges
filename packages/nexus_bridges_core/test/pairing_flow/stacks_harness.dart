@@ -16,6 +16,7 @@ import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart';
 
 final InternetAddress hostA = InternetAddress('127.0.0.1');
@@ -41,12 +42,13 @@ final class TestClock {
 
 Future<void> until(
   bool Function() condition, {
-  Duration limit = const Duration(seconds: 8),
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(const Duration(seconds: 8));
   final stopwatch = Stopwatch()..start();
   while (!condition()) {
-    if (stopwatch.elapsed > limit) fail('$reason not met within $limit');
+    if (stopwatch.elapsed > span) fail('$reason not met within $span');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }

@@ -12,6 +12,7 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart'
     show jsonContentType, loopback, pairedDeviceOf, presenting;
 
@@ -83,14 +84,12 @@ List<int> _replyOf(DeviceInfo info) {
   ];
 }
 
-Future<void> _until(
-  bool Function() condition, {
-  Duration limit = _limit,
-}) async {
-  final deadline = DateTime.now().add(limit);
+Future<void> _until(bool Function() condition, {Duration? limit}) async {
+  final span = limit ?? scaled(_limit);
+  final deadline = DateTime.now().add(span);
   while (!condition()) {
     if (DateTime.now().isAfter(deadline)) {
-      fail('condition not met within $limit');
+      fail('condition not met within $span');
     }
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
@@ -100,7 +99,7 @@ Future<void> _settle(
   int Function() value, {
   Duration quiet = const Duration(milliseconds: 200),
 }) async {
-  final deadline = DateTime.now().add(_limit);
+  final deadline = DateTime.now().add(scaled(_limit));
   var last = value();
   var since = DateTime.now();
   while (DateTime.now().difference(since) < quiet) {
@@ -116,32 +115,10 @@ Future<void> _settle(
 
 Future<void> _quiet([Duration wait = _silence]) => Future<void>.delayed(wait);
 
-Future<int> _freeTcpPort() async {
-  final probe = await ServerSocket.bind(loopback, 0);
-  final port = probe.port;
-  await probe.close();
-  return port;
-}
+Future<int> _freeTcpPort() => pickPort(tcp: [loopback]);
 
-Future<int> _freePort() async {
-  while (true) {
-    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = tcp.port;
-    RawDatagramSocket? udp;
-    try {
-      udp = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        port,
-        reuseAddress: false,
-      );
-    } on SocketException {
-      udp = null;
-    }
-    udp?.close();
-    await tcp.close();
-    if (udp != null) return port;
-  }
-}
+Future<int> _freePort() =>
+    pickPort(tcp: [InternetAddress.anyIPv4], udp: [InternetAddress.anyIPv4]);
 
 Future<PairedDevicesStore> _pairedStore() async {
   final dir = await Directory.systemTemp.createTemp('nexus_discovery_');
@@ -216,7 +193,7 @@ final class _Channel {
       _senders[source.address] = socket;
     }
     final bytes = announcement.encode();
-    final deadline = DateTime.now().add(_limit);
+    final deadline = DateTime.now().add(scaled(_limit));
     while (socket.send(bytes, InternetAddress.loopbackIPv4, port) !=
         bytes.length) {
       if (DateTime.now().isAfter(deadline)) fail('datagram not sent');
@@ -457,7 +434,7 @@ final class _Farm {
 
   Future<void> requestAt(int last) async {
     final link = await linkTo(last);
-    await link.requested.future.timeout(_limit);
+    await link.requested.future.timeout(scaled(_limit));
   }
 
   static Future<_Farm> start(List<_Endpoint> endpoints) async {
@@ -608,7 +585,7 @@ final class _Neighbour {
   Future<void> say(Announcement announcement) async {
     final before = channel.received.length;
     final bytes = announcement.encode();
-    final deadline = DateTime.now().add(_limit);
+    final deadline = DateTime.now().add(scaled(_limit));
     while (socket.send(bytes, InternetAddress.loopbackIPv4, channel.port) !=
         bytes.length) {
       if (DateTime.now().isAfter(deadline)) fail('datagram not sent');
@@ -1278,7 +1255,7 @@ void main() {
       );
       await s.service.syncInterfaces([first]);
 
-      await s.service.rescan().timeout(_limit);
+      await s.service.rescan().timeout(scaled(_limit));
 
       expect(asked, [first.id]);
       final device = s.find(bob.fingerprint)!;
@@ -1306,7 +1283,7 @@ void main() {
       );
       await s.service.syncInterfaces([first]);
 
-      await s.service.rescan().timeout(_limit);
+      await s.service.rescan().timeout(scaled(_limit));
 
       expect(farm.totalAt(30), 1);
       expect(s.service.current.map((d) => d.info.fingerprint), [
@@ -2164,7 +2141,7 @@ void main() {
       expect(s.find(bob.fingerprint)?.interfaceId, wide.id);
       expect(s.emitted, hasLength(emissions));
 
-      await s.service.rescan().timeout(_limit);
+      await s.service.rescan().timeout(scaled(_limit));
 
       expect(
         knocks.hits.keys,

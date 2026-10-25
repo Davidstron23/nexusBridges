@@ -12,6 +12,7 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart'
     show jsonContentType, pairedDeviceOf, presenting;
 
@@ -36,12 +37,13 @@ Announcement _hello(DeviceInfo info) =>
 
 Future<void> _until(
   bool Function() condition, {
-  Duration limit = _limit,
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(_limit);
   final watch = Stopwatch()..start();
   while (!condition()) {
-    if (watch.elapsed > limit) fail('$reason not met within $limit');
+    if (watch.elapsed > span) fail('$reason not met within $span');
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
 }
@@ -54,7 +56,7 @@ Future<void> _settle(
   var last = value();
   var since = Stopwatch()..start();
   while (since.elapsed < quiet) {
-    if (watch.elapsed > _limit) fail('value did not settle');
+    if (watch.elapsed > scaled(_limit)) fail('value did not settle');
     await Future<void>.delayed(const Duration(milliseconds: 10));
     final current = value();
     if (current != last) {
@@ -67,25 +69,8 @@ Future<void> _settle(
 Future<void> _pause([Duration span = const Duration(milliseconds: 300)]) =>
     Future<void>.delayed(span);
 
-Future<int> _freeUdpPort() async {
-  while (true) {
-    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = tcp.port;
-    RawDatagramSocket? udp;
-    try {
-      udp = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        port,
-        reuseAddress: false,
-      );
-    } on SocketException {
-      udp = null;
-    }
-    udp?.close();
-    await tcp.close();
-    if (udp != null) return port;
-  }
-}
+Future<int> _freeUdpPort() =>
+    pickPort(tcp: [InternetAddress.anyIPv4], udp: [InternetAddress.anyIPv4]);
 
 Future<PairedDevicesStore> _pairedStore(String owner) async {
   final dir = await Directory.systemTemp.createTemp('nexus_rescan_presence_');
@@ -155,7 +140,7 @@ final class _Channel {
     final watch = Stopwatch()..start();
     while (socket.send(bytes, InternetAddress.loopbackIPv4, port) !=
         bytes.length) {
-      if (watch.elapsed > _limit) fail('datagram not sent');
+      if (watch.elapsed > scaled(_limit)) fail('datagram not sent');
       await Future<void>.delayed(const Duration(milliseconds: 1));
     }
   }
@@ -479,7 +464,7 @@ void main() {
       pairedWith: pairedWith,
     );
     await s.service.syncInterfaces(interfaces);
-    await s.service.rescan().timeout(_limit);
+    await s.service.rescan().timeout(scaled(_limit));
     expect(s.lists(bob.fingerprint), isTrue);
     expect(s.find(bob.fingerprint)!.interfaceId, via.id);
     return (s, responder);
@@ -500,7 +485,7 @@ void main() {
       );
       await s.service.syncInterfaces([first]);
 
-      await s.service.rescan().timeout(_limit);
+      await s.service.rescan().timeout(scaled(_limit));
       expect(s.lists(bob.fingerprint), isTrue);
       expect(peer.registrations, hasLength(1));
 
@@ -553,7 +538,7 @@ void main() {
         announceInterval: Limits.announceInterval,
       );
       await s.service.syncInterfaces([first]);
-      await s.service.rescan().timeout(_limit);
+      await s.service.rescan().timeout(scaled(_limit));
       await _until(() => responder.connections >= 3);
 
       await channel.deliver(_host(3), _hello(responder.infoOf(bob)));
@@ -651,7 +636,7 @@ void main() {
         announceInterval: Limits.announceInterval,
       );
       await s.service.syncInterfaces([first]);
-      await s.service.rescan().timeout(_limit);
+      await s.service.rescan().timeout(scaled(_limit));
       expect(s.lists(bob.fingerprint), isTrue);
       return (s, responder, channel);
     }

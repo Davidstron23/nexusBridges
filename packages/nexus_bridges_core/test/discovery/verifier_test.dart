@@ -8,6 +8,7 @@ import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart';
 
 const Duration _oneSecond = Duration(seconds: 1);
@@ -1230,8 +1231,8 @@ void main() {
         timeout: const Duration(seconds: 10),
         abort: signal,
       );
-      final connection = await peer.firstConnection.timeout(waitLimit);
-      await connection.request.timeout(waitLimit);
+      final connection = await peer.firstConnection.timeout(scaled(waitLimit));
+      await connection.request.timeout(scaled(waitLimit));
       expect(signal.listenerCount, 1);
       final watch = Stopwatch()..start();
       signal.abort();
@@ -1252,8 +1253,8 @@ void main() {
         timeout: const Duration(seconds: 10),
         abort: signal,
       );
-      final connection = await peer.firstConnection.timeout(waitLimit);
-      await connection.firstBytes.timeout(waitLimit);
+      final connection = await peer.firstConnection.timeout(scaled(waitLimit));
+      await connection.firstBytes.timeout(scaled(waitLimit));
       final watch = Stopwatch()..start();
       signal.abort();
 

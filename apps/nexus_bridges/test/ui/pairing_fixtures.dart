@@ -198,6 +198,8 @@ Set<String> allowedTexts(
       s.noticePairingFailed(n),
       s.noticeAttemptLost(n),
       s.noticeReplaceWithdrawn(n),
+      s.noticeReceiveFolderNotSaved(n),
+      s.noticePeerCancelledTransfer(n),
       s.namesakeWarning(n),
     ],
   };

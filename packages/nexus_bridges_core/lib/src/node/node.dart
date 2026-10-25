@@ -14,7 +14,26 @@ import '../pairing/pairing.dart'
 import '../pairing_flow/pairing_flow.dart';
 import '../protocol/protocol.dart';
 import '../server/server.dart' show ApiServer;
+import '../settings/settings.dart' show SavedReceiveFolder, SettingsStore;
 import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
+import '../transfer/transfer.dart'
+    show
+        FilePicker,
+        FileSystemPlatform,
+        FolderRevealer,
+        PeerCancelledTransfer,
+        ReceiveFolder,
+        ReceiveFolderNotSaved,
+        ReceiveFolderStore,
+        RevealResult,
+        SendStart,
+        SendTarget,
+        TempJournal,
+        TransferCoordinator,
+        TransferEvent,
+        WindowsFileSystemPlatform,
+        WindowsFilePicker,
+        writeAllBytes;
 import 'entries.dart';
 import 'node_state.dart';
 import 'reconcile.dart';
@@ -25,6 +44,21 @@ export '../network/network.dart' show NetworkDecision, AdapterInfo, Ipv4Subnet;
 export '../pairing_flow/pairing_flow.dart'
     show PairingView, PairingRole, PairingPhase, PairingOutcome, ReceiverAnswer;
 export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
+export '../transfer/transfer.dart'
+    show
+        OutgoingTransferView,
+        OutgoingPhase,
+        IncomingTransferView,
+        IncomingStage,
+        FolderQuestionView,
+        FolderQuestionKind,
+        FolderProblem,
+        AfterEndResult,
+        TransferResultView,
+        TransferDirection,
+        TransferOutcome,
+        TransferResultKind,
+        RevealResult;
 export 'node_state.dart';
 
 void _noLog(String message) {}
@@ -53,6 +87,30 @@ String _resolveDeviceName(String? requested) {
 File _fileIn(Directory dir, String name) =>
     File('${dir.path}${Platform.pathSeparator}$name');
 
+final class _SettingsReceiveFolders implements ReceiveFolderStore {
+  _SettingsReceiveFolders(this._settings);
+
+  final SettingsStore _settings;
+
+  @override
+  Future<ReceiveFolder?> load() async {
+    final saved = await _settings.readReceiveFolder();
+    if (saved == null) return null;
+    return ReceiveFolder(path: saved.path, volumeId: saved.volumeId);
+  }
+
+  @override
+  Future<bool> save(ReceiveFolder folder) async {
+    try {
+      return await _settings.writeReceiveFolder(
+        SavedReceiveFolder(path: folder.path, volumeId: folder.volumeId),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
 final class NexusNode {
   NexusNode._({
     required this._dataDir,
@@ -69,6 +127,17 @@ final class NexusNode {
     required this._activeOf,
     required this._pairingTickInterval,
     required this._pairingPollHold,
+    required this._ownerWindowClass,
+    required this._ownerWindowTitle,
+    required this._fileSystem,
+    required this._picker,
+    required this._revealer,
+    required this._clock,
+    required this._transferTickInterval,
+    required this._transferPollHold,
+    required this._transferIdleTimeout,
+    required this._transferConfirmTimeout,
+    required this._transferWriteBytes,
   });
 
   static Future<NexusNode> start({
@@ -87,6 +156,17 @@ final class NexusNode {
     MulticastChannel? channel,
     Duration pairingTickInterval = const Duration(seconds: 1),
     Duration pairingPollHold = Limits.pairingPollHold,
+    String ownerWindowClass = '',
+    String ownerWindowTitle = '',
+    FileSystemPlatform? fileSystem,
+    FilePicker? picker,
+    FolderRevealer? revealer,
+    Duration Function() clock = monotonicClock,
+    Duration transferTickInterval = const Duration(seconds: 1),
+    Duration transferPollHold = Limits.transferPollHold,
+    Duration transferIdleTimeout = Limits.transferIdleTimeout,
+    Duration transferConfirmTimeout = Limits.transferConfirmTimeout,
+    Future<void> Function(RandomAccessFile, List<int>)? transferWriteBytes,
   }) async {
     final node = NexusNode._(
       dataDir: dataDir,
@@ -103,6 +183,17 @@ final class NexusNode {
       activeOf: activeOf,
       pairingTickInterval: pairingTickInterval,
       pairingPollHold: pairingPollHold,
+      ownerWindowClass: ownerWindowClass,
+      ownerWindowTitle: ownerWindowTitle,
+      fileSystem: fileSystem,
+      picker: picker,
+      revealer: revealer,
+      clock: clock,
+      transferTickInterval: transferTickInterval,
+      transferPollHold: transferPollHold,
+      transferIdleTimeout: transferIdleTimeout,
+      transferConfirmTimeout: transferConfirmTimeout,
+      transferWriteBytes: transferWriteBytes,
     );
     await node._exclusive(node._boot);
     node._suggestTimer = Timer.periodic(_suggestInterval, (_) {
@@ -129,6 +220,17 @@ final class NexusNode {
   final List<ActiveInterface> Function(List<InterfaceState>) _activeOf;
   final Duration _pairingTickInterval;
   final Duration _pairingPollHold;
+  final String _ownerWindowClass;
+  final String _ownerWindowTitle;
+  final FileSystemPlatform? _fileSystem;
+  final FilePicker? _picker;
+  final FolderRevealer? _revealer;
+  final Duration Function() _clock;
+  final Duration _transferTickInterval;
+  final Duration _transferPollHold;
+  final Duration _transferIdleTimeout;
+  final Duration _transferConfirmTimeout;
+  final Future<void> Function(RandomAccessFile, List<int>)? _transferWriteBytes;
 
   final StreamController<NodeState> _states =
       StreamController<NodeState>.broadcast();
@@ -175,6 +277,7 @@ final class NexusNode {
   PairedDevicesStore? _paired;
   IgnoredDevicesStore? _ignored;
   PairingCoordinator? _coordinator;
+  TransferCoordinator? _transfers;
   PeerCheckScheduler? _scheduler;
   ApiServer? _server;
   MulticastChannel? _channel;
@@ -185,6 +288,8 @@ final class NexusNode {
   StreamSubscription<List<DiscoveredDevice>>? _devicesSubscription;
   StreamSubscription<void>? _coordinatorChangesSubscription;
   StreamSubscription<PairingEvent>? _coordinatorEventsSubscription;
+  StreamSubscription<void>? _transfersChangesSubscription;
+  StreamSubscription<TransferEvent>? _transfersEventsSubscription;
   StreamSubscription<void>? _ignoredSubscription;
   StreamSubscription<void>? _pairedSaveSubscription;
   StreamSubscription<void>? _ignoredSaveSubscription;
@@ -267,6 +372,128 @@ final class NexusNode {
       'dismiss pairing',
       (coordinator) => coordinator.dismissOutcome(),
     );
+  }
+
+  Future<SendFileResult> sendFile(String fingerprint) async {
+    TransferCoordinator? transfers;
+    SendTarget? target;
+    var result = SendFileResult.unavailable;
+    await _run('send file', () async {
+      final current = _transfers;
+      if (current == null) return;
+      var allowed = false;
+      for (final entry in _entries) {
+        if (entry.fingerprint == fingerprint) allowed = entry.canSendFile;
+      }
+      if (!allowed) return;
+      if (current.sending) {
+        result = SendFileResult.alreadySending;
+        return;
+      }
+      final found = _sendTargetOf(fingerprint);
+      if (found == null) return;
+      transfers = current;
+      target = found;
+    });
+    final active = transfers;
+    final chosen = target;
+    if (active == null || chosen == null) return result;
+    try {
+      final start = await active.sendFile(
+        chosen,
+        refresh: () => _sendTargetOf(fingerprint),
+      );
+      return switch (start) {
+        SendStart.started => SendFileResult.started,
+        SendStart.nothingChosen => SendFileResult.nothingChosen,
+        SendStart.alreadySending => SendFileResult.alreadySending,
+      };
+    } catch (e) {
+      _log('send file failed: ${e.runtimeType}');
+      return SendFileResult.unavailable;
+    }
+  }
+
+  void cancelSending() {
+    _queueTransfers(
+      'cancel sending',
+      (transfers) => transfers.cancelOutgoing(),
+    );
+  }
+
+  void cancelReceiving(String sessionId) {
+    _queueTransfers(
+      'cancel receiving',
+      (transfers) => transfers.cancelIncoming(sessionId),
+    );
+  }
+
+  void answerIncoming(String sessionId, {required bool accept}) {
+    _queueTransfers(
+      'answer incoming',
+      (transfers) => transfers.answerWarning(sessionId, accept: accept),
+    );
+  }
+
+  Future<void> useProposedFolder(String sessionId) {
+    return _startTransfers(
+      'use proposed folder',
+      (transfers) => transfers.useProposedFolder(sessionId),
+    );
+  }
+
+  Future<void> chooseOtherFolder(String sessionId) {
+    return _startTransfers(
+      'choose other folder',
+      (transfers) => transfers.chooseOtherFolder(sessionId),
+    );
+  }
+
+  void useFolderAnyway(String sessionId) {
+    _queueTransfers(
+      'use folder anyway',
+      (transfers) => transfers.useFolderAnyway(sessionId),
+    );
+  }
+
+  void cancelFolderQuestion(String sessionId) {
+    _queueTransfers(
+      'cancel folder question',
+      (transfers) => transfers.cancelFolderQuestion(sessionId),
+    );
+  }
+
+  Future<void> rememberFolderAfterEnd(
+    String sessionId, {
+    required bool remember,
+  }) {
+    return _startTransfers(
+      'remember folder',
+      (transfers) =>
+          transfers.rememberFolderAfterEnd(sessionId, remember: remember),
+    );
+  }
+
+  void dismissFolderPanel(String sessionId) {
+    _queueTransfers(
+      'dismiss folder panel',
+      (transfers) => transfers.dismissFolderPanel(sessionId),
+    );
+  }
+
+  Future<RevealResult> revealLastReceived() async {
+    Future<RevealResult>? pending;
+    await _run('reveal last received', () async {
+      pending = _transfers?.revealLastReceived();
+    });
+    final reveal = pending;
+    if (reveal == null) return RevealResult.unavailable;
+    try {
+      return await reveal;
+    } catch (e) {
+      _log('reveal failed: ${e.runtimeType}');
+      return RevealResult.unavailable;
+    }
   }
 
   Future<void> answerMine(String fingerprint, {required bool mine}) {
@@ -526,6 +753,18 @@ final class NexusNode {
     } catch (e) {
       _log('ignored load failed: ${e.runtimeType}');
     }
+    final settings = SettingsStore(
+      JsonFileStore(_fileIn(dir, 'settings.json')),
+    );
+    final journal = TempJournal(
+      JsonFileStore(_fileIn(dir, 'cleanup.json')),
+      log: _log,
+    );
+    try {
+      await journal.load();
+    } catch (e) {
+      _log('cleanup journal load failed: ${e.runtimeType}');
+    }
     if (_closing) return;
 
     _identityStatus = switch (loaded) {
@@ -571,12 +810,35 @@ final class NexusNode {
       pollHold: _pairingPollHold,
       log: _log,
     );
+    final transfers = TransferCoordinator(
+      identity: identity,
+      paired: paired,
+      folders: _SettingsReceiveFolders(settings),
+      journal: journal,
+      dataDirPath: dir.path,
+      picker:
+          _picker ??
+          WindowsFilePicker(
+            ownerWindowClass: _ownerWindowClass,
+            ownerWindowTitle: _ownerWindowTitle,
+          ),
+      fileSystem: _fileSystem ?? const WindowsFileSystemPlatform(),
+      revealer: _revealer,
+      clock: _clock,
+      tickInterval: _transferTickInterval,
+      pollHold: _transferPollHold,
+      idleTimeout: _transferIdleTimeout,
+      confirmTimeout: _transferConfirmTimeout,
+      writeBytes: _transferWriteBytes ?? writeAllBytes,
+      log: _log,
+    );
     final server = ApiServer(
       identity: identity,
       paired: paired,
       selfInfo: selfInfo,
       onRegistered: discovery.handleRegistration,
-      routes: coordinator.routes,
+      routes: [...coordinator.routes, ...transfers.routes],
+      uploadRoutes: transfers.uploadRoutes,
       port: _port,
       now: _now,
       log: _log,
@@ -592,6 +854,7 @@ final class NexusNode {
     _ignored = ignored;
     _scheduler = scheduler;
     _coordinator = coordinator;
+    _transfers = transfers;
     _channel = channel;
     _discovery = discovery;
     _server = server;
@@ -622,6 +885,13 @@ final class NexusNode {
     _coordinatorEventsSubscription = coordinator.events.listen(
       (event) => _enqueue('pairing event', () async => _onPairingEvent(event)),
     );
+    transfers.start();
+    _transfersChangesSubscription = transfers.changes.listen((_) => _emit());
+    _transfersEventsSubscription = transfers.events.listen(
+      (event) =>
+          _enqueue('transfer event', () async => _onTransferEvent(event)),
+    );
+    unawaited(_guard('temp cleanup', transfers.cleanupAtStart));
     _ignoredSubscription = ignored.changes.listen(
       (_) => _enqueue('ignored change', () async => _refresh()),
     );
@@ -638,6 +908,7 @@ final class NexusNode {
   }
 
   Future<void> _onPairedChanged() async {
+    _callTransfers('paired changed', (transfers) => transfers.pairedChanged());
     final current = _paired;
     if (current != null) {
       _seenAt.removeWhere((fingerprint, _) => !current.isPaired(fingerprint));
@@ -790,6 +1061,10 @@ final class NexusNode {
       'interfaces changed',
       (coordinator) => coordinator.interfacesChanged(ids),
     );
+    _callTransfers(
+      'transfers interfaces changed',
+      (transfers) => transfers.interfacesChanged(ids),
+    );
   }
 
   Future<void> _enterPortInUseLocked(
@@ -809,17 +1084,30 @@ final class NexusNode {
     await _guard('channel close', () => channel.close());
   }
 
+  Future<void> _cancelTransfersWith(String fingerprint) async {
+    final transfers = _transfers;
+    if (transfers == null) return;
+    try {
+      await transfers.peerUnpaired(fingerprint);
+    } catch (e) {
+      _log('transfers unpair failed: ${e.runtimeType}');
+    }
+  }
+
   Future<void> _closeResourcesLocked({required bool sayGoodbye}) async {
     final monitor = _monitor;
     final discovery = _discovery;
     final server = _server;
     final channel = _channel;
     final coordinator = _coordinator;
+    final transfers = _transfers;
     final changes = _changesSubscription;
     final paired = _pairedSubscription;
     final devices = _devicesSubscription;
     final pairingChanges = _coordinatorChangesSubscription;
     final pairingEvents = _coordinatorEventsSubscription;
+    final transfersChanges = _transfersChangesSubscription;
+    final transfersEvents = _transfersEventsSubscription;
     final ignoredChanges = _ignoredSubscription;
     final pairedSave = _pairedSaveSubscription;
     final ignoredSave = _ignoredSaveSubscription;
@@ -827,6 +1115,7 @@ final class NexusNode {
     _paired = null;
     _ignored = null;
     _coordinator = null;
+    _transfers = null;
     _scheduler = null;
     _pairingRounds.clear();
     _questions = const [];
@@ -845,6 +1134,8 @@ final class NexusNode {
     _devicesSubscription = null;
     _coordinatorChangesSubscription = null;
     _coordinatorEventsSubscription = null;
+    _transfersChangesSubscription = null;
+    _transfersEventsSubscription = null;
     _ignoredSubscription = null;
     _pairedSaveSubscription = null;
     _ignoredSaveSubscription = null;
@@ -852,10 +1143,16 @@ final class NexusNode {
     await _guard('paired changes cancel', () => paired?.cancel());
     await _guard('pairing changes cancel', () => pairingChanges?.cancel());
     await _guard('pairing events cancel', () => pairingEvents?.cancel());
+    await _guard('transfers changes cancel', () => transfersChanges?.cancel());
+    await _guard('transfers events cancel', () => transfersEvents?.cancel());
     await _guard('ignored changes cancel', () => ignoredChanges?.cancel());
     await _guard('paired save status cancel', () => pairedSave?.cancel());
     await _guard('ignored save status cancel', () => ignoredSave?.cancel());
     await _guard('monitor stop', () => monitor?.stop());
+    await _guard(
+      'transfers close',
+      () => transfers?.close().timeout(Limits.transferCloseBudget),
+    );
     await _guard('pairing close', () => coordinator?.close());
     await _guard('server close', () => server?.close());
     await _guard('discovery stop', () {
@@ -963,6 +1260,46 @@ final class NexusNode {
     }
   }
 
+  void _callTransfers(String what, void Function(TransferCoordinator) action) {
+    final transfers = _transfers;
+    if (_closing || transfers == null) return;
+    try {
+      action(transfers);
+    } catch (e) {
+      _log('$what failed: ${e.runtimeType}');
+    }
+  }
+
+  void _queueTransfers(String what, void Function(TransferCoordinator) action) {
+    _enqueue(what, () async => _callTransfers(what, action));
+  }
+
+  Future<void> _startTransfers(
+    String what,
+    Future<void> Function(TransferCoordinator) action,
+  ) {
+    return _run(what, () async {
+      final transfers = _transfers;
+      if (transfers == null) return;
+      unawaited(_guard(what, () => action(transfers)));
+    });
+  }
+
+  SendTarget? _sendTargetOf(String fingerprint) {
+    if (_closing) return null;
+    final paired = _paired;
+    if (paired == null || !paired.isPaired(fingerprint)) return null;
+    final target = _targetFor(fingerprint);
+    if (target == null) return null;
+    return SendTarget(
+      fingerprint: fingerprint,
+      address: target.address,
+      port: target.port,
+      interfaceId: target.interfaceId,
+      localAddress: target.localAddress,
+    );
+  }
+
   PairRequestResult _pairLocked(String fingerprint) {
     final coordinator = _coordinator;
     final paired = _paired;
@@ -1020,6 +1357,7 @@ final class NexusNode {
     final device = paired.deviceOf(fingerprint);
     if (device == null) return;
     final target = _targetFor(fingerprint);
+    final cancelled = _cancelTransfersWith(fingerprint);
     final removal = paired.remove(fingerprint);
     final server = _server;
     if (server != null) {
@@ -1030,7 +1368,10 @@ final class NexusNode {
     final coordinator = _coordinator;
     if (target != null && coordinator != null) {
       unawaited(
-        _guard('unpair notice', () => coordinator.notifyUnpaired(target)),
+        _guard('unpair notice', () async {
+          await cancelled;
+          await coordinator.notifyUnpaired(target);
+        }),
       );
     }
     final saved = await removal;
@@ -1162,6 +1503,24 @@ final class NexusNode {
     _refresh();
   }
 
+  void _onTransferEvent(TransferEvent event) {
+    switch (event) {
+      case ReceiveFolderNotSaved(:final path):
+        _addNotice(NoticeKind.receiveFolderNotSaved, detail: path);
+      case PeerCancelledTransfer(:final peerFingerprint, :final peerName):
+        final short = shortFingerprint(peerFingerprint);
+        _notices = List.unmodifiable([
+          for (final notice in _notices)
+            if (!_isCancelNoticeOf(notice, short)) notice,
+        ]);
+        _addNotice(
+          NoticeKind.peerCancelledTransfer,
+          detail: _labelOf(peerFingerprint, peerName),
+        );
+    }
+    _refresh();
+  }
+
   void _askAbout(String fingerprint) {
     final paired = _paired;
     final device = paired?.deviceOf(fingerprint);
@@ -1280,16 +1639,34 @@ final class NexusNode {
     ]);
   }
 
-  void _addNotice(NoticeKind kind, {String? deviceName}) {
+  void _addNotice(NoticeKind kind, {String? deviceName, String? detail}) {
     final next = [
       ..._notices,
-      Notice(id: _nextNoticeId++, kind: kind, deviceName: deviceName),
+      Notice(
+        id: _nextNoticeId++,
+        kind: kind,
+        deviceName: deviceName,
+        detail: detail,
+      ),
     ];
-    _notices = List.unmodifiable(
-      next.length > _maxNotices
-          ? next.sublist(next.length - _maxNotices)
-          : next,
-    );
+    while (next.length > _maxNotices) {
+      final index = next.indexWhere((notice) => !_isProtected(notice));
+      next.removeAt(index < 0 ? 0 : index);
+    }
+    _notices = List.unmodifiable(next);
+  }
+
+  bool _isProtected(Notice notice) =>
+      notice.canRetry ||
+      notice.kind == NoticeKind.attemptDataMismatch ||
+      notice.kind == NoticeKind.unpairedByPeer ||
+      notice.kind == NoticeKind.pairingPaused;
+
+  bool _isCancelNoticeOf(Notice notice, String short) {
+    final detail = notice.detail;
+    return notice.kind == NoticeKind.peerCancelledTransfer &&
+        detail != null &&
+        (detail == short || detail.endsWith(' · $short'));
   }
 
   bool _refreshSuggest() {
@@ -1314,6 +1691,7 @@ final class NexusNode {
     if (_closing) return;
     final view = _coordinator?.view;
     final paired = _paired;
+    final transfers = _transfers;
     final next = NodeState(
       identityStatus: _identityStatus,
       identityError: _identityError,
@@ -1342,6 +1720,12 @@ final class NexusNode {
           (_paired?.hasUnsavedChanges ?? false) ||
           (_ignored?.hasUnsavedChanges ?? false),
       scanning: _scanning,
+      outgoing: transfers?.outgoing,
+      incoming: transfers?.incoming,
+      lastSent: transfers?.lastSent,
+      lastReceived: transfers?.lastReceived,
+      transferInProgress: transfers?.busy ?? false,
+      pickerOpen: transfers?.pickerOpen ?? false,
     );
     _state = next;
     final last = _lastEmitted;
@@ -1362,6 +1746,12 @@ bool _sameState(NodeState a, NodeState b) {
       a.fingerprint == b.fingerprint &&
       a.unsavedChanges == b.unsavedChanges &&
       a.scanning == b.scanning &&
+      a.outgoing == b.outgoing &&
+      a.incoming == b.incoming &&
+      a.lastSent == b.lastSent &&
+      a.lastReceived == b.lastReceived &&
+      a.transferInProgress == b.transferInProgress &&
+      a.pickerOpen == b.pickerOpen &&
       a.pairing == b.pairing &&
       a.pairingNamesake == b.pairingNamesake &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&

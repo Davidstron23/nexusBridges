@@ -9,6 +9,7 @@ import 'package:nexus_bridges_core/src/network/network.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart';
 
 const Duration _oneSecond = Duration(seconds: 1);
@@ -56,12 +57,12 @@ final class _Farm {
   Future<void> get allClosed => Future.wait(_closings);
 
   Future<void> waitForOpen(int count) async {
-    final deadline = DateTime.now().add(waitLimit);
+    final deadline = DateTime.now().add(scaled(waitLimit));
     while (open < count) {
       if (DateTime.now().isAfter(deadline)) {
         throw TimeoutException('only $open connections open');
       }
-      await _arrivals.stream.first.timeout(waitLimit);
+      await _arrivals.stream.first.timeout(scaled(waitLimit));
     }
   }
 

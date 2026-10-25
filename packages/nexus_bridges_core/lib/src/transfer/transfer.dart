@@ -11,7 +11,14 @@ import 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
 import 'receiver.dart' show TransferReceiver;
 import 'sender.dart' show TransferSender;
 import 'windows_file_system.dart' show WindowsFileSystemPlatform;
+import 'windows_shell.dart' show WindowsFolderRevealer;
 import 'writer.dart' show writeAllBytes;
+
+export 'journal.dart' show TempJournal;
+export 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
+export 'windows_file_system.dart' show WindowsFileSystemPlatform;
+export 'windows_shell.dart' show WindowsFilePicker;
+export 'writer.dart' show writeAllBytes;
 
 void _noLog(String message) {}
 
@@ -384,7 +391,7 @@ final class TransferCoordinator {
     Future<void> Function(RandomAccessFile file, List<int> bytes) writeBytes =
         writeAllBytes,
     this._log = _noLog,
-  }) {
+  }) : _revealer = revealer ?? const WindowsFolderRevealer() {
     _pickers = PickerTracker(
       clock: clock,
       onChanged: (open, since) => _receiver.pickersChanged(open, since),
@@ -423,6 +430,8 @@ final class TransferCoordinator {
   final Duration _tickInterval;
 
   final void Function(String) _log;
+
+  final FolderRevealer _revealer;
 
   late final TransferReceiver _receiver;
 
@@ -568,4 +577,21 @@ final class TransferCoordinator {
   }) => _sender.sendFile(target, refresh: refresh);
 
   void cancelOutgoing() => _sender.cancelOutgoing();
+
+  Future<RevealResult> revealLastReceived() async {
+    final result = _receiver.lastReceived;
+    final path = _receiver.lastReceivedPath;
+    if (_closing != null ||
+        result == null ||
+        !result.canReveal ||
+        path == null) {
+      return RevealResult.unavailable;
+    }
+    try {
+      return await _revealer.reveal(path);
+    } catch (e) {
+      _log('reveal failed: ${e.runtimeType}');
+      return RevealResult.unavailable;
+    }
+  }
 }

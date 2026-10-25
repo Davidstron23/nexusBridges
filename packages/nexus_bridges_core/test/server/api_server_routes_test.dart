@@ -9,6 +9,7 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import 'api_server_harness.dart';
 
 const String _marker = 'handler-detail-marker';
@@ -51,7 +52,9 @@ List<int> _chunkedRequest(String path, List<int> body, {int pieces = 4}) {
 Future<void> _until(bool Function() condition) async {
   final stopwatch = Stopwatch()..start();
   while (!condition()) {
-    if (stopwatch.elapsed > waitLimit) throw TimeoutException('condition');
+    if (stopwatch.elapsed > scaled(waitLimit)) {
+      throw TimeoutException('condition');
+    }
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }

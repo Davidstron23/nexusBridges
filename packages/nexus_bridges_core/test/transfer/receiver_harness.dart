@@ -10,14 +10,12 @@ import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/settings/settings.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
-import 'package:nexus_bridges_core/src/transfer/journal.dart';
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
-import 'package:nexus_bridges_core/src/transfer/windows_file_system.dart';
-import 'package:nexus_bridges_core/src/transfer/writer.dart' show writeAllBytes;
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart';
 
 const WindowsFileSystemPlatform realFs = WindowsFileSystemPlatform();
@@ -304,12 +302,18 @@ Future<Directory> _temporaryDirectory() async {
 
 Future<void> eventually(
   bool Function() condition, {
-  Duration limit = const Duration(seconds: 5),
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(const Duration(seconds: 5));
   final stopwatch = Stopwatch()..start();
-  while (!condition()) {
-    if (stopwatch.elapsed > limit) fail('$reason not met within $limit');
+  while (true) {
+    try {
+      if (condition()) return;
+    } on FileSystemException {
+      if (stopwatch.elapsed > span) rethrow;
+    }
+    if (stopwatch.elapsed > span) fail('$reason not met within $span');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }
