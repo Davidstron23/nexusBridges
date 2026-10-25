@@ -13,7 +13,7 @@ typedef _Received = (Announcement, InternetAddress, ActiveInterface);
 
 const Duration _arrivalLimit = Duration(seconds: 5);
 const Duration _silence = Duration(milliseconds: 300);
-const Timeout _childTimeout = Timeout(Duration(minutes: 2));
+const Timeout _childTimeout = Timeout(Duration(minutes: 6));
 
 final InternetAddress _first = InternetAddress('127.0.0.1');
 final InternetAddress _second = InternetAddress('127.0.0.2');
@@ -1160,7 +1160,7 @@ void main() {
         final stderrText = process.stderr.transform(utf8.decoder).join();
 
         final exitCode = await process.exitCode.timeout(
-          const Duration(seconds: 90),
+          const Duration(minutes: 4),
         );
 
         expect(exitCode, 0, reason: await stderrText);

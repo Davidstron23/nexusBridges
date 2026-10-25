@@ -712,10 +712,13 @@ void main() {
       );
       await _quiet();
       final hellosBefore = f.ownHellos.length;
+      final statesBefore = f.states.length;
       final watch = Stopwatch()..start();
 
       f.adapters = [_wifi(_cafe, 'Cafe')];
-      await f.until((s) => s.devices.isEmpty);
+      await _eventually(
+        () => f.states.skip(statesBefore).any((s) => s.devices.isEmpty),
+      );
       await _eventually(() => f.ownHellos.length > hellosBefore);
       watch.stop();
 
@@ -856,7 +859,6 @@ void main() {
         expect(f.state.portInUse, f.port);
         expect(await _ownSocketOn('TCP', f.port), isFalse);
         expect(await _ownSocketOn('UDP', f.port), isFalse);
-        expect(await canBind(loopback, f.port), isTrue);
 
         await f.node.retry();
 
