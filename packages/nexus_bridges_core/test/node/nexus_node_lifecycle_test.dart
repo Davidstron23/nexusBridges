@@ -28,8 +28,10 @@ Future<void> _expectNoLiveTimers(TestNode node) async {
 
 void main() {
   group('network change during a pairing at node level (C95, RF-92)', () {
-    Future<(TestNode, TestNode)> receiverMoves() async {
-      final (a, b) = await twoNodes(pollB: fastPoll);
+    Future<(TestNode, TestNode)> receiverMoves({
+      Duration holdB = const Duration(milliseconds: 300),
+    }) async {
+      final (a, b) = await twoNodes(pollB: fastPoll, holdB: holdB);
       await b.inZone(
         () => b.node.decideNetwork(otherNetwork, NetworkDecision.trusted),
       );
@@ -70,7 +72,11 @@ void main() {
 
     test('(a) plan detail: A learns it from its next poll and ends in '
         'cancelledByPeer', () async {
-      final (a, b) = await receiverMoves();
+      final (a, b) = await receiverMoves(holdB: const Duration(seconds: 5));
+      await eventually(
+        () => b.timers.activeBy('PairingReceiver._hold') == 1,
+        reason: 'the wait of A held by B',
+      );
 
       b.adapters = [adapterOn(otherNetwork)];
 

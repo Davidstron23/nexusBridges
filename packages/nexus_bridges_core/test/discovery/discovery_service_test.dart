@@ -1568,21 +1568,26 @@ void main() {
           _Endpoint.honest(200, newcomer),
         ]);
         final channel = await _Channel.open([first]);
+        var wave = <InternetAddress>[];
         final s = await _Subject.create(
           channel,
           identity: self,
           scanner: (verifier) => SubnetScanner(
             verifier: verifier,
             port: farm.port,
-            hostsOf: (_) => [
-              for (var i = 0; i < crowd.length; i++) _host(100 + i),
-            ],
+            hostsOf: (_) => wave,
           ),
         );
         await s.paired.replaceAll([pairedDeviceOf(newcomer)]);
         await s.service.syncInterfaces([first]);
 
-        await s.service.rescan().timeout(const Duration(seconds: 20));
+        for (var start = 0; start < crowd.length; start += 4) {
+          wave = [
+            for (var i = start; i < min(start + 4, crowd.length); i++)
+              _host(100 + i),
+          ];
+          await s.service.rescan().timeout(const Duration(seconds: 20));
+        }
 
         expect(farm.total, crowd.length);
         expect(s.service.current, hasLength(Limits.maxListedUnpaired));
