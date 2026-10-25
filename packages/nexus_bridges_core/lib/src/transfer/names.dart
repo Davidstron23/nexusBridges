@@ -86,6 +86,9 @@ const List<String> _programSuffixes = [
   '.jar',
   '.reg',
   '.appx',
+  '.dll',
+  '.sys',
+  '.application',
 ];
 
 bool _isHighSurrogate(int unit) => unit >= 0xD800 && unit <= 0xDBFF;
