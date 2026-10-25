@@ -5,7 +5,6 @@ import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
-import 'package:nexus_bridges_core/src/transfer/journal.dart';
 import 'package:nexus_bridges_core/src/transfer/pickers.dart';
 import 'package:nexus_bridges_core/src/transfer/receiver.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';

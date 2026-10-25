@@ -15,6 +15,8 @@ import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
+
 final InternetAddress hostA = InternetAddress('127.0.0.1');
 final InternetAddress hostB = InternetAddress('127.0.0.2');
 
@@ -64,58 +66,18 @@ AdapterInfo adapterOn(String networkId) => AdapterInfo(
   networkName: networkId == homeNetwork ? 'Home' : 'Other',
 );
 
-Future<bool> _tcpFree(InternetAddress address, int port) async {
-  try {
-    final socket = await ServerSocket.bind(address, port);
-    await socket.close();
-    return true;
-  } on SocketException {
-    return false;
-  }
-}
-
-Future<bool> _udpFree(int port) async {
-  try {
-    final socket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      port,
-      reuseAddress: false,
-    );
-    socket.close();
-    return true;
-  } on SocketException {
-    return false;
-  }
-}
-
-Future<int> freePort() async {
-  for (var attempt = 0; attempt < 600; attempt++) {
-    try {
-      final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-      final port = probe.port;
-      await probe.close();
-      if (await _udpFree(port) &&
-          await _tcpFree(hostA, port) &&
-          await _tcpFree(hostB, port)) {
-        return port;
-      }
-    } on SocketException {
-      await pause(const Duration(milliseconds: 50));
-      continue;
-    }
-    if (attempt % 20 == 19) await pause(const Duration(milliseconds: 50));
-  }
-  throw StateError('no free port');
-}
+Future<int> freePort() =>
+    pickPort(tcp: [hostA, hostB], udp: [InternetAddress.anyIPv4]);
 
 Future<void> eventually(
   FutureOr<bool> Function() condition, {
-  Duration limit = waitLimit,
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(waitLimit);
   final stopwatch = Stopwatch()..start();
   while (!await condition()) {
-    if (stopwatch.elapsed > limit) fail('$reason not met within $limit');
+    if (stopwatch.elapsed > span) fail('$reason not met within $span');
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
 }
@@ -302,7 +264,7 @@ final class TestNode {
       () => node.decideNetwork(homeNetwork, NetworkDecision.trusted),
     );
     final stopwatch = Stopwatch()..start();
-    while (stopwatch.elapsed < waitLimit) {
+    while (stopwatch.elapsed < scaled(waitLimit)) {
       if (state.portInUse != null) return false;
       final recent = logs.skip(before);
       if (recent.contains('listening on $ifaceId')) return true;
@@ -329,7 +291,7 @@ final class TestNode {
 
   Future<NodeState> until(
     bool Function(NodeState s) condition, {
-    Duration limit = waitLimit,
+    Duration? limit,
     String reason = 'state',
   }) async {
     await eventually(() => condition(node.state), limit: limit, reason: reason);
@@ -418,7 +380,7 @@ Future<void> meet(TestNode a, TestNode b) async {
     await a.inZone(() => a.node.rescan());
     if (!b.sees(a)) await b.inZone(() => b.node.rescan());
     final stopwatch = Stopwatch()..start();
-    while (stopwatch.elapsed < const Duration(seconds: 3)) {
+    while (stopwatch.elapsed < scaled(const Duration(seconds: 3))) {
       if (a.sees(b) && b.sees(a)) return;
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }

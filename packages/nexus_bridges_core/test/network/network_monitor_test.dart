@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:nexus_bridges_core/src/network/network.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
+
 const Duration _shortInterval = Duration(milliseconds: 20);
 const Duration _neverInterval = Duration(hours: 1);
 const Duration _waitLimit = Duration(seconds: 5);
@@ -59,7 +61,7 @@ final class _ControlledReader {
 
   Future<Completer<List<AdapterInfo>>> next() async {
     while (_pending.isEmpty) {
-      await _arrived.future.timeout(_waitLimit);
+      await _arrived.future.timeout(scaled(_waitLimit));
     }
     return _pending.removeAt(0);
   }
@@ -115,7 +117,7 @@ final class _Harness {
 Future<void> _until(bool Function() condition) async {
   final watch = Stopwatch()..start();
   while (!condition()) {
-    if (watch.elapsed > _waitLimit) fail('the condition was never met');
+    if (watch.elapsed > scaled(_waitLimit)) fail('the condition was never met');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }
@@ -599,7 +601,7 @@ void main() {
       final firstChange = monitor.changes.first;
 
       monitor.start();
-      final change = await firstChange.timeout(_waitLimit);
+      final change = await firstChange.timeout(scaled(_waitLimit));
       await monitor.stop();
 
       expect(logs, ['network read failed: ArgumentError']);

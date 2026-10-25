@@ -12,10 +12,8 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transfer/folders.dart'
     show tempFolderName;
-import 'package:nexus_bridges_core/src/transfer/journal.dart';
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
-import 'package:nexus_bridges_core/src/transfer/writer.dart' show writeAllBytes;
 import 'package:test/test.dart';
 
 import '../server/api_server_harness.dart';

@@ -18,6 +18,7 @@ import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart';
 
 final InternetAddress thirdLoopback = InternetAddress('127.0.0.3');
@@ -105,12 +106,13 @@ Future<Directory> temporaryDirectory() async {
 
 Future<void> eventually(
   bool Function() condition, {
-  Duration limit = waitLimit,
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(waitLimit);
   final stopwatch = Stopwatch()..start();
   while (!condition()) {
-    if (stopwatch.elapsed > limit) fail('$reason not met within $limit');
+    if (stopwatch.elapsed > span) fail('$reason not met within $span');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }

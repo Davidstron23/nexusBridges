@@ -302,4 +302,13 @@ final class AppStringsEn implements AppStrings {
   @override
   String noticePairingFailed(String who) =>
       'The pairing with $who could not be completed.';
+
+  @override
+  String noticeReceiveFolderNotSaved(String path) =>
+      'Files will be saved in $path until you close the app, but it '
+      "couldn't be remembered.";
+
+  @override
+  String noticePeerCancelledTransfer(String name) =>
+      '$name cancelled the send.';
 }

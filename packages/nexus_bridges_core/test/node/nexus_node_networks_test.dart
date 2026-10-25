@@ -13,6 +13,7 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart'
     show
         callerInfoOf,
@@ -98,36 +99,20 @@ Future<String> _systemLoopbackName() async {
       .name;
 }
 
-Future<int> _freePort() async {
-  while (true) {
-    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = tcp.port;
-    RawDatagramSocket? udp;
-    try {
-      udp = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        port,
-        reuseAddress: false,
-      );
-    } on SocketException {
-      udp = null;
-    }
-    udp?.close();
-    await tcp.close();
-    if (udp != null) return port;
-  }
-}
+Future<int> _freePort() =>
+    pickPort(tcp: [InternetAddress.anyIPv4], udp: [InternetAddress.anyIPv4]);
 
 Future<void> _quiet() => Future<void>.delayed(_silence);
 
 Future<void> _eventually(
   FutureOr<bool> Function() condition, {
-  Duration limit = _waitLimit,
+  Duration? limit,
 }) async {
-  final deadline = DateTime.now().add(limit);
+  final span = limit ?? scaled(_waitLimit);
+  final deadline = DateTime.now().add(span);
   while (!await condition()) {
     if (DateTime.now().isAfter(deadline)) {
-      fail('condition not met within $limit');
+      fail('condition not met within $span');
     }
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
@@ -201,7 +186,7 @@ Future<void> _crossed(
 ) async {
   final finished = runZonedGuarded(calls, (error, _) => uncaught.add(error));
   await finished!.timeout(
-    _waitLimit,
+    scaled(_waitLimit),
     onTimeout: () => fail('the crossed calls did not finish: $uncaught'),
   );
 }
@@ -374,7 +359,7 @@ final class _Fixture {
 
   Future<NodeState> until(
     bool Function(NodeState s) condition, {
-    Duration limit = _waitLimit,
+    Duration? limit,
   }) async {
     await _eventually(() => condition(node.state), limit: limit);
     return node.state;
@@ -391,7 +376,7 @@ final class _Fixture {
   }
 
   Future<void> inject(RawDatagramSocket from, List<int> bytes) async {
-    final deadline = DateTime.now().add(_waitLimit);
+    final deadline = DateTime.now().add(scaled(_waitLimit));
     while (from.send(bytes, InternetAddress.loopbackIPv4, port) !=
         bytes.length) {
       if (DateTime.now().isAfter(deadline)) fail('datagram not sent');
@@ -658,7 +643,7 @@ void main() {
       await f.until((s) => s.prompts.isNotEmpty);
       await f.node.decideNetwork(_home, NetworkDecision.untrusted);
 
-      await f.node.rescan().timeout(_waitLimit);
+      await f.node.rescan().timeout(scaled(_waitLimit));
       await _quiet();
 
       expect(connections, 0);
@@ -1166,7 +1151,7 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         await f.node.decideNetwork(_home, NetworkDecision.trusted);
       }, uncaught);
-      await f.node.retry().timeout(_waitLimit);
+      await f.node.retry().timeout(scaled(_waitLimit));
       await _quiet();
 
       expect(uncaught, isEmpty);
@@ -1205,7 +1190,7 @@ void main() {
         f.node.askAgain(_home);
         await decided;
       }, uncaught);
-      await f.node.retry().timeout(_waitLimit);
+      await f.node.retry().timeout(scaled(_waitLimit));
       await _quiet();
 
       expect(uncaught, isEmpty);

@@ -2,3 +2,5 @@ tags:
   slow:
   large:
     skip: "dart test --run-skipped -t large"
+  manual:
+    skip: "dart test --run-skipped -t manual test/transfer/windows_shell_test.dart"

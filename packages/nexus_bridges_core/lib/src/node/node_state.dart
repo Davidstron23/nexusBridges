@@ -1,6 +1,8 @@
 import '../discovery/discovery.dart';
 import '../pairing_flow/pairing_flow.dart' show PairingView;
 import '../protocol/protocol.dart' show DeviceType;
+import '../transfer/transfer.dart'
+    show IncomingTransferView, OutgoingTransferView, TransferResultView;
 
 enum IdentityStatus { ok, reset, failed }
 
@@ -10,6 +12,8 @@ enum PairRequestResult {
   tooManyPaired,
   unavailable,
 }
+
+enum SendFileResult { started, nothingChosen, alreadySending, unavailable }
 
 enum NoticeKind {
   attemptCancelled,
@@ -23,6 +27,8 @@ enum NoticeKind {
   pairingFailed,
   pairingPaused,
   replaceWithdrawn,
+  receiveFolderNotSaved,
+  peerCancelledTransfer,
 }
 
 final class NetworkPrompt {
@@ -66,6 +72,8 @@ final class DeviceEntry {
 
   bool get canPair => visible && (paired ? mismatch : !ignored);
 
+  bool get canSendFile => paired && visible && !mismatch;
+
   @override
   bool operator ==(Object other) =>
       other is DeviceEntry &&
@@ -99,12 +107,14 @@ final class Notice {
     required this.kind,
     this.deviceName,
     this.count = 1,
+    this.detail,
   });
 
   final int id;
   final NoticeKind kind;
   final String? deviceName;
   final int count;
+  final String? detail;
 
   bool get canRetry =>
       kind == NoticeKind.unpairNotSaved || kind == NoticeKind.changeNotSaved;
@@ -115,10 +125,11 @@ final class Notice {
       other.id == id &&
       other.kind == kind &&
       other.deviceName == deviceName &&
-      other.count == count;
+      other.count == count &&
+      other.detail == detail;
 
   @override
-  int get hashCode => Object.hash(id, kind, deviceName, count);
+  int get hashCode => Object.hash(id, kind, deviceName, count, detail);
 }
 
 sealed class PairingQuestion {
@@ -199,6 +210,12 @@ final class NodeState {
     this.notices = const [],
     this.unsavedChanges = false,
     this.scanning = false,
+    this.outgoing,
+    this.incoming,
+    this.lastSent,
+    this.lastReceived,
+    this.transferInProgress = false,
+    this.pickerOpen = false,
   });
 
   final IdentityStatus identityStatus;
@@ -220,4 +237,10 @@ final class NodeState {
   final List<Notice> notices;
   final bool unsavedChanges;
   final bool scanning;
+  final OutgoingTransferView? outgoing;
+  final IncomingTransferView? incoming;
+  final TransferResultView? lastSent;
+  final TransferResultView? lastReceived;
+  final bool transferInProgress;
+  final bool pickerOpen;
 }

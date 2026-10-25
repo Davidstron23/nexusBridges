@@ -757,13 +757,12 @@ void main() {
     });
   });
 
-  group('C135, R20: composed and decomposed accents are not the same name', () {
-    test('"Portátil" composed and decomposed are not sameName (documented '
-        'residual risk)', () {
+  group('C135, PR4-1: composed and decomposed accents are the same name', () {
+    test('"Portátil" composed and decomposed are sameName', () {
       final composed = 'Port${_mark(0x00E1)}til';
       final decomposed = 'Porta${_mark(0x0301)}til';
 
-      expect(sameName(composed, decomposed), isFalse);
+      expect(sameName(composed, decomposed), isTrue);
       expect(sameName(decomposed, decomposed), isTrue);
     });
   });
@@ -788,6 +787,8 @@ void main() {
         NoticeKind.pairingFailed,
         NoticeKind.pairingPaused,
         NoticeKind.replaceWithdrawn,
+        NoticeKind.receiveFolderNotSaved,
+        NoticeKind.peerCancelledTransfer,
       ]);
     });
 

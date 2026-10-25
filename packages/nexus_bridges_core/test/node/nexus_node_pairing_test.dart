@@ -146,7 +146,7 @@ Future<(PairingNode, DeviceIdentity)> _nodeWithSpare() async {
   await a.writePaired(own.fingerprint, [
     pairedEntryFor(spare, name: 'Spare PC'),
   ]);
-  await a.start();
+  await startTogether([a]);
   return (a, spare);
 }
 
@@ -648,8 +648,7 @@ void main() {
       await a.writePaired(own.fingerprint, [
         pairedEntryFor(DeviceIdentity.generate(), name: 'pc'),
       ]);
-      await a.start();
-      await b.start();
+      await startTogether([a, b]);
       await meet(a, b);
       return (a, b);
     }

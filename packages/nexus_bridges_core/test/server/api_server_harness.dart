@@ -14,6 +14,8 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
+
 final InternetAddress loopback = InternetAddress.loopbackIPv4;
 final InternetAddress otherLoopback = InternetAddress('127.0.0.2');
 const String registerPath = '$apiPrefix/register';
@@ -228,8 +230,8 @@ final class TlsClient {
     }
   }
 
-  Future<Reply?> reply({Duration limit = waitLimit}) async {
-    await _closed.future.timeout(limit);
+  Future<Reply?> reply({Duration? limit}) async {
+    await _closed.future.timeout(limit ?? scaled(waitLimit));
     return Reply.parse(received);
   }
 
@@ -245,7 +247,7 @@ Future<Reply?> send(
   SecurityContext? context,
   InternetAddress? from,
   InternetAddress? to,
-  Duration limit = waitLimit,
+  Duration? limit,
 }) async {
   final client = await TlsClient.connect(
     port,
@@ -265,7 +267,7 @@ Future<Reply?> sendOrCut(
   SecurityContext? context,
   InternetAddress? from,
   InternetAddress? to,
-  Duration limit = waitLimit,
+  Duration? limit,
 }) async {
   try {
     return await send(
@@ -316,10 +318,11 @@ final class RouteProbe {
     limit: limit,
   );
 
-  Future<void> arrived(int expected, {Duration limit = waitLimit}) async {
+  Future<void> arrived(int expected, {Duration? limit}) async {
+    final span = limit ?? scaled(waitLimit);
     final stopwatch = Stopwatch()..start();
     while (calls.length < expected) {
-      if (stopwatch.elapsed > limit) {
+      if (stopwatch.elapsed > span) {
         throw TimeoutException('$path got ${calls.length} of $expected');
       }
       await Future<void>.delayed(const Duration(milliseconds: 5));
@@ -407,37 +410,11 @@ final class ServerHarness {
   );
 }
 
-Future<int> freePort({InternetAddress? address}) async {
-  final probe = await ServerSocket.bind(address ?? loopback, 0);
-  final port = probe.port;
-  await probe.close();
-  return port;
-}
+Future<int> freePort({InternetAddress? address}) =>
+    pickPort(tcp: [address ?? loopback]);
 
-Future<int> freePortOn(List<InternetAddress> addresses) async {
-  for (var attempt = 0; attempt < 50; attempt++) {
-    final port = await freePort(address: addresses.first);
-    var free = true;
-    for (final address in addresses) {
-      if (!await canBind(address, port) || !await _canBindUdp(address, port)) {
-        free = false;
-        break;
-      }
-    }
-    if (free) return port;
-  }
-  throw StateError('no port free on every address');
-}
-
-Future<bool> _canBindUdp(InternetAddress address, int port) async {
-  try {
-    final socket = await RawDatagramSocket.bind(address, port);
-    socket.close();
-    return true;
-  } on SocketException {
-    return false;
-  }
-}
+Future<int> freePortOn(List<InternetAddress> addresses) =>
+    pickPort(tcp: addresses, udp: addresses);
 
 Future<bool> canBind(InternetAddress address, int port) async {
   try {
@@ -479,6 +456,6 @@ Future<int> holdPortInChildProcess(InternetAddress address) async {
       .transform(utf8.decoder)
       .transform(const LineSplitter())
       .first
-      .timeout(const Duration(seconds: 30));
+      .timeout(scaled(const Duration(seconds: 30)));
   return int.parse(line.trim());
 }

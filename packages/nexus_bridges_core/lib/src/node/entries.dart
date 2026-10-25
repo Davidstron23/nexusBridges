@@ -1,4 +1,5 @@
-import '../discovery/discovery.dart' show DiscoveredDevice, displayNamesFor;
+import '../discovery/discovery.dart'
+    show DiscoveredDevice, displayNamesFor, foldedName;
 import '../pairing/pairing.dart' show PairedDevice, PeerRelation;
 import '../protocol/protocol.dart' show sanitizeDisplayName;
 import 'node_state.dart' show DeviceEntry;
@@ -7,9 +8,7 @@ bool sameName(String? a, String? b) {
   if (a == null || b == null) return false;
   final left = sanitizeDisplayName(a);
   final right = sanitizeDisplayName(b);
-  return left != null &&
-      right != null &&
-      left.toLowerCase() == right.toLowerCase();
+  return left != null && right != null && foldedName(left) == foldedName(right);
 }
 
 PairedDevice? findReplaced({

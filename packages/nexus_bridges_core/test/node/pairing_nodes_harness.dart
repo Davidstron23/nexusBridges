@@ -14,6 +14,8 @@ import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
+
 const String dot = '\u00B7';
 const String homeNetwork = '{NETWORK-HOME}';
 const String _adapterId = '{WIFI-ADAPTER}';
@@ -47,55 +49,22 @@ Future<String> _systemLoopbackName() async {
   return name;
 }
 
-Future<bool> _tcpFree(String address, int port) async {
-  try {
-    final socket = await ServerSocket.bind(InternetAddress(address), port);
-    await socket.close();
-    return true;
-  } on SocketException {
-    return false;
-  }
-}
-
 Future<int> freeTcpPort({
   List<String> hosts = const ['127.0.0.1', '127.0.0.2'],
-}) async {
-  for (var attempt = 0; attempt < 100; attempt++) {
-    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = probe.port;
-    await probe.close();
-    var free = true;
-    for (final host in hosts) {
-      if (!await _tcpFree(host, port)) {
-        free = false;
-        break;
-      }
-    }
-    if (free) return port;
-  }
-  throw StateError('no free port');
-}
+}) => pickPort(tcp: [for (final host in hosts) InternetAddress(host)]);
 
-Future<int> _freeUdpPort() async {
-  final socket = await RawDatagramSocket.bind(
-    InternetAddress.anyIPv4,
-    0,
-    reuseAddress: false,
-  );
-  final port = socket.port;
-  socket.close();
-  return port;
-}
+Future<int> _freeUdpPort() => pickPort(udp: [InternetAddress.anyIPv4]);
 
 Future<void> eventually(
   FutureOr<bool> Function() condition, {
-  Duration limit = waitLimit,
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(waitLimit);
   final watch = Stopwatch()..start();
   while (!await condition()) {
-    if (watch.elapsed > limit) {
-      fail('$reason not met within $limit');
+    if (watch.elapsed > span) {
+      fail('$reason not met within $span');
     }
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
@@ -153,8 +122,8 @@ final class PairingNode {
   final String name;
   final String address;
   final Directory root;
-  final int port;
-  final int channelPort;
+  int port;
+  int channelPort;
   final List<String> logs = [];
   final List<NodeState> states = [];
   DateTime clock = DateTime.utc(2026, 10, 24, 12);
@@ -223,6 +192,7 @@ final class PairingNode {
     Duration pollInterval = const Duration(minutes: 1),
   }) async {
     final loopback = await _systemLoopbackName();
+    final before = logs.length;
     final channel = MulticastChannel(port: channelPort, log: logs.add);
     addTearDown(channel.close);
     final started = await NexusNode.start(
@@ -260,6 +230,13 @@ final class PairingNode {
       await started.decideNetwork(homeNetwork, NetworkDecision.trusted);
     }
     await eventually(() => !started.state.paused, reason: '$name active');
+    await awaitListening(
+      name: name,
+      logs: logs,
+      since: before,
+      portInUse: () => started.state.portInUse,
+      limit: scaled(waitLimit),
+    );
     return started;
   }
 
@@ -270,7 +247,7 @@ final class PairingNode {
 
   Future<NodeState> until(
     bool Function(NodeState s) condition, {
-    Duration limit = waitLimit,
+    Duration? limit,
     String? reason,
   }) async {
     await eventually(
@@ -304,11 +281,45 @@ Future<(PairingNode, PairingNode)> twoPairingNodes({
   final a = await PairingNode.create('Node A', '127.0.0.1', port: port);
   final b = await PairingNode.create('Node B', '127.0.0.2', port: port);
   if (before != null) await before(a, b);
-  await a.start(pollHold: pollHoldA);
-  await b.start(pollHold: pollHoldB);
+  await startTogether(
+    [a, b],
+    start: (node) =>
+        node.start(pollHold: identical(node, a) ? pollHoldA : pollHoldB),
+  );
   await meet(a, b);
   return (a, b);
 }
+
+Future<void> startTogether(
+  List<PairingNode> nodes, {
+  Future<void> Function(PairingNode node)? start,
+  List<PairingNode> later = const [],
+}) => onFreshPorts(
+  () async {
+    for (final node in nodes) {
+      if (start != null) {
+        await start(node);
+      } else {
+        await node.start();
+      }
+    }
+  },
+  reset: () async {
+    for (final node in nodes) {
+      await node._node?.shutdown();
+    }
+    final port = await freeTcpPort(
+      hosts: [
+        for (final node in [...nodes, ...later]) node.address,
+      ],
+    );
+    for (final node in [...nodes, ...later]) {
+      node
+        ..port = port
+        ..channelPort = await _freeUdpPort();
+    }
+  },
+);
 
 Future<void> meet(PairingNode a, PairingNode b) async {
   for (var attempt = 0; attempt < 5; attempt++) {
@@ -316,7 +327,7 @@ Future<void> meet(PairingNode a, PairingNode b) async {
     await a.node.rescan();
     await b.node.rescan();
     final watch = Stopwatch()..start();
-    while (watch.elapsed < const Duration(seconds: 3) &&
+    while (watch.elapsed < scaled(const Duration(seconds: 3)) &&
         !(a.sees(b) && b.sees(a))) {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
@@ -389,7 +400,7 @@ Future<void> sayByeAs(
   final watch = Stopwatch()..start();
   while (socket.send(bytes, to.internetAddress, to.channelPort) !=
       bytes.length) {
-    if (watch.elapsed > waitLimit) fail('bye not sent');
+    if (watch.elapsed > scaled(waitLimit)) fail('bye not sent');
     await Future<void>.delayed(const Duration(milliseconds: 1));
   }
 }

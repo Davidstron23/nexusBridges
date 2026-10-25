@@ -136,6 +136,12 @@ class HomeScreen extends StatelessWidget {
       NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
       NoticeKind.pairingFailed => strings.noticePairingFailed(name),
       NoticeKind.pairingPaused => strings.noticePairingPaused,
+      NoticeKind.receiveFolderNotSaved => strings.noticeReceiveFolderNotSaved(
+        notice.detail ?? '',
+      ),
+      NoticeKind.peerCancelledTransfer => strings.noticePeerCancelledTransfer(
+        notice.detail ?? '',
+      ),
     };
   }
 }
