@@ -415,7 +415,7 @@ Future<int> freePort({InternetAddress? address}) async {
 }
 
 Future<int> freePortOn(List<InternetAddress> addresses) async {
-  for (var attempt = 0; attempt < 50; attempt++) {
+  for (var attempt = 0; attempt < 400; attempt++) {
     final port = await freePort(address: addresses.first);
     var free = true;
     for (final address in addresses) {
@@ -425,6 +425,7 @@ Future<int> freePortOn(List<InternetAddress> addresses) async {
       }
     }
     if (free) return port;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
   }
   throw StateError('no port free on every address');
 }
