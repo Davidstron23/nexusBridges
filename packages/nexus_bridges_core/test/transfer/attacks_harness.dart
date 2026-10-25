@@ -23,6 +23,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart'
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../node/pairing_nodes_harness.dart'
     show XorProtector, eventually, homeNetwork, wifiAdapter;
 import 'receiver_harness.dart'
@@ -60,43 +61,10 @@ Future<String> _systemLoopbackName() async {
   return name;
 }
 
-Future<bool> _tcpFree(String address, int port) async {
-  try {
-    final socket = await ServerSocket.bind(InternetAddress(address), port);
-    await socket.close();
-    return true;
-  } on SocketException {
-    return false;
-  }
-}
+Future<int> freePortOnAll(List<String> hosts) =>
+    pickPort(tcp: [for (final host in hosts) InternetAddress(host)]);
 
-Future<int> freePortOnAll(List<String> hosts) async {
-  for (var attempt = 0; attempt < 100; attempt++) {
-    final probe = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = probe.port;
-    await probe.close();
-    var free = true;
-    for (final host in hosts) {
-      if (!await _tcpFree(host, port)) {
-        free = false;
-        break;
-      }
-    }
-    if (free) return port;
-  }
-  throw StateError('no free port');
-}
-
-Future<int> _freeUdpPort() async {
-  final socket = await RawDatagramSocket.bind(
-    InternetAddress.anyIPv4,
-    0,
-    reuseAddress: false,
-  );
-  final port = socket.port;
-  socket.close();
-  return port;
-}
+Future<int> _freeUdpPort() => pickPort(udp: [InternetAddress.anyIPv4]);
 
 Uint8List patternBytes(int length, int seed) {
   final random = Random(seed);
@@ -176,9 +144,9 @@ final class TransferNode {
 
   final String name;
   final String address;
-  final int port;
+  int port;
   final String base;
-  final int channelPort;
+  int channelPort;
   final TransferPlatform platform;
   final ScriptedPicker picker = ScriptedPicker();
   final FakeClock clock = FakeClock()..followRealTime();
@@ -298,6 +266,7 @@ final class TransferNode {
 
   Future<NexusNode> start() async {
     final loopback = await _systemLoopbackName();
+    final before = logs.length;
     final channel = MulticastChannel(port: channelPort, log: logs.add);
     addTearDown(channel.close);
     final adapterIds = {for (final i in interfaces) i.adapterId};
@@ -339,7 +308,7 @@ final class TransferNode {
     addTearDown(subscription.cancel);
     await eventually(
       () => started.state.prompts.isNotEmpty || !started.state.paused,
-      limit: nodeLimit,
+      limit: scaled(nodeLimit),
       reason: '$name network read',
     );
     if (started.state.prompts.isNotEmpty) {
@@ -347,20 +316,27 @@ final class TransferNode {
     }
     await eventually(
       () => !started.state.paused,
-      limit: nodeLimit,
+      limit: scaled(nodeLimit),
       reason: '$name active',
+    );
+    await awaitListening(
+      name: name,
+      logs: logs,
+      since: before,
+      portInUse: () => started.state.portInUse,
+      limit: scaled(nodeLimit),
     );
     return started;
   }
 
   Future<NodeState> until(
     bool Function(NodeState s) condition, {
-    Duration limit = nodeLimit,
+    Duration? limit,
     String? reason,
   }) async {
     await eventually(
       () => condition(node.state),
-      limit: limit,
+      limit: limit ?? scaled(nodeLimit),
       reason: reason ?? '$name state',
     );
     return node.state;
@@ -386,7 +362,7 @@ final class TransferNode {
 
   Future<TransferResultView> sentResult({
     TransferResultView? after,
-    Duration limit = nodeLimit,
+    Duration? limit,
   }) async {
     final s = await until(
       (s) =>
@@ -401,7 +377,7 @@ final class TransferNode {
 
   Future<TransferResultView> receivedResult({
     TransferResultView? after,
-    Duration limit = nodeLimit,
+    Duration? limit,
   }) async {
     final s = await until(
       (s) =>
@@ -433,11 +409,31 @@ Future<List<TransferNode>> transferNodes(
   ];
 }
 
-Future<void> startAll(List<TransferNode> nodes) async {
-  for (final node in nodes) {
-    await node.start();
-  }
-}
+Future<void> startAll(
+  List<TransferNode> nodes, {
+  List<TransferNode> later = const [],
+}) => onFreshPorts(
+  () async {
+    for (final node in nodes) {
+      await node.start();
+    }
+  },
+  reset: () async {
+    for (final node in nodes) {
+      await node._node?.shutdown();
+    }
+    final group = [...nodes, ...later];
+    final port = await freePortOnAll([
+      for (final node in group)
+        for (final iface in node.interfaces) iface.address,
+    ]);
+    for (final node in group) {
+      node
+        ..port = port
+        ..channelPort = await _freeUdpPort();
+    }
+  },
+);
 
 Future<void> meetAll(
   List<TransferNode> nodes, {
@@ -452,7 +448,7 @@ Future<void> meetAll(
       if (expectVisible != null && !expectVisible(from, to)) continue;
       await eventually(
         () => from.entryOf(to)?.visible == true,
-        limit: nodeLimit,
+        limit: scaled(nodeLimit),
         reason: '${from.name} sees ${to.name}',
       );
     }
@@ -461,7 +457,7 @@ Future<void> meetAll(
 
 Future<void> canSend(TransferNode from, TransferNode to) => eventually(
   () => from.entryOf(to)?.canSendFile == true,
-  limit: nodeLimit,
+  limit: scaled(nodeLimit),
   reason: '${from.name} can send to ${to.name}',
 );
 

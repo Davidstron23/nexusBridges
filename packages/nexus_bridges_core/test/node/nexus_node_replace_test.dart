@@ -76,8 +76,12 @@ Future<_Trio> _trio({Duration pollA = const Duration(minutes: 1)}) async {
     ),
   ]);
   final start = a.clock;
-  await a.start(pollInterval: pollA);
-  await b.start();
+  await startTogether(
+    [a, b],
+    start: (node) =>
+        identical(node, a) ? node.start(pollInterval: pollA) : node.start(),
+    later: [p],
+  );
   await meet(a, b);
   return _Trio(a, b, p, old, start);
 }

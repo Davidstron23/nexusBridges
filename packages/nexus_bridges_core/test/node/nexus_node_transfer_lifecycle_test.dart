@@ -14,6 +14,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart'
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import 'transfer_nodes_harness.dart';
 
 const String _ownTemp =
@@ -306,7 +307,7 @@ void main() {
       final path = await a.sourceFile('slow.txt', _bytes(5000));
 
       expect(await a.send(b, path), SendFileResult.started);
-      await marking.future.timeout(transferWait);
+      await marking.future.timeout(scaled(transferWait));
       await a.until(
         (s) => s.outgoing?.phase == OutgoingPhase.verifying,
         reason: 'A verifying',
@@ -341,7 +342,7 @@ void main() {
       final path = await a.sourceFile('slow.txt', _bytes(5000));
 
       expect(await a.send(b, path), SendFileResult.started);
-      await marking.future.timeout(transferWait);
+      await marking.future.timeout(scaled(transferWait));
 
       final took = await _timed(b.stop);
 
@@ -355,12 +356,12 @@ void main() {
       );
       await eventually(
         () => b.filesIn(b.recvDir).contains('slow.txt'),
-        limit: transferWait,
+        limit: scaled(transferWait),
         reason: 'the verified file saved after the close',
       );
       await eventually(
         () => !b.tempLeftIn(b.recvDir),
-        limit: transferWait,
+        limit: scaled(transferWait),
         reason: 'temp gone after the late save',
       );
       expect(b.filesIn(b.recvDir), ['slow.txt']);

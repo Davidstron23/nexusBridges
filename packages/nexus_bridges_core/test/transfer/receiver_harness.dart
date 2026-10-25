@@ -15,6 +15,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../server/api_server_harness.dart';
 
 const WindowsFileSystemPlatform realFs = WindowsFileSystemPlatform();
@@ -301,17 +302,18 @@ Future<Directory> _temporaryDirectory() async {
 
 Future<void> eventually(
   bool Function() condition, {
-  Duration limit = const Duration(seconds: 5),
+  Duration? limit,
   String reason = 'condition',
 }) async {
+  final span = limit ?? scaled(const Duration(seconds: 5));
   final stopwatch = Stopwatch()..start();
   while (true) {
     try {
       if (condition()) return;
     } on FileSystemException {
-      if (stopwatch.elapsed > limit) rethrow;
+      if (stopwatch.elapsed > span) rethrow;
     }
-    if (stopwatch.elapsed > limit) fail('$reason not met within $limit');
+    if (stopwatch.elapsed > span) fail('$reason not met within $span');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }

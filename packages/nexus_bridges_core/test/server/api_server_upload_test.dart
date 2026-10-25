@@ -12,6 +12,7 @@ import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import 'api_server_harness.dart';
 
 const String _uploadPath = ApiPaths.transferUpload;
@@ -57,13 +58,11 @@ String _describe(StreamPostResult result) => switch (result) {
   StreamPostFailed(:final failure) => 'failed ${failure.name}',
 };
 
-Future<void> _until(
-  bool Function() condition, {
-  Duration limit = waitLimit,
-}) async {
+Future<void> _until(bool Function() condition, {Duration? limit}) async {
+  final span = limit ?? scaled(waitLimit);
   final stopwatch = Stopwatch()..start();
   while (!condition()) {
-    if (stopwatch.elapsed > limit) throw TimeoutException('condition');
+    if (stopwatch.elapsed > span) throw TimeoutException('condition');
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }

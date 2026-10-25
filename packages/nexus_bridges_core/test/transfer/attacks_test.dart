@@ -14,6 +14,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart'
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import 'attacks_harness.dart';
 import 'transfer_stacks_harness.dart' show TransferStack, hostA, hostF;
 
@@ -42,13 +43,13 @@ void expectCut(StreamPostResult result) {
 Future<void> expectNothingIn(TransferNode b) async {
   await eventually(
     () => !anyTempIn(b.receiveDir),
-    limit: nodeLimit,
+    limit: scaled(nodeLimit),
     reason: 'no temporary file left',
   );
   expect(treeOf(b.receiveDir), isEmpty);
   await eventually(
     () async => (await b.journalFolders()).isEmpty,
-    limit: nodeLimit,
+    limit: scaled(nodeLimit),
     reason: 'cleanup journal empty',
   );
 }
@@ -135,7 +136,7 @@ void main() {
       await b.trust([(a, mine)]);
       await c.trust([(b, mine)]);
       await b.rememberReceiveFolder();
-      await startAll([a, b]);
+      await startAll([a, b], later: [c]);
       await exhaustPairStatus(b, c.internetAddress);
       await c.start();
       await meetAll([a, b, c]);
@@ -195,7 +196,7 @@ void main() {
       await meetAll([a, b, c]);
       await eventually(
         () => c.entryOf(b)?.mismatch == true,
-        limit: nodeLimit,
+        limit: scaled(nodeLimit),
         reason: 'C sees the mismatch',
       );
       final inspected = b.platform.calls.length;
@@ -235,7 +236,7 @@ void main() {
       await expectNothingIn(b);
       await eventually(
         () => a.entryOf(b)?.paired == false,
-        limit: nodeLimit,
+        limit: scaled(nodeLimit),
         reason: 'A no longer paired with B',
       );
       expect(throttle.written, lessThan(24 * mib));

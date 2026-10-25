@@ -9,6 +9,8 @@ import 'package:nexus_bridges_core/src/node/node.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
+
 const Duration _shutdownLimit = Duration(seconds: 2);
 const Duration _waitLimit = Duration(seconds: 5);
 const Timeout _childTimeout = Timeout(Duration(minutes: 6));
@@ -73,25 +75,8 @@ Iterable<String> _pemFragments(String pem, {int size = 16}) sync* {
   }
 }
 
-Future<int> _freePort() async {
-  while (true) {
-    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = tcp.port;
-    RawDatagramSocket? udp;
-    try {
-      udp = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        port,
-        reuseAddress: false,
-      );
-    } on SocketException {
-      udp = null;
-    }
-    udp?.close();
-    await tcp.close();
-    if (udp != null) return port;
-  }
-}
+Future<int> _freePort() =>
+    pickPort(tcp: [InternetAddress.anyIPv4], udp: [InternetAddress.anyIPv4]);
 
 Future<bool> _udpPortFree(int port) async {
   final probe = MulticastChannel(port: port);
@@ -106,10 +91,10 @@ Future<bool> _udpPortFree(int port) async {
 }
 
 Future<void> _until(bool Function() condition) async {
-  final deadline = DateTime.now().add(_waitLimit);
+  final deadline = DateTime.now().add(scaled(_waitLimit));
   while (!condition()) {
     if (DateTime.now().isAfter(deadline)) {
-      fail('condition not met within $_waitLimit');
+      fail('condition not met within ${scaled(_waitLimit)}');
     }
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
@@ -549,7 +534,7 @@ void main() {
       Future<void>? closed;
       protector.onProtect = () => closed ??= node.shutdown();
 
-      await node.retry().timeout(_waitLimit);
+      await node.retry().timeout(scaled(_waitLimit));
 
       expect(protector.protectCalls, 1);
       expect(closed, isNotNull);
@@ -717,8 +702,8 @@ void main() {
       await node.shutdown();
       await File(dataDir().path).delete();
 
-      await node.rescan().timeout(_waitLimit);
-      await node.retry().timeout(_waitLimit);
+      await node.rescan().timeout(scaled(_waitLimit));
+      await node.retry().timeout(scaled(_waitLimit));
 
       expect(node.state.identityStatus, IdentityStatus.failed);
       expect(await _udpPortFree(port), isTrue);
@@ -779,16 +764,16 @@ void main() {
       final second = node.rescan();
 
       expect(second, same(first));
-      await first.timeout(_waitLimit);
+      await first.timeout(scaled(_waitLimit));
       final third = node.rescan();
       expect(third, isNot(same(first)));
-      await third.timeout(_waitLimit);
+      await third.timeout(scaled(_waitLimit));
     });
 
     test('rescan on a failed node ends without error', () async {
       final node = await startNode(dir: await blockedDataDir());
 
-      await node.rescan().timeout(_waitLimit);
+      await node.rescan().timeout(scaled(_waitLimit));
 
       expect(await _udpPortFree(port), isTrue);
     });

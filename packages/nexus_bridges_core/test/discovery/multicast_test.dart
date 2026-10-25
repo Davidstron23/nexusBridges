@@ -9,6 +9,8 @@ import 'package:nexus_bridges_core/src/network/network.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
+
 typedef _Received = (Announcement, InternetAddress, ActiveInterface);
 
 const Duration _arrivalLimit = Duration(seconds: 5);
@@ -61,25 +63,8 @@ Future<String> _systemLoopbackName() async {
       .name;
 }
 
-Future<int> _freePort() async {
-  while (true) {
-    final tcp = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    final port = tcp.port;
-    RawDatagramSocket? udp;
-    try {
-      udp = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4,
-        port,
-        reuseAddress: false,
-      );
-    } on SocketException {
-      udp = null;
-    }
-    udp?.close();
-    await tcp.close();
-    if (udp != null) return port;
-  }
-}
+Future<int> _freePort() =>
+    pickPort(tcp: [InternetAddress.anyIPv4], udp: [InternetAddress.anyIPv4]);
 
 Future<RawDatagramSocket> _socketOn(InternetAddress address) async {
   final socket = await RawDatagramSocket.bind(address, 0, reuseAddress: false);
@@ -118,11 +103,11 @@ final class _Fixture {
     if (received.length >= count) return Future<void>.value();
     final completer = Completer<void>();
     _waiters.add((count, completer));
-    return completer.future.timeout(_arrivalLimit);
+    return completer.future.timeout(scaled(_arrivalLimit));
   }
 
   Future<void> inject(RawDatagramSocket from, List<int> bytes) async {
-    final deadline = DateTime.now().add(_arrivalLimit);
+    final deadline = DateTime.now().add(scaled(_arrivalLimit));
     while (from.send(bytes, InternetAddress.loopbackIPv4, port) !=
         bytes.length) {
       if (DateTime.now().isAfter(deadline)) fail('datagram not sent');
@@ -1186,10 +1171,10 @@ void main() {
 }
 
 Future<void> _until(bool Function() condition) async {
-  final deadline = DateTime.now().add(_arrivalLimit);
+  final deadline = DateTime.now().add(scaled(_arrivalLimit));
   while (!condition()) {
     if (DateTime.now().isAfter(deadline)) {
-      fail('condition not met within $_arrivalLimit');
+      fail('condition not met within ${scaled(_arrivalLimit)}');
     }
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }

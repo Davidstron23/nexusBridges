@@ -18,6 +18,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart'
     show writeAllBytes;
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import '../transfer/receiver_harness.dart'
     show FakeClock, TransferPlatform, realFs;
 import 'pairing_nodes_harness.dart'
@@ -47,16 +48,7 @@ Future<String> _systemLoopbackName() async {
       .name;
 }
 
-Future<int> _freeUdpPort() async {
-  final socket = await RawDatagramSocket.bind(
-    InternetAddress.anyIPv4,
-    0,
-    reuseAddress: false,
-  );
-  final port = socket.port;
-  socket.close();
-  return port;
-}
+Future<int> _freeUdpPort() => pickPort(udp: [InternetAddress.anyIPv4]);
 
 final class NodePicker implements FilePicker {
   String? nextFile;
@@ -148,7 +140,7 @@ final class TransferNode {
   final String name;
   final InternetAddress address;
   final String base;
-  final int port;
+  int port;
   final TransferPlatform platform;
   final List<String> logs = [];
   final List<NodeState> states = [];
@@ -283,6 +275,7 @@ final class TransferNode {
 
   Future<NexusNode> start() async {
     final loopback = await _systemLoopbackName();
+    final before = logs.length;
     channelPort = await _freeUdpPort();
     final zone = Zone.current.fork(specification: timers.specification(_mark));
     final started = await zone.run(() async {
@@ -328,7 +321,7 @@ final class TransferNode {
     addTearDown(subscription.cancel);
     await eventually(
       () => started.state.prompts.isNotEmpty || !started.state.paused,
-      limit: transferWait,
+      limit: scaled(transferWait),
       reason: '$name network read',
     );
     if (started.state.prompts.isNotEmpty) {
@@ -336,13 +329,15 @@ final class TransferNode {
     }
     await eventually(
       () => !started.state.paused,
-      limit: transferWait,
+      limit: scaled(transferWait),
       reason: '$name active',
     );
-    await eventually(
-      () => logs.any((line) => line.startsWith('listening on ')),
-      limit: transferWait,
-      reason: '$name listening',
+    await awaitListening(
+      name: name,
+      logs: logs,
+      since: before,
+      portInUse: () => started.state.portInUse,
+      limit: scaled(transferWait),
     );
     return started;
   }
@@ -356,12 +351,12 @@ final class TransferNode {
 
   Future<NodeState> until(
     bool Function(NodeState s) condition, {
-    Duration limit = transferWait,
+    Duration? limit,
     String? reason,
   }) async {
     await eventually(
       () => condition(node.state),
-      limit: limit,
+      limit: limit ?? scaled(transferWait),
       reason: reason ?? '$name state',
     );
     return node.state;
@@ -381,7 +376,7 @@ final class TransferNode {
 
   Future<TransferResultView> sentResult({
     TransferResultView? after,
-    Duration limit = transferWait,
+    Duration? limit,
   }) async {
     final s = await until(
       (s) =>
@@ -450,8 +445,20 @@ Future<(TransferNode, TransferNode)> transferNodes({
   if (rememberA) await a.rememberFolder();
   if (rememberB) await b.rememberFolder();
   if (before != null) await before(a, b);
-  await a.start();
-  await b.start();
+  await onFreshPorts(
+    () async {
+      await a.start();
+      await b.start();
+    },
+    reset: () async {
+      for (final node in [a, b]) {
+        if (node._node != null) await node.stop();
+      }
+      final fresh = await freeTcpPort(hosts: const ['127.0.0.1', '127.0.0.2']);
+      a.port = fresh;
+      b.port = fresh;
+    },
+  );
   await meet(a, b);
   return (a, b);
 }
@@ -461,7 +468,7 @@ Future<void> meet(TransferNode a, TransferNode b) async {
     await a.node.rescan();
     await b.node.rescan();
     final watch = Stopwatch()..start();
-    while (watch.elapsed < const Duration(seconds: 3)) {
+    while (watch.elapsed < scaled(const Duration(seconds: 3))) {
       if (a.entryOf(b.fingerprint)?.visible == true &&
           b.entryOf(a.fingerprint)?.visible == true) {
         return;
@@ -500,7 +507,7 @@ Future<void> sayBye(TransferNode from, TransferNode to) async {
   ).encode();
   final watch = Stopwatch()..start();
   while (socket.send(bytes, to.address, to.channelPort) != bytes.length) {
-    if (watch.elapsed > transferWait) fail('bye not sent');
+    if (watch.elapsed > scaled(transferWait)) fail('bye not sent');
     await Future<void>.delayed(const Duration(milliseconds: 1));
   }
 }

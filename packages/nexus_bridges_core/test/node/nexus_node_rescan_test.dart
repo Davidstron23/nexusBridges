@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import 'two_nodes_harness.dart';
 
 const Duration _present = Duration(milliseconds: 200);
@@ -53,7 +54,7 @@ void main() {
 
       final call = node.zone.run(() => node.node.rescan());
       expect(node.state.scanning, isTrue);
-      await call.timeout(waitLimit);
+      await call.timeout(scaled(waitLimit));
 
       expect(node.state.scanning, isFalse);
       await eventually(
