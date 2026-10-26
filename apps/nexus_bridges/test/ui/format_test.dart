@@ -209,4 +209,14 @@ void main() {
       expect(percentOf(1024 * _tib, 1024 * _tib), 100);
     });
   });
+
+  group('E260, E262: formatOverflow', () {
+    test('is a plus sign and the number of hidden peers, the same in both '
+        'languages', () {
+      expect(formatOverflow(1), '+1');
+      expect(formatOverflow(2), '+2');
+      expect(formatOverflow(19), '+19');
+      expect(formatOverflow(1000), '+1000');
+    });
+  });
 }

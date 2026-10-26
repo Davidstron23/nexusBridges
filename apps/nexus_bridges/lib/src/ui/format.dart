@@ -36,6 +36,8 @@ String shortenFileName(String name, {int maxRunes = 60}) {
   return String.fromCharCodes([...runes.take(head < 0 ? 0 : head), _ellipsis]);
 }
 
+String formatOverflow(int hidden) => '+$hidden';
+
 int percentOf(int done, int total) {
   if (total == 0) return 100;
   return done * 100 ~/ total;
