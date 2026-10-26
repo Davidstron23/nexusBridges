@@ -2,7 +2,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/activity_cards.dart';
 import 'package:nexus_bridges/src/ui/brand/brand_mark.dart';
+import 'package:nexus_bridges/src/ui/device_list.dart';
 import 'package:nexus_bridges/src/ui/diagram/flow_diagram.dart';
 import 'package:nexus_bridges/src/ui/home_layout.dart';
 import 'package:nexus_bridges/src/ui/network_strip.dart';
@@ -110,10 +112,8 @@ bool _selected(WidgetTester tester, String label) => tester
 bool _showsDevices(WidgetTester tester, AppStrings strings) {
   final devices = _selected(tester, strings.devicesTab);
   expect(_selected(tester, strings.activityTab), !devices);
-  expect(
-    find.text(strings.activityEmpty),
-    devices ? findsNothing : findsOneWidget,
-  );
+  expect(find.byType(ActivityPanel), devices ? findsNothing : findsOneWidget);
+  expect(find.byType(DeviceList), devices ? findsOneWidget : findsNothing);
   return devices;
 }
 
@@ -812,7 +812,9 @@ void main() {
         );
       });
 
-      testWidgets('Activity shows activityEmpty for now', (tester) async {
+      testWidgets('Activity without any activity shows activityEmpty', (
+        tester,
+      ) async {
         _window(tester, const Size(800, 600));
         final controller = FakeAppController(
           state: NodeState(entries: _threeEntries),
