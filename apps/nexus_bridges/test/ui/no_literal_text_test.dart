@@ -9,6 +9,8 @@ final RegExp _literalSpan = RegExp(
   r'''TextSpan\(\s*(?:\w+:\s*[^,()]+,\s*)*text:\s*['"]''',
 );
 
+final RegExp _materialIcon = RegExp(r'\bIcons\.');
+
 const List<String> _acronyms = [
   'PDF',
   'XLS',
@@ -131,6 +133,43 @@ void main() {
       for (final file in _uiSources()) {
         final source = file.readAsStringSync();
         for (final match in _literalSpan.allMatches(source)) {
+          final line = '\n'.allMatches(source.substring(0, match.start)).length;
+          offenders.add('${file.path}:${line + 1}');
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('point 124: no Material Icons in lib/src/ui', () {
+    test('the pattern catches Icons. and lets the own glyphs through', () {
+      expect(_materialIcon.hasMatch('Icon(Icons.computer)'), isTrue);
+      expect(
+        _materialIcon.hasMatch('icon: const Icon(Icons.more_vert),'),
+        isTrue,
+      );
+      expect(_materialIcon.hasMatch('Icons.smartphone'), isTrue);
+      expect(_materialIcon.hasMatch('(Icons.send)'), isTrue);
+      expect(_materialIcon.hasMatch('GlyphIcon(Glyphs.more)'), isFalse);
+      expect(_materialIcon.hasMatch('CupertinoIcons.add'), isFalse);
+      expect(_materialIcon.hasMatch('AppIcons.send'), isFalse);
+      expect(_materialIcon.hasMatch('IconsTheme.of(context)'), isFalse);
+      expect(_materialIcon.hasMatch('Glyphs.send'), isFalse);
+    });
+
+    test('lib/src/ui does draw its own glyphs, so the check is not empty', () {
+      final glyphs = [
+        for (final file in _uiSources())
+          ...RegExp(r'GlyphIcon\(').allMatches(file.readAsStringSync()),
+      ];
+      expect(glyphs, isNotEmpty);
+    });
+
+    test('no file in lib/src/ui uses Icons.', () {
+      final offenders = <String>[];
+      for (final file in _uiSources()) {
+        final source = file.readAsStringSync();
+        for (final match in _materialIcon.allMatches(source)) {
           final line = '\n'.allMatches(source.substring(0, match.start)).length;
           offenders.add('${file.path}:${line + 1}');
         }

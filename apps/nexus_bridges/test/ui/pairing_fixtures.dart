@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/device_list.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
@@ -75,24 +76,27 @@ Finder get dialog => find.byType(AlertDialog);
 List<String> buttonLabelsIn(WidgetTester tester, Finder scope) {
   final buttons = find.descendant(
     of: scope,
-    matching: find.byWidgetPredicate(
-      (widget) => widget is TextButton || widget is FilledButton,
-    ),
+    matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
   );
   return [
-    for (final button in tester.widgetList<ButtonStyleButton>(buttons))
-      switch (button.child) {
-        Text(:final data) => data ?? '',
-        _ => '',
-      },
-  ];
+    for (final button in buttons.evaluate())
+      [
+        for (final text in tester.widgetList<Text>(
+          find.descendant(
+            of: find.byElementPredicate((element) => element == button),
+            matching: find.byType(Text),
+          ),
+        ))
+          text.data ?? '',
+      ].join(' '),
+  ].where((label) => label.isNotEmpty).toList();
 }
 
 List<String> dialogButtons(WidgetTester tester) =>
     buttonLabelsIn(tester, dialog);
 
 Finder cardOf(String name) =>
-    find.ancestor(of: find.text(name), matching: find.byType(Card)).first;
+    find.ancestor(of: find.text(name), matching: find.byType(DeviceRow)).first;
 
 List<String> rowButtons(WidgetTester tester, String name) =>
     buttonLabelsIn(tester, cardOf(name));
@@ -125,6 +129,13 @@ Set<String> allowedTexts(
     s.rescanHint,
     s.rescanButton,
     s.pausedBanner,
+    s.sectionUnpaired,
+    s.chipMine,
+    s.chipForeign,
+    s.visibleLabel,
+    s.sendFileButton,
+    s.sendNeedsVisible,
+    s.sendNeedsPairAgain,
     s.networkPromptTitle,
     s.yes,
     s.no,

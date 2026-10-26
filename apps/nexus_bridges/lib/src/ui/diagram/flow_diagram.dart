@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../l10n/app_strings.dart';
+import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
 import '../icons/glyphs.dart';
 import '../theme/app_theme.dart';
@@ -26,21 +27,6 @@ const int _shortLength = 8;
 
 String _shortOf(String fingerprint) =>
     fingerprint.substring(0, math.min(_shortLength, fingerprint.length));
-
-DiscTone _discToneFor(NodeState state, DeviceEntry entry) {
-  final incoming = state.incoming;
-  if (incoming != null &&
-      incoming.peerFingerprint == entry.fingerprint &&
-      (incoming.stage == IncomingStage.warning ||
-          incoming.stage == IncomingStage.folderQuestion)) {
-    return DiscTone.asking;
-  }
-  if (state.outgoing?.peerFingerprint == entry.fingerprint) {
-    return DiscTone.sending;
-  }
-  if (!entry.visible) return DiscTone.notVisible;
-  return DiscTone.idle;
-}
 
 DeviceEntry? _pairedEntry(NodeState state, String? fingerprint) {
   if (fingerprint == null) return null;
@@ -308,7 +294,7 @@ class _FlowDiagramState extends State<FlowDiagram>
               reduceMotion: _reduceMotion,
               child: _FlowPopover(
                 entry: entry,
-                tone: _discToneFor(widget.state, entry),
+                tone: discToneFor(widget.state, entry),
                 onSend: () {
                   _closePopover();
                   widget.onSend(entry.fingerprint);

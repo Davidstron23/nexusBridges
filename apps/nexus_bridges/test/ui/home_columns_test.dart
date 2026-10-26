@@ -221,9 +221,8 @@ void main() {
         expect(_showsDevices(tester, strings), isTrue);
       });
 
-      testWidgets('sending from the diagram popover calls sendFile', (
-        tester,
-      ) async {
+      testWidgets('Send file in the diagram popover, not the one of a row, '
+          'calls sendFile for that device', (tester) async {
         _window(tester, const Size(800, 600));
         final controller = FakeAppController(
           state: NodeState(entries: _threeEntries),
@@ -232,15 +231,23 @@ void main() {
 
         await tester.tap(find.byKey(ValueKey('flow-peer-$_fpB')));
         await tester.pumpAndSettle();
-        await tester.tap(find.text(strings.sendFileButton));
+        final popoverSend = find.descendant(
+          of: find.byType(FlowDiagram),
+          matching: find.text(strings.sendFileButton),
+        );
+        expect(popoverSend, findsOneWidget);
+        expect(find.text(strings.sendFileButton), findsNWidgets(3));
+        await tester.tap(popoverSend);
         await tester.pump();
 
-        expect(controller.calls, contains('sendFile $_fpB'));
+        expect(controller.calls, ['sendFile $_fpB']);
         await tester.pumpAndSettle();
+        expect(popoverSend, findsNothing);
+        expect(find.byType(SnackBar), findsNothing);
       });
     });
 
-    group('[$code] E264 header', () {
+    group('[$code] E264 header without the mark (point 153)', () {
       final screens = <String, (NodeState?, bool, bool)>{
         'normal': (const NodeState(), false, true),
         'no state': (null, false, false),
@@ -252,60 +259,69 @@ void main() {
         ),
         'port in use': (const NodeState(portInUse: 53530), false, false),
       };
-      for (final width in [800.0, 320.0]) {
+      for (final width in [1180.0, 800.0, 320.0]) {
         for (final MapEntry(key: name, value: (state, failed, normal))
             in screens.entries) {
-          testWidgets('$name at $width px shows the mark and appTitle'
-              '${normal ? ' and the strip' : ', without the strip'}', (
-            tester,
-          ) async {
-            _window(tester, Size(width, 800));
-            final controller = FakeAppController(
-              state: state,
-              startFailed: failed,
-            );
-            await pumpHome(tester, controller, code);
+          testWidgets(
+            '$name at $width px paints neither the mark nor appTitle'
+            '${normal ? ', and the strip fills the header' : ', nor the strip'}',
+            (tester) async {
+              _window(tester, Size(width, 800));
+              final controller = FakeAppController(
+                state: state,
+                startFailed: failed,
+              );
+              await pumpHome(tester, controller, code);
 
-            expect(tester.takeException(), isNull);
-            expect(find.byType(BrandMark), findsOneWidget);
-            expect(find.text(strings.appTitle), findsOneWidget);
-            expect(
-              tester.getTopLeft(find.byType(BrandMark)).dx,
-              lessThan(tester.getTopLeft(find.text(strings.appTitle)).dx),
-            );
-            expect(_strip, normal ? findsOneWidget : findsNothing);
-            expect(find.byType(AppBar), findsNothing);
-            if (!normal) {
-              expect(find.byType(FlowDiagram), findsNothing);
-              expect(find.text(strings.devicesTab), findsNothing);
-              expect(find.text(strings.retryButton), findsOneWidget);
-            }
-          });
+              expect(tester.takeException(), isNull);
+              expect(find.byType(BrandMark), findsNothing);
+              expect(find.text(strings.appTitle), findsNothing);
+              expect(find.byType(AppBar), findsNothing);
+              expect(_strip, normal ? findsOneWidget : findsNothing);
+              if (normal) {
+                final strip = tester.getRect(_strip);
+                expect(strip.left, closeTo(16, 0.01));
+                expect(strip.right, closeTo(width - 16, 0.01));
+                expect(strip.top, closeTo(12, 0.01));
+                expect(
+                  tester.widget<NetworkStrip>(_strip).compact,
+                  width < 600,
+                );
+              } else {
+                expect(find.byType(FlowDiagram), findsNothing);
+                expect(find.text(strings.devicesTab), findsNothing);
+                expect(find.text(strings.retryButton), findsOneWidget);
+              }
+            },
+          );
         }
       }
 
-      testWidgets('at 800x600 the strip shares the row with the mark', (
-        tester,
-      ) async {
+      testWidgets('at 800x600 the strip alone fills the header, 60 px high, '
+          'with the text button', (tester) async {
         _window(tester, const Size(800, 600));
         final controller = FakeAppController(
-          state: const NodeState(activeNetworks: [_home]),
+          state: NodeState(
+            activeNetworks: const [_home],
+            entries: _threeEntries,
+          ),
         );
         await pumpHome(tester, controller, code);
 
+        expect(tester.takeException(), isNull);
         expect(tester.widget<NetworkStrip>(_strip).compact, isFalse);
-        final mark = tester.getRect(find.byType(BrandMark));
-        final strip = tester.getRect(_strip);
-        expect(strip.top, lessThan(mark.bottom));
-        expect(strip.left, greaterThan(mark.right));
-        expect(strip.right, closeTo(800 - 16, 0.01));
-        expect(strip.height, 60);
+        expect(tester.getRect(_strip), const Rect.fromLTRB(16, 12, 784, 72));
         expect(_stripOutlined, findsOneWidget);
+        expect(_inStrip(find.byType(IconButton)), findsNothing);
         expect(find.text(strings.rescanButton), findsOneWidget);
+        expect(
+          tester.getRect(_strip).bottom,
+          lessThan(tester.getRect(find.byType(FlowDiagram)).top),
+        );
       });
 
-      testWidgets('at 320x800 the strip goes under the mark with an icon '
-          'button and its tooltip', (tester) async {
+      testWidgets('at 320x800 the strip stays on the first row, compact, with '
+          'an icon button and its tooltip', (tester) async {
         _window(tester, const Size(320, 800));
         final controller = FakeAppController(
           state: NodeState(
@@ -317,11 +333,12 @@ void main() {
 
         expect(tester.takeException(), isNull);
         expect(tester.widget<NetworkStrip>(_strip).compact, isTrue);
-        final mark = tester.getRect(find.byType(BrandMark));
         final strip = tester.getRect(_strip);
-        expect(strip.top, greaterThanOrEqualTo(mark.bottom + 8));
+        expect(strip.top, closeTo(12, 0.01));
         expect(strip.left, closeTo(16, 0.01));
         expect(strip.width, closeTo(320 - 32, 0.01));
+        expect(find.byType(BrandMark), findsNothing);
+        expect(find.text(strings.appTitle), findsNothing);
         expect(_inStrip(find.byType(IconButton)), findsOneWidget);
         expect(_stripOutlined, findsNothing);
         expect(find.text(strings.rescanButton), findsNothing);
@@ -331,6 +348,10 @@ void main() {
               .widget<IconButton>(_inStrip(find.byType(IconButton)))
               .onPressed,
           isNotNull,
+        );
+        expect(
+          strip.bottom,
+          lessThan(tester.getTopLeft(_tab(strings.devicesTab)).dy),
         );
 
         await tester.tap(_inStrip(find.byType(IconButton)));
@@ -386,30 +407,39 @@ void main() {
 
       for (final (width, compact) in [
         (599.0, true),
-        (code == 'es' ? 610.0 : 600.0, false),
+        (600.0, false),
+        (610.0, false),
       ]) {
         testWidgets('a header of $width px ${compact ? 'is' : 'is not'} '
-            'compact', (tester) async {
+            'compact and the strip stays on the first row at full width', (
+          tester,
+        ) async {
           _window(tester, Size(width, 700));
-          final controller = FakeAppController(state: const NodeState());
+          final controller = FakeAppController(
+            state: const NodeState(activeNetworks: [_home]),
+          );
           await pumpHome(tester, controller, code);
 
+          expect(tester.takeException(), isNull);
           expect(tester.widget<NetworkStrip>(_strip).compact, compact);
-          final mark = tester.getRect(find.byType(BrandMark));
           final strip = tester.getRect(_strip);
-          if (compact) {
-            expect(strip.top, greaterThanOrEqualTo(mark.bottom));
-          } else {
-            expect(strip.top, lessThan(mark.bottom));
-          }
+          expect(strip.top, closeTo(12, 0.01));
+          expect(strip.left, closeTo(16, 0.01));
+          expect(strip.right, closeTo(width - 16, 0.01));
+          expect(
+            _inStrip(find.byType(IconButton)),
+            compact ? findsOneWidget : findsNothing,
+          );
+          expect(_stripOutlined, compact ? findsNothing : findsOneWidget);
+          expect(find.byType(BrandMark), findsNothing);
         });
       }
     });
 
     group('[$code] E265 strip in the screen', () {
-      testWidgets('shows the name of the network in use, and the note only '
-          'with a wide strip', (tester) async {
-        _window(tester, const Size(800, 600));
+      testWidgets('shows the name of the network in use, measures the whole '
+          'header and shows the note only from 700 px', (tester) async {
+        _window(tester, const Size(700, 600));
         final controller = FakeAppController(
           state: const NodeState(activeNetworks: [_home]),
         );
@@ -420,12 +450,18 @@ void main() {
           _inStrip(find.text(strings.trustedNetworkLabel)),
           findsOneWidget,
         );
-        expect(tester.getSize(_strip).width, lessThan(700));
+        expect(tester.getSize(_strip).width, closeTo(700 - 32, 0.01));
         expect(find.text(strings.onlyPairedCanSend), findsNothing);
+
+        _window(tester, const Size(800, 600));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(tester.getSize(_strip).width, closeTo(800 - 32, 0.01));
+        expect(find.text(strings.onlyPairedCanSend), findsOneWidget);
 
         _window(tester, const Size(1180, 720));
         await tester.pumpAndSettle();
-        expect(tester.getSize(_strip).width, greaterThanOrEqualTo(700));
+        expect(tester.getSize(_strip).width, closeTo(1180 - 32, 0.01));
         expect(find.text(strings.onlyPairedCanSend), findsOneWidget);
       });
 

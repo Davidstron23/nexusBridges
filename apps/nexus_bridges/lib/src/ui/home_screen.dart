@@ -3,11 +3,11 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
-import 'brand/brand_mark.dart';
 import 'diagram/flow_diagram.dart';
 import 'home_layout.dart';
+import 'device_list.dart';
 import 'network_strip.dart';
-import 'pairing_dialogs.dart';
+import 'send_action.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -78,7 +78,6 @@ class _HomeScreenState extends State<HomeScreen> {
           body: Column(
             children: [
               _Header(
-                strings: strings,
                 controller: controller,
                 state: failure == null ? state : null,
               ),
@@ -146,69 +145,25 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.strings,
-    required this.controller,
-    required this.state,
-  });
+  const _Header({required this.controller, required this.state});
 
-  final AppStrings strings;
   final AppController controller;
   final NodeState? state;
 
   @override
   Widget build(BuildContext context) {
-    final colors = NbColors.of(context);
     final state = this.state;
-    final brand = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const BrandMark(size: 36),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            strings.appTitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: NbText.title.copyWith(color: colors.text),
-          ),
-        ),
-      ],
-    );
+    if (state == null) return const SizedBox.shrink();
     return LayoutBuilder(
       builder: (context, constraints) {
-        final narrow = constraints.maxWidth < _narrowHeader;
-        final strip = state == null
-            ? null
-            : NetworkStrip(
-                state: state,
-                onRescan: controller.rescan,
-                onTrust: controller.askAgain,
-                compact: narrow,
-              );
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: strip != null && narrow
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Align(alignment: Alignment.centerLeft, child: brand),
-                    const SizedBox(height: 8),
-                    strip,
-                  ],
-                )
-              : ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 60),
-                  child: Row(
-                    children: [
-                      brand,
-                      if (strip != null) ...[
-                        const SizedBox(width: 16),
-                        Expanded(child: strip),
-                      ],
-                    ],
-                  ),
-                ),
+          child: NetworkStrip(
+            state: state,
+            onRescan: controller.rescan,
+            onTrust: controller.askAgain,
+            compact: constraints.maxWidth < _narrowHeader,
+          ),
         );
       },
     );
@@ -278,6 +233,7 @@ class _Body extends StatelessWidget {
             controller: controller,
             state: state,
             tab: tab,
+            hovered: hovered,
             noticeText: noticeText,
           );
           if (!showsDiagram(width)) return column;
@@ -290,7 +246,8 @@ class _Body extends StatelessWidget {
                   child: FlowDiagram(
                     state: state,
                     hovered: hovered,
-                    onSend: (fingerprint) => controller.sendFile(fingerprint),
+                    onSend: (fingerprint) =>
+                        startSend(context, controller, fingerprint),
                     onShowDevices: () => tab.value = ColumnTab.devices,
                   ),
                 ),
@@ -311,6 +268,7 @@ class _SideColumn extends StatelessWidget {
     required this.controller,
     required this.state,
     required this.tab,
+    required this.hovered,
     required this.noticeText,
   });
 
@@ -318,6 +276,7 @@ class _SideColumn extends StatelessWidget {
   final AppController controller;
   final NodeState state;
   final ValueNotifier<ColumnTab> tab;
+  final ValueNotifier<String?> hovered;
   final String Function(Notice notice) noticeText;
 
   List<Widget> _notices() {
@@ -363,29 +322,6 @@ class _SideColumn extends StatelessWidget {
     ];
   }
 
-  Widget _devices() {
-    if (state.entries.isEmpty) {
-      return _EmptyDevices(
-        strings: strings,
-        suggestRescan: state.suggestRescan,
-        scanning: state.scanning,
-        onRescan: controller.rescan,
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final entry in state.entries)
-          _DeviceTile(
-            key: ValueKey(entry.fingerprint),
-            strings: strings,
-            controller: controller,
-            entry: entry,
-          ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = NbColors.of(context);
@@ -407,7 +343,7 @@ class _SideColumn extends StatelessWidget {
               style: NbText.bodySm.copyWith(color: colors.textWeak),
             )
           else
-            _devices(),
+            DeviceList(controller: controller, state: state, hovered: hovered),
         ];
         return SingleChildScrollView(
           child: Column(
@@ -549,211 +485,6 @@ class _TabZone extends StatelessWidget {
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-enum _RowAction { toggleMine, unpair }
-
-class _DeviceTile extends StatelessWidget {
-  const _DeviceTile({
-    required this.strings,
-    required this.controller,
-    required this.entry,
-    super.key,
-  });
-
-  final AppStrings strings;
-  final AppController controller;
-  final DeviceEntry entry;
-
-  String get _label {
-    if (entry.paired) {
-      return entry.mine ? strings.pairedMineLabel : strings.pairedForeignLabel;
-    }
-    return entry.ignored ? strings.ignoredLabel : strings.notPairedLabel;
-  }
-
-  String get _subtitle {
-    if (!entry.visible) return strings.notVisibleLabel;
-    return entry.deviceType == DeviceType.mobile
-        ? strings.deviceTypeMobile
-        : strings.deviceTypeDesktop;
-  }
-
-  Future<void> _pair(BuildContext context) async {
-    final result = await controller.pair(entry.fingerprint);
-    if (!context.mounted) return;
-    final message = switch (result) {
-      PairRequestResult.started => null,
-      PairRequestResult.alreadyInProgress => strings.pairingAlreadyInProgress,
-      PairRequestResult.tooManyPaired => strings.tooManyPaired,
-      PairRequestResult.unavailable => strings.pairUnavailable,
-    };
-    if (message == null) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _unpair(BuildContext context) async {
-    final confirmed = await confirmUnpair(context, entry.displayName);
-    if (!confirmed) return;
-    await controller.unpair(entry.fingerprint);
-  }
-
-  void _onMenu(BuildContext context, _RowAction action) {
-    switch (action) {
-      case _RowAction.toggleMine:
-        controller.setMine(entry.fingerprint, mine: !entry.mine);
-      case _RowAction.unpair:
-        _unpair(context);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bodyStyle = Theme.of(context).textTheme.bodyMedium;
-    final possiblyReplaces = entry.possiblyReplaces;
-    final actions = <Widget>[
-      if (entry.paired && entry.mismatch) ...[
-        TextButton(
-          onPressed: () => _unpair(context),
-          child: Text(strings.removeButton),
-        ),
-        FilledButton.tonal(
-          onPressed: () => _pair(context),
-          child: Text(strings.pairAgainButton),
-        ),
-      ] else if (entry.canPair)
-        FilledButton.tonal(
-          onPressed: () => _pair(context),
-          child: Text(strings.pairButton),
-        ),
-      if (entry.ignored)
-        TextButton(
-          onPressed: () => controller.unignore(entry.fingerprint),
-          child: Text(strings.unignoreButton),
-        ),
-    ];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Card.outlined(
-        margin: EdgeInsets.zero,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            LayoutBuilder(
-              builder: (context, constraints) => ListTile(
-                leading: Icon(
-                  entry.deviceType == DeviceType.mobile
-                      ? Icons.smartphone
-                      : Icons.computer,
-                ),
-                title: Text(entry.displayName),
-                subtitle: Text(_subtitle),
-                trailing: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: constraints.maxWidth * 0.4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          _label,
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (entry.paired)
-                        PopupMenuButton<_RowAction>(
-                          tooltip: strings.moreOptions,
-                          onSelected: (action) => _onMenu(context, action),
-                          itemBuilder: (_) => [
-                            PopupMenuItem(
-                              value: _RowAction.toggleMine,
-                              child: Text(
-                                entry.mine
-                                    ? strings.markAsForeign
-                                    : strings.markAsMine,
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: _RowAction.unpair,
-                              child: Text(strings.unpairButton),
-                            ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (entry.paired && entry.mismatch)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(strings.mismatchWarning, style: bodyStyle),
-              ),
-            if (possiblyReplaces != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  strings.possibleReinstall(possiblyReplaces),
-                  style: bodyStyle,
-                ),
-              ),
-            if (actions.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Wrap(spacing: 8, runSpacing: 4, children: actions),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyDevices extends StatelessWidget {
-  const _EmptyDevices({
-    required this.strings,
-    required this.suggestRescan,
-    required this.scanning,
-    required this.onRescan,
-  });
-
-  final AppStrings strings;
-  final bool suggestRescan;
-  final bool scanning;
-  final VoidCallback onRescan;
-
-  @override
-  Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 48),
-      child: Column(
-        children: [
-          if (suggestRescan) ...[
-            Text(
-              strings.rescanHint,
-              textAlign: TextAlign.center,
-              style: textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: scanning ? null : onRescan,
-              child: Text(strings.rescanButton),
-            ),
-          ] else
-            Text(
-              strings.noDevicesYet,
-              textAlign: TextAlign.center,
-              style: textTheme.bodyLarge,
-            ),
-        ],
       ),
     );
   }
