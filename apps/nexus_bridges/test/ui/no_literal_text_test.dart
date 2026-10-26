@@ -1,8 +1,23 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexus_bridges/src/ui/icons/file_icon.dart';
 
 final RegExp _literalText = RegExp(r'''Text\(\s*['"]''');
+
+const List<String> _acronyms = [
+  'PDF',
+  'XLS',
+  'DOC',
+  'PPT',
+  'ZIP',
+  'EXE',
+  '</>',
+];
+
+final RegExp _acronymLiteral = RegExp(
+  '[\'"](?:${_acronyms.map(RegExp.escape).join('|')})[\'"]',
+);
 
 List<File> _uiSources() {
   final directory = Directory(
@@ -61,6 +76,58 @@ void main() {
         for (final match in _literalText.allMatches(source)) {
           final line = '\n'.allMatches(source.substring(0, match.start)).length;
           offenders.add('${file.path}:${line + 1}');
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('E259 point 138: file type acronyms live only in fileKindLabels', () {
+    test('the pattern catches quoted acronyms and nothing else', () {
+      expect(_acronymLiteral.hasMatch("'PDF'"), isTrue);
+      expect(_acronymLiteral.hasMatch('"EXE"'), isTrue);
+      expect(_acronymLiteral.hasMatch("label: '</>',"), isTrue);
+      expect(_acronymLiteral.hasMatch("'PDFs'"), isFalse);
+      expect(_acronymLiteral.hasMatch("'a.pdf'"), isFalse);
+      expect(_acronymLiteral.hasMatch('FileKind.pdf'), isFalse);
+      expect(_acronymLiteral.hasMatch("'Doc'"), isFalse);
+    });
+
+    test('fileKindLabels holds exactly the closed list', () {
+      expect(fileKindLabels.values.toSet(), _acronyms.toSet());
+      expect(fileKindLabels, hasLength(_acronyms.length));
+    });
+
+    test('file_icon.dart writes each acronym once, inside the map', () {
+      final source = File(
+        'lib${Platform.pathSeparator}src${Platform.pathSeparator}ui'
+        '${Platform.pathSeparator}icons${Platform.pathSeparator}'
+        'file_icon.dart',
+      ).readAsStringSync();
+      final start = source.indexOf('fileKindLabels = {');
+      expect(start, isNot(-1));
+      final end = source.indexOf('};', start);
+      for (final acronym in _acronyms) {
+        final hits = RegExp('[\'"]${RegExp.escape(acronym)}[\'"]')
+            .allMatches(source)
+            .toList();
+        expect(hits, hasLength(1), reason: acronym);
+        expect(
+          hits.single.start,
+          inInclusiveRange(start, end),
+          reason: acronym,
+        );
+      }
+    });
+
+    test('no other file in lib/src/ui quotes an acronym', () {
+      final offenders = <String>[];
+      for (final file in _uiSources()) {
+        if (file.uri.pathSegments.last == 'file_icon.dart') continue;
+        final source = file.readAsStringSync();
+        for (final match in _acronymLiteral.allMatches(source)) {
+          final line = '\n'.allMatches(source.substring(0, match.start)).length;
+          offenders.add('${file.path}:${line + 1} ${match.group(0)}');
         }
       }
       expect(offenders, isEmpty);
