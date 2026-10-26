@@ -48,6 +48,11 @@ Set<String> _allowedTexts(
   List<int> ports = const [],
 }) {
   return {
+    strings.appTitle,
+    strings.activityTab,
+    strings.devicesTab,
+    strings.trustedNetworkLabel,
+    strings.onlyPairedCanSend,
     strings.devicesTitle,
     strings.noDevicesYet,
     strings.rescanHint,
@@ -77,18 +82,20 @@ void main() {
     final strings = stringsFor(code);
 
     group('[$code] title', () {
-      testWidgets('shows devicesTitle in every screen', (tester) async {
+      testWidgets('shows appTitle in the header of every screen', (
+        tester,
+      ) async {
         final controller = FakeAppController();
         await pumpHome(tester, controller, code);
-        expect(find.text(strings.devicesTitle), findsOneWidget);
+        expect(find.text(strings.appTitle), findsOneWidget);
 
         controller.emit(const NodeState(portInUse: 53530));
         await tester.pumpAndSettle();
-        expect(find.text(strings.devicesTitle), findsOneWidget);
+        expect(find.text(strings.appTitle), findsOneWidget);
 
         controller.emit(const NodeState());
         await tester.pumpAndSettle();
-        expect(find.text(strings.devicesTitle), findsOneWidget);
+        expect(find.text(strings.appTitle), findsOneWidget);
       });
     });
 
@@ -515,7 +522,7 @@ void main() {
         await pumpHome(tester, controller, code);
 
         expect(find.text(strings.rescanHint), findsOneWidget);
-        expect(find.text(strings.rescanButton), findsOneWidget);
+        expect(find.text(strings.rescanButton), findsNWidgets(2));
         expect(find.text(strings.noDevicesYet), findsNothing);
       });
 
@@ -525,7 +532,7 @@ void main() {
         );
         await pumpHome(tester, controller, code);
 
-        await tester.tap(find.text(strings.rescanButton));
+        await tester.tap(find.text(strings.rescanButton).last);
         await tester.pumpAndSettle();
 
         expect(controller.calls, ['rescan']);
@@ -537,7 +544,7 @@ void main() {
 
         expect(find.text(strings.noDevicesYet), findsOneWidget);
         expect(find.text(strings.rescanHint), findsNothing);
-        expect(find.text(strings.rescanButton), findsNothing);
+        expect(find.text(strings.rescanButton), findsOneWidget);
       });
 
       testWidgets('a non-empty list never shows the hint', (tester) async {
@@ -552,7 +559,7 @@ void main() {
 
         expect(find.text('PC'), findsOneWidget);
         expect(find.text(strings.rescanHint), findsNothing);
-        expect(find.text(strings.rescanButton), findsNothing);
+        expect(find.text(strings.rescanButton), findsOneWidget);
         expect(find.text(strings.noDevicesYet), findsNothing);
       });
     });

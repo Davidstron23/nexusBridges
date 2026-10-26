@@ -7,7 +7,7 @@ import 'fake_app_controller.dart';
 
 const String peerShort = 'ABCD1234';
 final String peerFingerprint = fingerprintOf(peerShort);
-const String peerName = 'Portátil de Ana';
+const String peerName = 'Port\u00E1til de Ana';
 const String rawCode = '482913';
 const String formattedCode = '482 913';
 const String namesakeName = 'PC';
@@ -117,6 +117,10 @@ Set<String> allowedTexts(
 }) {
   return {
     s.devicesTitle,
+    s.activityTab,
+    s.devicesTab,
+    s.trustedNetworkLabel,
+    s.onlyPairedCanSend,
     s.noDevicesYet,
     s.rescanHint,
     s.rescanButton,

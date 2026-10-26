@@ -3,120 +3,119 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
+import 'brand/brand_mark.dart';
+import 'diagram/flow_diagram.dart';
+import 'home_layout.dart';
+import 'network_strip.dart';
 import 'pairing_dialogs.dart';
+import 'theme/app_theme.dart';
+import 'theme/components.dart';
+import 'theme/tokens.dart';
 
-class HomeScreen extends StatelessWidget {
+const double _narrowHeader = 600;
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen(this.controller, {super.key});
 
   final AppController controller;
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final ValueNotifier<ColumnTab> _tab = ValueNotifier(ColumnTab.devices);
+  final ValueNotifier<String?> _hovered = ValueNotifier(null);
+  NodeState? _previous;
+  bool _tabSet = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_syncTab);
+    _syncTab();
+  }
+
+  @override
+  void didUpdateWidget(HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_syncTab);
+      widget.controller.addListener(_syncTab);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_syncTab);
+    _tab.dispose();
+    _hovered.dispose();
+    super.dispose();
+  }
+
+  void _syncTab() {
+    final state = widget.controller.state;
+    if (state == null) return;
+    if (!_tabSet) {
+      _tab.value = hasActivity(state) ? ColumnTab.activity : ColumnTab.devices;
+      _tabSet = true;
+    } else if (shouldShowActivity(_previous, state)) {
+      _tab.value = ColumnTab.activity;
+    }
+    _previous = state;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
         final strings = AppStringsDelegate.of(context);
+        final state = controller.state;
+        final failure = _failureMessage(strings);
         return Scaffold(
-          appBar: AppBar(title: Text(strings.devicesTitle)),
-          body: Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720),
-              child: _content(strings),
-            ),
+          body: Column(
+            children: [
+              _Header(
+                strings: strings,
+                controller: controller,
+                state: failure == null ? state : null,
+              ),
+              Expanded(
+                child: failure != null
+                    ? _MessageWithRetry(
+                        message: failure,
+                        retryLabel: strings.retryButton,
+                        onRetry: controller.retry,
+                      )
+                    : _Body(
+                        strings: strings,
+                        controller: controller,
+                        state: state!,
+                        tab: _tab,
+                        hovered: _hovered,
+                        noticeText: (notice) => _noticeText(strings, notice),
+                      ),
+              ),
+            ],
           ),
         );
       },
     );
   }
 
-  Widget _content(AppStrings strings) {
+  String? _failureMessage(AppStrings strings) {
+    final controller = widget.controller;
     final state = controller.state;
     if (state == null ||
         controller.startFailed ||
         state.identityStatus == IdentityStatus.failed) {
-      return _MessageWithRetry(
-        message: strings.identityFailed,
-        retryLabel: strings.retryButton,
-        onRetry: controller.retry,
-      );
+      return strings.identityFailed;
     }
     final port = state.portInUse;
-    if (port != null) {
-      return _MessageWithRetry(
-        message: strings.portInUse(port),
-        retryLabel: strings.retryButton,
-        onRetry: controller.retry,
-      );
-    }
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (state.paused)
-          _Notice(
-            message: strings.pausedBanner,
-            actions: [
-              for (final network in state.pausedNetworks)
-                TextButton(
-                  onPressed: () => controller.askAgain(network.networkId),
-                  child: Text(strings.trustNetworkButton(network.networkName)),
-                ),
-            ],
-          ),
-        if (state.decisionNotSaved) _Notice(message: strings.decisionNotSaved),
-        if (state.identityStatus == IdentityStatus.reset &&
-            !controller.identityWarningDismissed)
-          _Notice(
-            message: strings.identityResetWarning,
-            actions: [
-              TextButton(
-                onPressed: controller.dismissIdentityWarning,
-                child: Text(strings.closeButton),
-              ),
-            ],
-          ),
-        for (final notice in state.notices)
-          _Notice(
-            key: ValueKey('notice-${notice.id}'),
-            message: _noticeText(strings, notice),
-            actions: [
-              if (notice.canRetry)
-                TextButton(
-                  onPressed: controller.retrySave,
-                  child: Text(strings.retryButton),
-                ),
-              TextButton(
-                onPressed: () => controller.dismissNotice(notice.id),
-                child: Text(strings.closeButton),
-              ),
-            ],
-          ),
-        if (state.unsavedChanges && !state.notices.any((n) => n.canRetry))
-          _Notice(
-            message: strings.noticeChangeNotSaved,
-            actions: [
-              TextButton(
-                onPressed: controller.retrySave,
-                child: Text(strings.retryButton),
-              ),
-            ],
-          ),
-        if (state.entries.isEmpty)
-          _EmptyDevices(
-            strings: strings,
-            suggestRescan: state.suggestRescan,
-            onRescan: controller.rescan,
-          )
-        else
-          for (final entry in state.entries)
-            _DeviceTile(
-              key: ValueKey(entry.fingerprint),
-              strings: strings,
-              controller: controller,
-              entry: entry,
-            ),
-      ],
-    );
+    if (port != null) return strings.portInUse(port);
+    return null;
   }
 
   String _noticeText(AppStrings strings, Notice notice) {
@@ -146,6 +145,76 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.strings,
+    required this.controller,
+    required this.state,
+  });
+
+  final AppStrings strings;
+  final AppController controller;
+  final NodeState? state;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final state = this.state;
+    final brand = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const BrandMark(size: 36),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            strings.appTitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: NbText.title.copyWith(color: colors.text),
+          ),
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < _narrowHeader;
+        final strip = state == null
+            ? null
+            : NetworkStrip(
+                state: state,
+                onRescan: controller.rescan,
+                onTrust: controller.askAgain,
+                compact: narrow,
+              );
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: strip != null && narrow
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Align(alignment: Alignment.centerLeft, child: brand),
+                    const SizedBox(height: 8),
+                    strip,
+                  ],
+                )
+              : ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 60),
+                  child: Row(
+                    children: [
+                      brand,
+                      if (strip != null) ...[
+                        const SizedBox(width: 16),
+                        Expanded(child: strip),
+                      ],
+                    ],
+                  ),
+                ),
+        );
+      },
+    );
+  }
+}
+
 class _MessageWithRetry extends StatelessWidget {
   const _MessageWithRetry({
     required this.message,
@@ -159,6 +228,7 @@ class _MessageWithRetry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -168,7 +238,7 @@ class _MessageWithRetry extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.titleMedium,
+              style: NbText.title.copyWith(color: colors.text),
             ),
             const SizedBox(height: 16),
             FilledButton(onPressed: onRetry, child: Text(retryLabel)),
@@ -179,29 +249,304 @@ class _MessageWithRetry extends StatelessWidget {
   }
 }
 
-class _Notice extends StatelessWidget {
-  const _Notice({required this.message, this.actions = const [], super.key});
+class _Body extends StatelessWidget {
+  const _Body({
+    required this.strings,
+    required this.controller,
+    required this.state,
+    required this.tab,
+    required this.hovered,
+    required this.noticeText,
+  });
 
-  final String message;
-  final List<Widget> actions;
+  final AppStrings strings;
+  final AppController controller;
+  final NodeState state;
+  final ValueNotifier<ColumnTab> tab;
+  final ValueNotifier<String?> hovered;
+  final String Function(Notice notice) noticeText;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Card.filled(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final column = _SideColumn(
+            strings: strings,
+            controller: controller,
+            state: state,
+            tab: tab,
+            noticeText: noticeText,
+          );
+          if (!showsDiagram(width)) return column;
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(message),
-              if (actions.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, runSpacing: 4, children: actions),
+              Expanded(
+                child: NbCard(
+                  padding: EdgeInsets.zero,
+                  child: FlowDiagram(
+                    state: state,
+                    hovered: hovered,
+                    onSend: (fingerprint) => controller.sendFile(fingerprint),
+                    onShowDevices: () => tab.value = ColumnTab.devices,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              SizedBox(width: columnWidthFor(width), child: column),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SideColumn extends StatelessWidget {
+  const _SideColumn({
+    required this.strings,
+    required this.controller,
+    required this.state,
+    required this.tab,
+    required this.noticeText,
+  });
+
+  final AppStrings strings;
+  final AppController controller;
+  final NodeState state;
+  final ValueNotifier<ColumnTab> tab;
+  final String Function(Notice notice) noticeText;
+
+  List<Widget> _notices() {
+    return [
+      if (state.decisionNotSaved) NoticeCard(message: strings.decisionNotSaved),
+      if (state.identityStatus == IdentityStatus.reset &&
+          !controller.identityWarningDismissed)
+        NoticeCard(
+          message: strings.identityResetWarning,
+          actions: [
+            TextButton(
+              onPressed: controller.dismissIdentityWarning,
+              child: Text(strings.closeButton),
+            ),
+          ],
+        ),
+      for (final notice in state.notices)
+        NoticeCard(
+          key: ValueKey('notice-${notice.id}'),
+          message: noticeText(notice),
+          actions: [
+            if (notice.canRetry)
+              TextButton(
+                onPressed: controller.retrySave,
+                child: Text(strings.retryButton),
+              ),
+            TextButton(
+              onPressed: () => controller.dismissNotice(notice.id),
+              child: Text(strings.closeButton),
+            ),
+          ],
+        ),
+      if (state.unsavedChanges && !state.notices.any((n) => n.canRetry))
+        NoticeCard(
+          message: strings.noticeChangeNotSaved,
+          actions: [
+            TextButton(
+              onPressed: controller.retrySave,
+              child: Text(strings.retryButton),
+            ),
+          ],
+        ),
+    ];
+  }
+
+  Widget _devices() {
+    if (state.entries.isEmpty) {
+      return _EmptyDevices(
+        strings: strings,
+        suggestRescan: state.suggestRescan,
+        scanning: state.scanning,
+        onRescan: controller.rescan,
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final entry in state.entries)
+          _DeviceTile(
+            key: ValueKey(entry.fingerprint),
+            strings: strings,
+            controller: controller,
+            entry: entry,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final pairedCount = state.entries.where((entry) => entry.paired).length;
+    return ValueListenableBuilder<ColumnTab>(
+      valueListenable: tab,
+      builder: (context, current, _) {
+        final blocks = <Widget>[
+          ..._notices(),
+          _ColumnTabs(
+            strings: strings,
+            current: current,
+            pairedCount: pairedCount,
+            onSelect: (value) => tab.value = value,
+          ),
+          if (current == ColumnTab.activity)
+            Text(
+              strings.activityEmpty,
+              style: NbText.bodySm.copyWith(color: colors.textWeak),
+            )
+          else
+            _devices(),
+        ];
+        return SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < blocks.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                blocks[i],
               ],
             ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ColumnTabs extends StatelessWidget {
+  const _ColumnTabs({
+    required this.strings,
+    required this.current,
+    required this.pairedCount,
+    required this.onSelect,
+  });
+
+  final AppStrings strings;
+  final ColumnTab current;
+  final int pairedCount;
+  final ValueChanged<ColumnTab> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceWeak,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(3),
+        child: Row(
+          children: [
+            Expanded(
+              child: _TabZone(
+                label: strings.activityTab,
+                active: current == ColumnTab.activity,
+                onTap: () => onSelect(ColumnTab.activity),
+              ),
+            ),
+            Expanded(
+              child: _TabZone(
+                label: strings.devicesTab,
+                active: current == ColumnTab.devices,
+                badge: pairedCount > 0 ? pairedCount : null,
+                onTap: () => onSelect(ColumnTab.devices),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TabZone extends StatelessWidget {
+  const _TabZone({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.badge,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  final int? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final badge = this.badge;
+    return Semantics(
+      button: true,
+      selected: active,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 32,
+        decoration: BoxDecoration(
+          color: active ? colors.card : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: colors.nodeShadow,
+                    offset: const Offset(0, 1),
+                    blurRadius: 2,
+                  ),
+                ]
+              : null,
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: NbText.button.copyWith(
+                        color: active ? colors.text : colors.textWeak,
+                      ),
+                    ),
+                  ),
+                  if (badge != null) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      height: 18,
+                      constraints: const BoxConstraints(minWidth: 18),
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: colors.primaryWeak,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        badge.toString(),
+                        style: NbText.badge.copyWith(color: colors.primaryInk),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -375,11 +720,13 @@ class _EmptyDevices extends StatelessWidget {
   const _EmptyDevices({
     required this.strings,
     required this.suggestRescan,
+    required this.scanning,
     required this.onRescan,
   });
 
   final AppStrings strings;
   final bool suggestRescan;
+  final bool scanning;
   final VoidCallback onRescan;
 
   @override
@@ -397,7 +744,7 @@ class _EmptyDevices extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             FilledButton.tonal(
-              onPressed: onRescan,
+              onPressed: scanning ? null : onRescan,
               child: Text(strings.rescanButton),
             ),
           ] else

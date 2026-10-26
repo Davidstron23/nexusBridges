@@ -206,35 +206,34 @@ class FakeAppController extends AppController {
   }
 }
 
+Widget homeApp(AppController controller, String languageCode) {
+  return MaterialApp(
+    locale: Locale(languageCode),
+    supportedLocales: const [Locale('en'), Locale('es')],
+    localizationsDelegates: const [
+      AppStringsDelegate(),
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    theme: buildTheme(Brightness.light),
+    darkTheme: buildTheme(Brightness.dark),
+    themeMode: ThemeMode.system,
+    themeAnimationDuration: Duration.zero,
+    home: NetworkPromptHost(
+      controller: controller,
+      child: PairingHost(controller: controller, child: HomeScreen(controller)),
+    ),
+  );
+}
+
 Future<void> pumpHome(
   WidgetTester tester,
   AppController controller,
   String languageCode, {
   bool settle = true,
 }) async {
-  await tester.pumpWidget(
-    MaterialApp(
-      locale: Locale(languageCode),
-      supportedLocales: const [Locale('en'), Locale('es')],
-      localizationsDelegates: const [
-        AppStringsDelegate(),
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
-      themeMode: ThemeMode.system,
-      themeAnimationDuration: Duration.zero,
-      home: NetworkPromptHost(
-        controller: controller,
-        child: PairingHost(
-          controller: controller,
-          child: HomeScreen(controller),
-        ),
-      ),
-    ),
-  );
+  await tester.pumpWidget(homeApp(controller, languageCode));
   if (settle) {
     await tester.pumpAndSettle();
   } else {
@@ -271,9 +270,13 @@ DiscoveredDevice deviceWith({
   );
 }
 
+const String brandName = 'NexusBridges';
+
+final RegExp _digitsOnly = RegExp(r'^\d+$');
+
 List<String> visibleTexts(WidgetTester tester) {
   return [
     for (final text in tester.widgetList<Text>(find.byType(Text)))
       text.data ?? text.textSpan?.toPlainText() ?? '',
-  ];
+  ].where((text) => text != brandName && !_digitsOnly.hasMatch(text)).toList();
 }
