@@ -5,6 +5,10 @@ import 'package:nexus_bridges/src/ui/icons/file_icon.dart';
 
 final RegExp _literalText = RegExp(r'''Text\(\s*['"]''');
 
+final RegExp _literalSpan = RegExp(
+  r'''TextSpan\(\s*(?:\w+:\s*[^,()]+,\s*)*text:\s*['"]''',
+);
+
 const List<String> _acronyms = [
   'PDF',
   'XLS',
@@ -74,6 +78,59 @@ void main() {
       for (final file in _uiSources()) {
         final source = file.readAsStringSync();
         for (final match in _literalText.allMatches(source)) {
+          final line = '\n'.allMatches(source.substring(0, match.start)).length;
+          offenders.add('${file.path}:${line + 1}');
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('point 124: no literal TextSpan in lib/src/ui', () {
+    test('the pattern catches literal spans and lets variables through', () {
+      expect(_literalSpan.hasMatch("TextSpan(text: 'Hola')"), isTrue);
+      expect(_literalSpan.hasMatch('TextSpan(text: "Hola")'), isTrue);
+      expect(
+        _literalSpan.hasMatch("const TextSpan(\n  text: 'Hola',\n)"),
+        isTrue,
+      );
+      expect(_literalSpan.hasMatch("TextSpan(text:'Hola')"), isTrue);
+      expect(_literalSpan.hasMatch("TextSpan(text: '''Hola''')"), isTrue);
+      expect(
+        _literalSpan.hasMatch("TextSpan(style: style, text: 'Hola')"),
+        isTrue,
+      );
+      expect(
+        _literalSpan.hasMatch(
+          "TextSpan(\n  style: NbText.title,\n  text: 'Hola',\n)",
+        ),
+        isTrue,
+      );
+      expect(_literalSpan.hasMatch('TextSpan(text: label, style: s)'), isFalse);
+      expect(
+        _literalSpan.hasMatch('TextSpan(text: strings.appTitle)'),
+        isFalse,
+      );
+      expect(
+        _literalSpan.hasMatch('TextSpan(style: style, text: scene.title)'),
+        isFalse,
+      );
+      expect(_literalSpan.hasMatch('TextSpan(children: spans)'), isFalse);
+    });
+
+    test('lib/src/ui does build TextSpans, so the check is not empty', () {
+      final spans = [
+        for (final file in _uiSources())
+          ...RegExp(r'TextSpan\(').allMatches(file.readAsStringSync()),
+      ];
+      expect(spans, isNotEmpty);
+    });
+
+    test('no file in lib/src/ui builds a TextSpan from a literal', () {
+      final offenders = <String>[];
+      for (final file in _uiSources()) {
+        final source = file.readAsStringSync();
+        for (final match in _literalSpan.allMatches(source)) {
           final line = '\n'.allMatches(source.substring(0, match.start)).length;
           offenders.add('${file.path}:${line + 1}');
         }
