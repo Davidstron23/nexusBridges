@@ -27,12 +27,14 @@ final class NetworkPlan {
     required this.active,
     required this.prompts,
     required this.pausedNetworks,
+    required this.activeNetworks,
     required this.paused,
   });
 
   final List<ActiveInterface> active;
   final List<NetworkPrompt> prompts;
   final List<NetworkPrompt> pausedNetworks;
+  final List<NetworkPrompt> activeNetworks;
   final bool paused;
 }
 
@@ -51,6 +53,17 @@ NetworkPlan reconcileNetworks({
 }) {
   final states = evaluateInterfaces(adapters, decisionOf);
   final active = activeOf(states);
+  final adapterById = {for (final s in states) s.adapter.id: s.adapter};
+  final activeNetworks = <NetworkPrompt>[];
+  final seenNetworks = <String>{};
+  for (final interface in active) {
+    final adapter = adapterById[interface.adapterId];
+    final networkId = adapter?.networkId;
+    if (adapter == null || networkId == null) continue;
+    if (seenNetworks.add(networkId)) {
+      activeNetworks.add(NetworkPrompt(networkId, _promptName(adapter)));
+    }
+  }
 
   final firstOfNetwork = <String, InterfaceState>{};
   for (final state in states) {
@@ -78,6 +91,7 @@ NetworkPlan reconcileNetworks({
     active: active,
     prompts: prompts,
     pausedNetworks: pausedNetworks,
+    activeNetworks: activeNetworks,
     paused: active.isEmpty,
   );
 }

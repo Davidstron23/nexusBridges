@@ -196,6 +196,7 @@ final class NodeState {
     this.prompts = const [],
     this.paused = false,
     this.pausedNetworks = const [],
+    this.activeNetworks = const [],
     this.devices = const [],
     this.displayNames = const {},
     this.suggestRescan = false,
@@ -224,6 +225,7 @@ final class NodeState {
   final List<NetworkPrompt> prompts;
   final bool paused;
   final List<NetworkPrompt> pausedNetworks;
+  final List<NetworkPrompt> activeNetworks;
   final List<DiscoveredDevice> devices;
   final Map<String, String> displayNames;
   final bool suggestRescan;
