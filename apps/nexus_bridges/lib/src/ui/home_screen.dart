@@ -3,6 +3,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
+import 'activity_cards.dart';
 import 'diagram/flow_diagram.dart';
 import 'home_layout.dart';
 import 'device_list.dart';
@@ -324,7 +325,6 @@ class _SideColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = NbColors.of(context);
     final pairedCount = state.entries.where((entry) => entry.paired).length;
     return ValueListenableBuilder<ColumnTab>(
       valueListenable: tab,
@@ -338,10 +338,7 @@ class _SideColumn extends StatelessWidget {
             onSelect: (value) => tab.value = value,
           ),
           if (current == ColumnTab.activity)
-            Text(
-              strings.activityEmpty,
-              style: NbText.bodySm.copyWith(color: colors.textWeak),
-            )
+            ActivityPanel(controller: controller, state: state)
           else
             DeviceList(controller: controller, state: state, hovered: hovered),
         ];
