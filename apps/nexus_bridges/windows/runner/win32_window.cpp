@@ -1,6 +1,7 @@
 #include "win32_window.h"
 
 #include <dwmapi.h>
+#include <cwchar>
 #include <flutter_windows.h>
 
 #include "resource.h"
@@ -17,6 +18,9 @@ namespace {
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+
+constexpr int kMinWindowWidth = 760;
+constexpr int kMinWindowHeight = 520;
 
 /// Registry key for app theme preference.
 ///
@@ -212,6 +216,29 @@ Win32Window::MessageHandler(HWND hwnd,
         SetFocus(child_content_);
       }
       return 0;
+
+    case WM_GETMINMAXINFO: {
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      const UINT dpi = FlutterDesktopGetDpiForMonitor(
+          MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
+      const double scale = dpi / 96.0;
+      RECT frame = {0, 0, Scale(kMinWindowWidth, scale),
+                    Scale(kMinWindowHeight, scale)};
+      AdjustWindowRectExForDpi(
+          &frame, static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_STYLE)), FALSE,
+          static_cast<DWORD>(GetWindowLongPtr(hwnd, GWL_EXSTYLE)), dpi);
+      info->ptMinTrackSize.x = frame.right - frame.left;
+      info->ptMinTrackSize.y = frame.bottom - frame.top;
+      return 0;
+    }
+
+    case WM_SETTINGCHANGE:
+      if (lparam != 0 &&
+          wcscmp(reinterpret_cast<LPCWSTR>(lparam), L"ImmersiveColorSet") ==
+              0) {
+        UpdateTheme(hwnd);
+      }
+      break;
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);

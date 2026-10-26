@@ -616,4 +616,83 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String get closeAndCancelButton => 'Close and cancel';
+
+  @override
+  String get trustedNetworkLabel => 'Trusted network';
+
+  @override
+  String get onlyPairedCanSend => 'Only your paired devices can send you files';
+
+  @override
+  String get activityTab => 'Activity';
+
+  @override
+  String get devicesTab => 'Devices';
+
+  @override
+  String get activityEmpty =>
+      "Here you'll see the send in progress and the last file you sent or "
+      'received.';
+
+  @override
+  String get sectionUnpaired => 'Unpaired';
+
+  @override
+  String get chipMine => 'Mine';
+
+  @override
+  String get chipForeign => "Someone else's";
+
+  @override
+  String get visibleLabel => 'Visible';
+
+  @override
+  String get diagramTitle => 'My network';
+
+  @override
+  String diagramCount(int total, int visible) =>
+      "${total == 1 ? '1 device' : '$total devices'} · $visible visible";
+
+  @override
+  String thisDeviceCaption(String short) =>
+      short.isEmpty ? 'this device' : '$short · this device';
+
+  @override
+  String get chipPreparing => 'Preparing';
+
+  @override
+  String get chipWaiting => 'Waiting';
+
+  @override
+  String get chipInProgress => 'In progress';
+
+  @override
+  String get chipChecking => 'Checking';
+
+  @override
+  String get chipDelivered => 'Delivered';
+
+  @override
+  String get chipSaved => 'Saved';
+
+  @override
+  String get chipRejected => 'Rejected';
+
+  @override
+  String get chipCancelled => 'Cancelled';
+
+  @override
+  String get chipFailed => 'Failed';
+
+  @override
+  String get chipUnconfirmed => 'Unconfirmed';
+
+  @override
+  String foreignSenderNote(String short) =>
+      "It's someone else's device (fingerprint $short). Accept only if you "
+      'were expecting it.';
+
+  @override
+  String get incomingExpiresNote =>
+      "If you don't answer, this request expires after a minute.";
 }

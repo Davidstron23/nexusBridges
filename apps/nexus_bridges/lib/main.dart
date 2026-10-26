@@ -10,6 +10,7 @@ import 'src/ui/exit_flow.dart';
 import 'src/ui/home_screen.dart';
 import 'src/ui/network_prompt_dialog.dart';
 import 'src/ui/pairing_dialogs.dart';
+import 'src/ui/theme/app_theme.dart';
 
 const String windowClassName = 'FLUTTER_RUNNER_WIN32_WINDOW';
 const String windowTitle = 'NexusBridges';
@@ -73,9 +74,10 @@ class _NexusBridgesAppState extends State<NexusBridgesApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      ),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
+      themeAnimationDuration: Duration.zero,
       home: NetworkPromptHost(
         controller: widget.controller,
         child: PairingHost(

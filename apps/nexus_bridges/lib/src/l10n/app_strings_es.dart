@@ -629,4 +629,83 @@ final class AppStringsEs implements AppStrings {
 
   @override
   String get closeAndCancelButton => 'Cerrar y cancelar';
+
+  @override
+  String get trustedNetworkLabel => 'Red de confianza';
+
+  @override
+  String get onlyPairedCanSend =>
+      'Solo tus equipos vinculados pueden enviarte archivos';
+
+  @override
+  String get activityTab => 'Actividad';
+
+  @override
+  String get devicesTab => 'Equipos';
+
+  @override
+  String get activityEmpty =>
+      'Aquí verás el envío en curso y el último archivo que hayas enviado o '
+      'recibido.';
+
+  @override
+  String get sectionUnpaired => 'Sin vincular';
+
+  @override
+  String get chipMine => 'Mío';
+
+  @override
+  String get chipForeign => 'Ajeno';
+
+  @override
+  String get visibleLabel => 'A la vista';
+
+  @override
+  String get diagramTitle => 'Mi red';
+
+  @override
+  String diagramCount(int total, int visible) =>
+      "${total == 1 ? '1 equipo' : '$total equipos'} · $visible a la vista";
+
+  @override
+  String thisDeviceCaption(String short) =>
+      short.isEmpty ? 'este equipo' : '$short · este equipo';
+
+  @override
+  String get chipPreparing => 'Preparando';
+
+  @override
+  String get chipWaiting => 'Esperando';
+
+  @override
+  String get chipInProgress => 'En curso';
+
+  @override
+  String get chipChecking => 'Comprobando';
+
+  @override
+  String get chipDelivered => 'Entregado';
+
+  @override
+  String get chipSaved => 'Guardado';
+
+  @override
+  String get chipRejected => 'Rechazado';
+
+  @override
+  String get chipCancelled => 'Cancelado';
+
+  @override
+  String get chipFailed => 'Fallido';
+
+  @override
+  String get chipUnconfirmed => 'Sin confirmar';
+
+  @override
+  String foreignSenderNote(String short) =>
+      'Es un equipo ajeno (huella $short). Acepta solo si lo esperabas.';
+
+  @override
+  String get incomingExpiresNote =>
+      'Si no respondes, el aviso caduca al cabo de un minuto.';
 }

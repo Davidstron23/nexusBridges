@@ -155,6 +155,78 @@ final Map<String, _Text> _texts = {
   'closeDuringTransferBody': (s) => s.closeDuringTransferBody,
   'keepOpenButton': (s) => s.keepOpenButton,
   'closeAndCancelButton': (s) => s.closeAndCancelButton,
+  'trustedNetworkLabel': (s) => s.trustedNetworkLabel,
+  'onlyPairedCanSend': (s) => s.onlyPairedCanSend,
+  'activityTab': (s) => s.activityTab,
+  'devicesTab': (s) => s.devicesTab,
+  'activityEmpty': (s) => s.activityEmpty,
+  'sectionUnpaired': (s) => s.sectionUnpaired,
+  'chipMine': (s) => s.chipMine,
+  'chipForeign': (s) => s.chipForeign,
+  'visibleLabel': (s) => s.visibleLabel,
+  'diagramTitle': (s) => s.diagramTitle,
+  'diagramCount': (s) => s.diagramCount(3, 2),
+  'thisDeviceCaption': (s) => s.thisDeviceCaption(_sampleShort),
+  'chipPreparing': (s) => s.chipPreparing,
+  'chipWaiting': (s) => s.chipWaiting,
+  'chipInProgress': (s) => s.chipInProgress,
+  'chipChecking': (s) => s.chipChecking,
+  'chipDelivered': (s) => s.chipDelivered,
+  'chipSaved': (s) => s.chipSaved,
+  'chipRejected': (s) => s.chipRejected,
+  'chipCancelled': (s) => s.chipCancelled,
+  'chipFailed': (s) => s.chipFailed,
+  'chipUnconfirmed': (s) => s.chipUnconfirmed,
+  'foreignSenderNote': (s) => s.foreignSenderNote(_sampleShort),
+  'incomingExpiresNote': (s) => s.incomingExpiresNote,
+};
+
+final Map<String, (String, String)> _expectedDesign = {
+  'trustedNetworkLabel': ('Trusted network', 'Red de confianza'),
+  'onlyPairedCanSend': (
+    'Only your paired devices can send you files',
+    'Solo tus equipos vinculados pueden enviarte archivos',
+  ),
+  'activityTab': ('Activity', 'Actividad'),
+  'devicesTab': ('Devices', 'Equipos'),
+  'activityEmpty': (
+    "Here you'll see the send in progress and the last file you sent or "
+        'received.',
+    'Aqu\u00ed ver\u00e1s el env\u00edo en curso y el \u00faltimo archivo '
+        'que hayas enviado o recibido.',
+  ),
+  'sectionUnpaired': ('Unpaired', 'Sin vincular'),
+  'chipMine': ('Mine', 'M\u00edo'),
+  'chipForeign': ("Someone else's", 'Ajeno'),
+  'visibleLabel': ('Visible', 'A la vista'),
+  'diagramTitle': ('My network', 'Mi red'),
+  'diagramCount': (
+    '3 devices \u00b7 2 visible',
+    '3 equipos \u00b7 2 a la vista',
+  ),
+  'thisDeviceCaption': (
+    'ABCD1234 \u00b7 this device',
+    'ABCD1234 \u00b7 este equipo',
+  ),
+  'chipPreparing': ('Preparing', 'Preparando'),
+  'chipWaiting': ('Waiting', 'Esperando'),
+  'chipInProgress': ('In progress', 'En curso'),
+  'chipChecking': ('Checking', 'Comprobando'),
+  'chipDelivered': ('Delivered', 'Entregado'),
+  'chipSaved': ('Saved', 'Guardado'),
+  'chipRejected': ('Rejected', 'Rechazado'),
+  'chipCancelled': ('Cancelled', 'Cancelado'),
+  'chipFailed': ('Failed', 'Fallido'),
+  'chipUnconfirmed': ('Unconfirmed', 'Sin confirmar'),
+  'foreignSenderNote': (
+    "It's someone else's device (fingerprint ABCD1234). Accept only if you "
+        'were expecting it.',
+    'Es un equipo ajeno (huella ABCD1234). Acepta solo si lo esperabas.',
+  ),
+  'incomingExpiresNote': (
+    "If you don't answer, this request expires after a minute.",
+    'Si no respondes, el aviso caduca al cabo de un minuto.',
+  ),
 };
 
 const String _sampleFile = 'informe anual.pdf';
@@ -940,10 +1012,12 @@ void main() {
   final spanish = AppStringsEs();
 
   group('RF-62: every text exists in both languages', () {
-    test('the table covers the 138 texts of the plans of 001 to 005: the 84 '
-        'of 001, 002 and 003 and the 54 of the transfer (E145)', () {
-      expect(_texts.length, 138);
+    test('the table covers the 162 texts of the plans of 001 to 005: the 84 '
+        'of 001, 002 and 003, the 54 of the transfer (E145) and the 24 of '
+        'the design (E256)', () {
+      expect(_texts.length, 162);
       expect(_expectedTransfer.length, 54);
+      expect(_expectedDesign.length, 24);
       expect(
         _expected.keys.toSet().intersection(_expectedPairing.keys.toSet()),
         isEmpty,
@@ -956,12 +1030,57 @@ void main() {
         }),
         isEmpty,
       );
+      expect(
+        _expectedDesign.keys.toSet().intersection({
+          ..._expected.keys,
+          ..._expectedPairing.keys,
+          ..._expectedTransfer.keys,
+          ..._meaningOnly,
+        }),
+        isEmpty,
+      );
       expect({
         ..._expected.keys,
         ..._expectedPairing.keys,
         ..._expectedTransfer.keys,
+        ..._expectedDesign.keys,
         ..._meaningOnly,
       }, _texts.keys.toSet());
+    });
+
+    for (final entry in _expectedDesign.entries) {
+      test('${entry.key} matches the exact text of the design points 122, '
+          '140 and 151 (E256)', () {
+        final text = _texts[entry.key]!;
+        expect(text(english), entry.value.$1);
+        expect(text(spanish), entry.value.$2);
+      });
+    }
+
+    test('the design texts differ from each other in each language '
+        '(E256)', () {
+      for (final strings in [english, spanish]) {
+        final seen = <String, String>{};
+        for (final key in _expectedDesign.keys) {
+          final text = _texts[key]!(strings);
+          expect(seen[text], isNull, reason: '$key repeats ${seen[text]}');
+          seen[text] = key;
+        }
+      }
+    });
+
+    test('the design texts reuse no older key with the same text '
+        '(E256)', () {
+      for (final strings in [english, spanish]) {
+        final older = {
+          for (final key in _texts.keys)
+            if (!_expectedDesign.containsKey(key)) _texts[key]!(strings),
+        };
+        expect(older, hasLength(greaterThan(130)));
+        for (final key in _expectedDesign.keys) {
+          expect(older, isNot(contains(_texts[key]!(strings))), reason: key);
+        }
+      }
     });
 
     for (final entry in _expectedTransfer.entries) {
@@ -1302,6 +1421,52 @@ void main() {
           expect(entry.value(other, odd), contains(odd), reason: entry.key);
           expect(entry.value(strings, odd), isNot(entry.value(other, odd)));
         }
+      });
+    }
+  });
+
+  group('E256: design texts with arguments', () {
+    test('diagramCount is singular with one device and plural with more', () {
+      expect(english.diagramCount(1, 0), '1 device \u00b7 0 visible');
+      expect(spanish.diagramCount(1, 0), '1 equipo \u00b7 0 a la vista');
+      expect(english.diagramCount(3, 2), '3 devices \u00b7 2 visible');
+      expect(spanish.diagramCount(3, 2), '3 equipos \u00b7 2 a la vista');
+    });
+
+    test('diagramCount is plural with no devices and keeps both '
+        'numbers', () {
+      expect(english.diagramCount(0, 0), '0 devices \u00b7 0 visible');
+      expect(spanish.diagramCount(0, 0), '0 equipos \u00b7 0 a la vista');
+      expect(english.diagramCount(12, 7), '12 devices \u00b7 7 visible');
+      expect(spanish.diagramCount(12, 7), '12 equipos \u00b7 7 a la vista');
+      expect(english.diagramCount(1, 1), '1 device \u00b7 1 visible');
+      expect(spanish.diagramCount(1, 1), '1 equipo \u00b7 1 a la vista');
+    });
+
+    test('thisDeviceCaption with an empty fingerprint gives only "this '
+        'device", without separator (point 140)', () {
+      expect(english.thisDeviceCaption(''), 'this device');
+      expect(spanish.thisDeviceCaption(''), 'este equipo');
+      for (final strings in [english, spanish]) {
+        expect(strings.thisDeviceCaption(''), isNot(contains('\u00b7')));
+      }
+    });
+
+    test('thisDeviceCaption puts the short fingerprint first', () {
+      expect(english.thisDeviceCaption('1A2B'), '1A2B \u00b7 this device');
+      expect(spanish.thisDeviceCaption('1A2B'), '1A2B \u00b7 este equipo');
+    });
+
+    for (final strings in [english, spanish]) {
+      final language = strings is AppStringsEs ? 'es' : 'en';
+
+      test('foreignSenderNote includes the short fingerprint and changes '
+          'with it ($language)', () {
+        expect(strings.foreignSenderNote(_sampleShort), contains(_sampleShort));
+        expect(
+          strings.foreignSenderNote('A1'),
+          isNot(strings.foreignSenderNote('B2')),
+        );
       });
     }
   });

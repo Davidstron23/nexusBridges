@@ -8,6 +8,7 @@ import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/network_prompt_dialog.dart';
 import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
+import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 const List<String> languageCodes = ['es', 'en'];
@@ -221,6 +222,10 @@ Future<void> pumpHome(
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
+      themeAnimationDuration: Duration.zero,
       home: NetworkPromptHost(
         controller: controller,
         child: PairingHost(

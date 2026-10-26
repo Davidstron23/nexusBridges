@@ -161,6 +161,31 @@ abstract class AppStrings {
   String get closeDuringTransferBody;
   String get keepOpenButton;
   String get closeAndCancelButton;
+
+  String get trustedNetworkLabel;
+  String get onlyPairedCanSend;
+  String get activityTab;
+  String get devicesTab;
+  String get activityEmpty;
+  String get sectionUnpaired;
+  String get chipMine;
+  String get chipForeign;
+  String get visibleLabel;
+  String get diagramTitle;
+  String diagramCount(int total, int visible);
+  String thisDeviceCaption(String short);
+  String get chipPreparing;
+  String get chipWaiting;
+  String get chipInProgress;
+  String get chipChecking;
+  String get chipDelivered;
+  String get chipSaved;
+  String get chipRejected;
+  String get chipCancelled;
+  String get chipFailed;
+  String get chipUnconfirmed;
+  String foreignSenderNote(String short);
+  String get incomingExpiresNote;
 }
 
 AppStrings stringsFor(String languageCode) {
