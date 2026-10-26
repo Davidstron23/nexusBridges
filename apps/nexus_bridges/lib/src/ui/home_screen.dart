@@ -7,6 +7,7 @@ import 'activity_cards.dart';
 import 'diagram/flow_diagram.dart';
 import 'home_layout.dart';
 import 'device_list.dart';
+import 'incoming_cards.dart';
 import 'network_strip.dart';
 import 'send_action.dart';
 import 'theme/app_theme.dart';
@@ -330,6 +331,8 @@ class _SideColumn extends StatelessWidget {
       valueListenable: tab,
       builder: (context, current, _) {
         final blocks = <Widget>[
+          if (hasIncomingCard(state))
+            IncomingCards(controller: controller, state: state),
           ..._notices(),
           _ColumnTabs(
             strings: strings,
