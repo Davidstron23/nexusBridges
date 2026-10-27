@@ -298,6 +298,8 @@ final class PairingCoordinator {
 
   void answerAsReceiver(ReceiverAnswer answer) => _receiver.answer(answer);
 
+  void cancelAsReceiver() => _receiver.cancel();
+
   void dismissOutcome() {
     _receiver.dismissOutcome();
     _initiator.dismissOutcome();

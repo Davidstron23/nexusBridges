@@ -368,6 +368,13 @@ final class NexusNode {
     );
   }
 
+  void cancelRequest() {
+    _callCoordinator(
+      'cancel request',
+      (coordinator) => coordinator.cancelAsReceiver(),
+    );
+  }
+
   void dismissPairing() {
     _callCoordinator(
       'dismiss pairing',

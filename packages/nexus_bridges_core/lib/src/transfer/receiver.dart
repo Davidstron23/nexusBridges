@@ -251,6 +251,8 @@ final class _FolderAsk {
 
   AfterEndResult? afterEnd;
 
+  String? afterEndPath;
+
   FolderQuestionView get view => FolderQuestionView(
     kind: kind,
     proposedPath: proposedPath,
@@ -262,6 +264,7 @@ final class _FolderAsk {
     pickerOpen: pickerOpen,
     inspecting: inspecting,
     afterEnd: afterEnd,
+    afterEndPath: afterEndPath,
   );
 
   String? takeCreatedPending() {
@@ -752,10 +755,12 @@ final class TransferReceiver {
     }
     ask.inspecting = true;
     _onChanged();
+    final path = target.path;
     try {
       await _remember(target);
       ask.clearCaution();
       ask.afterEnd = AfterEndResult.remembered;
+      ask.afterEndPath = path;
     } finally {
       ask.inspecting = false;
       _onChanged();
@@ -856,11 +861,13 @@ final class TransferReceiver {
   ) async {
     if (ask.kind == FolderQuestionKind.firstTime) await _remember(target);
     if (_closed || session.phase == _InPhase.ended) {
+      _keepRememberedPanel(session, ask, target);
       _dropUnused(ask, target, createdNow);
       return;
     }
     await _sweepFolder(target.path);
     if (_closed || session.phase == _InPhase.ended) {
+      _keepRememberedPanel(session, ask, target);
       _dropUnused(ask, target, createdNow);
       return;
     }
@@ -870,6 +877,20 @@ final class TransferReceiver {
       return;
     }
     _advance(session);
+  }
+
+  void _keepRememberedPanel(
+    _InSession session,
+    _FolderAsk ask,
+    ReceiveTarget target,
+  ) {
+    if (_closed || ask.kind != FolderQuestionKind.firstTime) return;
+    ask
+      ..problem = null
+      ..problemPath = null
+      ..afterEnd = AfterEndResult.remembered
+      ..afterEndPath = target.path;
+    if (_panel == null && !(_active?.exposed ?? false)) _panel = session;
   }
 
   void _dropUnused(_FolderAsk ask, ReceiveTarget target, bool createdNow) {
@@ -918,6 +939,9 @@ final class TransferReceiver {
       _dropPanel(session);
       return;
     }
+    ask
+      ..problem = null
+      ..problemPath = null;
     ask.inspecting = true;
     _onChanged();
     try {
@@ -928,7 +952,9 @@ final class TransferReceiver {
       }
       switch (result) {
         case FolderRefused():
-          ask.afterEnd = AfterEndResult.notUsable;
+          ask
+            ..afterEnd = AfterEndResult.notUsable
+            ..afterEndPath = chosen;
         case FolderUsable(:final target, :final createdNow):
           if (target.remote || target.cloud || !target.supportsMark) {
             ask
@@ -940,7 +966,9 @@ final class TransferReceiver {
               ..afterEnd = AfterEndResult.needsConfirmation;
           } else {
             await _remember(target);
-            ask.afterEnd = AfterEndResult.remembered;
+            ask
+              ..afterEnd = AfterEndResult.remembered
+              ..afterEndPath = target.path;
           }
       }
     } finally {

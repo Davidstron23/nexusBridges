@@ -12,6 +12,7 @@ import 'package:test/test.dart';
 
 import '../server/api_server_harness.dart';
 import 'initiator_harness.dart';
+import 'receiver_harness.dart' show lockFile;
 
 void main() {
   late DeviceIdentity ia;
@@ -344,21 +345,189 @@ void main() {
       expect(b.paired.devices, isEmpty);
     });
 
-    test('after "matches" the initiator can no longer cancel (D3)', () async {
+    test('E276 RF-248 RF-89: after "matches" the initiator cancels while '
+        'waiting: its view closes, the receiver gets one cancel, counts it '
+        'and nothing is saved on either side', () async {
       final (a, b) = await twoStacks();
       await begin(a, b);
       a.coordinator.answerAsInitiator(matches: true);
-      a.coordinator.cancelAsInitiator();
-      a.coordinator.answerAsInitiator(matches: false);
       expect(a.view!.phase, PairingPhase.waitingPeer);
+      await waitUntil(
+        () => b.handledOn(ApiPaths.pairConfirm) >= 1,
+        reason: 'confirm reached B',
+      );
+
+      a.coordinator.cancelAsInitiator();
+
+      expect(a.view, isNull);
+      expect(a.coordinator.busy, isFalse);
+      await outcomeOf(b, PairingOutcome.cancelledByPeer);
+      final confirms = b.handledOn(ApiPaths.pairConfirm);
+      final waits = b.handledOn(ApiPaths.pairWait);
+      expect(b.view!.phase, PairingPhase.finished);
+      expect(b.view!.peerFingerprint, a.fingerprint);
+      await waitUntil(() => b.events.isNotEmpty, reason: 'event on B');
+      expect(
+        b.events.single,
+        isA<PairingAttemptRejected>()
+            .having((e) => e.fingerprint, 'fingerprint', a.fingerprint)
+            .having((e) => e.cause, 'cause', AttemptCause.cancelledAfterReveal),
+      );
+
+      await pause(const Duration(milliseconds: 1500));
+      expect(b.handledOn(ApiPaths.pairCancel), 1);
+      expect(
+        b.calls[ApiPaths.pairCancel]!.single.json,
+        containsPair('reason', 'cancelled'),
+      );
+      expect(b.handledOn(ApiPaths.pairConfirm), confirms);
+      expect(b.handledOn(ApiPaths.pairWait), waits);
+      expect(a.view, isNull);
+      expect(a.events, isEmpty);
+      expect(b.completions, isEmpty);
+      expect(a.paired.devices, isEmpty);
+      expect(b.paired.devices, isEmpty);
+      expect(await a.reloadPaired(), isEmpty);
+      expect(await b.reloadPaired(), isEmpty);
+    });
+
+    test('E276: once cancelled while waiting, a late "matches" of the '
+        'receiver user saves nothing', () async {
+      final (a, b) = await twoStacks();
+      await begin(a, b);
+      a.coordinator.answerAsInitiator(matches: true);
+      await waitUntil(() => b.handledOn(ApiPaths.pairConfirm) >= 1);
+      a.coordinator.cancelAsInitiator();
+      await outcomeOf(b, PairingOutcome.cancelledByPeer);
+
+      b.coordinator.answerAsReceiver(ReceiverAnswer.matches);
       await pause();
+
+      expect(b.view!.outcome, PairingOutcome.cancelledByPeer);
+      expect(a.paired.devices, isEmpty);
+      expect(b.paired.devices, isEmpty);
+      expect(a.completions, isEmpty);
+      expect(b.completions, isEmpty);
+    });
+
+    test('E276: "does not match" while waiting does nothing; the receiver '
+        'gets no cancel and its "matches" pairs both', () async {
+      final (a, b) = await twoStacks();
+      await begin(a, b);
+      a.coordinator.answerAsInitiator(matches: true);
+      final waiting = a.view;
+      expect(waiting!.phase, PairingPhase.waitingPeer);
+
+      a.coordinator.answerAsInitiator(matches: false);
+      a.coordinator.answerAsInitiator(matches: true);
+
+      expect(a.view, waiting);
+      expect(a.coordinator.busy, isTrue);
+      await pause();
+      expect(a.view, waiting);
       expect(b.handledOn(ApiPaths.pairCancel), 0);
+      expect(b.view!.phase, PairingPhase.comparing);
       b.coordinator.answerAsReceiver(ReceiverAnswer.matches);
       await waitUntil(
         () =>
             a.paired.isPaired(b.fingerprint) &&
             b.paired.isPaired(a.fingerprint),
+        reason: 'both paired',
       );
+      expect(b.handledOn(ApiPaths.pairCancel), 0);
+      expect(b.events.whereType<PairingAttemptRejected>(), isEmpty);
+    });
+
+    test(
+      'E276: cancelling twice while waiting sends a single cancel',
+      () async {
+        final (a, b) = await twoStacks();
+        await begin(a, b);
+        a.coordinator.answerAsInitiator(matches: true);
+        await waitUntil(() => b.handledOn(ApiPaths.pairConfirm) >= 1);
+
+        a.coordinator.cancelAsInitiator();
+        a.coordinator.cancelAsInitiator();
+
+        expect(a.view, isNull);
+        await outcomeOf(b, PairingOutcome.cancelledByPeer);
+        a.coordinator.cancelAsInitiator();
+        await pause(const Duration(milliseconds: 600));
+        expect(b.handledOn(ApiPaths.pairCancel), 1);
+        expect(b.events.whereType<PairingAttemptRejected>(), hasLength(1));
+      },
+    );
+
+    test('E276 R78 [SEG]: a pair/confirm already on its way that comes back '
+        '"paired" after the cancel saves nothing and completes '
+        'nothing', () async {
+      final a = await stackA();
+      final fake = await fakeB();
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) gate.complete();
+      });
+      fake.handlers[ApiPaths.pairConfirm] = (_) async {
+        await gate.future;
+        return FakeAnswer.state('paired');
+      };
+      await fakeComparing(a, fake);
+      a.coordinator.answerAsInitiator(matches: true);
+      expect(a.view!.phase, PairingPhase.waitingPeer);
+      await waitUntil(
+        () => fake.count(ApiPaths.pairConfirm) >= 1,
+        reason: 'confirm held in B',
+      );
+
+      a.coordinator.cancelAsInitiator();
+      expect(a.view, isNull);
+      gate.complete();
+
+      await waitUntil(
+        () => fake.count(ApiPaths.pairCancel) == 1,
+        reason: 'cancel reached B',
+      );
+      await pause(const Duration(milliseconds: 1000));
+      expect(fake.count(ApiPaths.pairCancel), 1);
+      final cancel = fake.callsTo(ApiPaths.pairCancel).single.body;
+      expect(cancel['session'], toHex(fake.session));
+      expect(cancel['reason'], 'cancelled');
+      expect(a.view, isNull);
+      expect(a.coordinator.busy, isFalse);
+      expect(a.paired.devices, isEmpty);
+      expect(a.events.whereType<PairingCompleted>(), isEmpty);
+      expect(a.events, isEmpty);
+      expect(await a.reloadPaired(), isEmpty);
+    });
+
+    test('E276 [SEG]: cancelling while the initiator is already saving does '
+        'nothing and the pairing completes', () async {
+      final a = await stackA();
+      final fake = await fakeB();
+      fake.handlers[ApiPaths.pairConfirm] = (_) => FakeAnswer.state('paired');
+      a.storeDir.createSync(recursive: true);
+      final lock = lockFile(a.pairedFile);
+      await fakeComparing(a, fake);
+      a.coordinator.answerAsInitiator(matches: true);
+      await waitUntil(
+        () => fake.count(ApiPaths.pairConfirm) >= 1,
+        reason: 'confirm answered paired',
+      );
+      await waitUntil(() => a.storeHasTemporaryFile, reason: 'saving held');
+      expect(a.view?.phase, PairingPhase.waitingPeer, reason: 'still saving');
+
+      a.coordinator.cancelAsInitiator();
+      a.coordinator.answerAsInitiator(matches: false);
+
+      expect(a.view?.phase, PairingPhase.waitingPeer);
+      lock.release();
+      await waitUntil(() => a.completions.isNotEmpty, reason: 'completed');
+      expect(a.view, isNull);
+      expect(a.paired.isPaired(fake.fingerprint), isTrue);
+      expect(await a.reloadPaired(), hasLength(1));
+      expect(a.completions.single.fingerprint, fake.fingerprint);
+      await pause();
+      expect(fake.count(ApiPaths.pairCancel), 0);
     });
 
     test('answers without a pairing in course do nothing', () async {
@@ -1464,8 +1633,6 @@ void main() {
         await pause();
         expect(a.view!.phase, PairingPhase.waitingPeer);
         expect(a.coordinator.busy, isTrue);
-        a.coordinator.cancelAsInitiator();
-        expect(a.view!.phase, PairingPhase.waitingPeer);
         expect(fake.count(ApiPaths.pairCancel), 0);
 
         a.clock.advance(const Duration(milliseconds: 1));

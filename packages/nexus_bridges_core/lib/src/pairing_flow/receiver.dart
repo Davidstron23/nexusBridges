@@ -261,6 +261,18 @@ final class PairingReceiver {
     }
   }
 
+  void cancel() {
+    final session = _active;
+    if (_closed ||
+        session == null ||
+        session.status != _ReceiverStatus.waitingPeer) {
+      return;
+    }
+    final until = _countFailureAfterReveal(session.origin);
+    _finish(session, _ReceiverStatus.cancelledLocal);
+    if (until != null) _emit(PairingPaused(until: until));
+  }
+
   void dismissOutcome() {
     if (_finishedView == null) return;
     _finishedView = null;

@@ -1210,6 +1210,7 @@ void main() {
         a.node.answerCode(matches: true);
         a.node.cancelPairing();
         a.node.answerRequest(ReceiverAnswer.matches);
+        a.node.cancelRequest();
         a.node.dismissPairing();
         a.node.dismissNotice(1);
         await a.node.answerMine(fingerprintOfB, mine: true);

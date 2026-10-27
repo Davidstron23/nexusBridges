@@ -173,6 +173,7 @@ final class FolderQuestionView {
     this.pickerOpen = false,
     this.inspecting = false,
     this.afterEnd,
+    this.afterEndPath,
   });
 
   final FolderQuestionKind kind;
@@ -185,6 +186,7 @@ final class FolderQuestionView {
   final bool pickerOpen;
   final bool inspecting;
   final AfterEndResult? afterEnd;
+  final String? afterEndPath;
 
   @override
   bool operator ==(Object other) =>
@@ -198,7 +200,8 @@ final class FolderQuestionView {
       other.cautionRemote == cautionRemote &&
       other.pickerOpen == pickerOpen &&
       other.inspecting == inspecting &&
-      other.afterEnd == afterEnd;
+      other.afterEnd == afterEnd &&
+      other.afterEndPath == afterEndPath;
 
   @override
   int get hashCode => Object.hash(
@@ -212,6 +215,7 @@ final class FolderQuestionView {
     pickerOpen,
     inspecting,
     afterEnd,
+    afterEndPath,
   );
 }
 

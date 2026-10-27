@@ -144,7 +144,7 @@ final class PairingInitiator {
     final run = _run;
     if (_closed || run == null || run.finished || run.saving) return;
     if (!matches) {
-      cancel();
+      if (run.phase != PairingPhase.waitingPeer) cancel();
       return;
     }
     if (run.phase != PairingPhase.comparing) return;
@@ -158,7 +158,8 @@ final class PairingInitiator {
     final run = _run;
     if (_closed || run == null || run.saving) return;
     if (run.phase != PairingPhase.connecting &&
-        run.phase != PairingPhase.comparing) {
+        run.phase != PairingPhase.comparing &&
+        run.phase != PairingPhase.waitingPeer) {
       return;
     }
     unawaited(_sendCancel(run, CancelReason.cancelled));
