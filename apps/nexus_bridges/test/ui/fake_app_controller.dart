@@ -88,6 +88,11 @@ class FakeAppController extends AppController {
   }
 
   @override
+  void cancelRequest() {
+    calls.add('cancelRequest');
+  }
+
+  @override
   void answerRequest(ReceiverAnswer answer) {
     calls.add('answerRequest ${answer.name}');
   }

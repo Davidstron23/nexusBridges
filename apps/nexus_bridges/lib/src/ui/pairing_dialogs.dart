@@ -5,10 +5,11 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
+import 'armed.dart';
+
+export 'armed.dart' show dialogActivationDelay;
 
 const int _shortFingerprintLength = 8;
-
-const Duration dialogActivationDelay = Duration(milliseconds: 500);
 
 String formatCode(String code) {
   return '${code.substring(0, 3)} ${code.substring(3)}';
@@ -201,10 +202,9 @@ class _PairingDialog extends StatefulWidget {
   State<_PairingDialog> createState() => _PairingDialogState();
 }
 
-class _PairingDialogState extends State<_PairingDialog> {
+class _PairingDialogState extends State<_PairingDialog>
+    with ArmingState<_PairingDialog> {
   Object? _contentKey;
-  bool _armed = false;
-  Timer? _timer;
 
   AppController get controller => widget.controller;
 
@@ -219,6 +219,7 @@ class _PairingDialogState extends State<_PairingDialog> {
       view?.code,
       view?.alreadyPaired,
       state?.pairingNamesake,
+      state?.pickerOpen,
     );
   }
 
@@ -226,22 +227,13 @@ class _PairingDialogState extends State<_PairingDialog> {
   void initState() {
     super.initState();
     _contentKey = _currentKey();
-    _arm();
     controller.addListener(_onControllerChanged);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
     controller.removeListener(_onControllerChanged);
     super.dispose();
-  }
-
-  void _arm() {
-    _timer?.cancel();
-    _timer = Timer(dialogActivationDelay, () {
-      if (mounted) setState(() => _armed = true);
-    });
   }
 
   void _onControllerChanged() {
@@ -250,12 +242,12 @@ class _PairingDialogState extends State<_PairingDialog> {
     if (next == _contentKey) return;
     setState(() {
       _contentKey = next;
-      _armed = false;
+      rearm();
     });
-    _arm();
   }
 
-  VoidCallback? _whenArmed(VoidCallback action) => _armed ? action : null;
+  VoidCallback? _whenArmed(VoidCallback action) =>
+      armed && controller.state?.pickerOpen != true ? action : null;
 
   @override
   Widget build(BuildContext context) {
@@ -361,6 +353,13 @@ class _PairingDialogState extends State<_PairingDialog> {
         ],
       ),
       actions: [
+        if (view.phase == PairingPhase.waitingPeer)
+          TextButton(
+            onPressed: _whenArmed(
+              isInitiator ? controller.cancelPairing : controller.cancelRequest,
+            ),
+            child: Text(strings.cancelButton),
+          ),
         if (comparing && isInitiator)
           TextButton(
             onPressed: _whenArmed(controller.cancelPairing),
@@ -424,26 +423,10 @@ class _QuestionDialog extends StatefulWidget {
   State<_QuestionDialog> createState() => _QuestionDialogState();
 }
 
-class _QuestionDialogState extends State<_QuestionDialog> {
-  bool _armed = false;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(dialogActivationDelay, () {
-      if (mounted) setState(() => _armed = true);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
+class _QuestionDialogState extends State<_QuestionDialog>
+    with ArmingState<_QuestionDialog> {
   VoidCallback? _answer(bool value) =>
-      _armed ? () => Navigator.of(context).pop(value) : null;
+      armed ? () => Navigator.of(context).pop(value) : null;
 
   @override
   Widget build(BuildContext context) {

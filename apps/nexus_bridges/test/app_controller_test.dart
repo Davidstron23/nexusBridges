@@ -536,6 +536,7 @@ void main() {
         expect(await controller.pair(unknown), PairRequestResult.unavailable);
         controller.answerCode(matches: true);
         controller.cancelPairing();
+        controller.cancelRequest();
         controller.answerRequest(ReceiverAnswer.matches);
         controller.dismissPairing();
         await controller.answerReplace(unknown, replace: true);
@@ -568,6 +569,7 @@ void main() {
 
       controller.answerCode(matches: false);
       controller.cancelPairing();
+      controller.cancelRequest();
       controller.answerRequest(ReceiverAnswer.mismatch);
       controller.dismissPairing();
       await controller.answerReplace(unknown, replace: false);
@@ -590,6 +592,41 @@ void main() {
         ),
         isEmpty,
       );
+    });
+  });
+
+  group('E279 cancelRequest (RF-248)', () {
+    test('without a node it does nothing and does not start one', () {
+      final controller = controllerFor();
+
+      controller.cancelRequest();
+      controller.cancelRequest();
+
+      expect(harness.startCalls, 0);
+      expect(controller.state, isNull);
+    });
+
+    test('with a node and no request it goes to the node and changes '
+        'nothing', () async {
+      final controller = controllerFor();
+      await controller.init();
+      final before = controller.state!;
+
+      controller.cancelRequest();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+
+      final after = controller.state!;
+      expect(after.pairing, isNull);
+      expect(after.entries, before.entries);
+      expect(after.notices, before.notices);
+    });
+
+    test('after shutdown it does not throw', () async {
+      final controller = controllerFor();
+      await controller.init();
+      await controller.shutdown();
+
+      expect(controller.cancelRequest, returnsNormally);
     });
   });
 

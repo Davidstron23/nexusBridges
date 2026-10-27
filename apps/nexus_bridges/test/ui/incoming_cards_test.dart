@@ -43,6 +43,7 @@ NodeState _warning({
   bool isProgram = false,
   bool withoutMark = false,
   String? namesake,
+  bool pickerOpen = false,
 }) => NodeState(
   incoming: incomingView(
     id: id,
@@ -53,6 +54,7 @@ NodeState _warning({
     withoutMark: withoutMark,
   ),
   incomingNamesake: namesake,
+  pickerOpen: pickerOpen,
 );
 
 NodeState _question(
@@ -722,106 +724,6 @@ void main() {
         expect(controller.calls, ['dismissFolderPanel s1']);
       });
 
-      for (final (label, folder, path) in [
-        (
-          'the proposed path',
-          const FolderQuestionView(
-            kind: FolderQuestionKind.firstTime,
-            proposedPath: downloadsPath,
-            afterEnd: AfterEndResult.remembered,
-          ),
-          downloadsPath,
-        ),
-        (
-          'the problem path over the proposed one',
-          const FolderQuestionView(
-            kind: FolderQuestionKind.firstTime,
-            proposedPath: downloadsPath,
-            problemPath: otherPath,
-            afterEnd: AfterEndResult.remembered,
-          ),
-          otherPath,
-        ),
-        (
-          'the caution path over the others',
-          const FolderQuestionView(
-            kind: FolderQuestionKind.firstTime,
-            proposedPath: downloadsPath,
-            problemPath: otherPath,
-            cautionPath: cautionPath,
-            afterEnd: AfterEndResult.remembered,
-          ),
-          cautionPath,
-        ),
-      ]) {
-        testWidgets('remembered names $label', (tester) async {
-          final controller = await _pumpCards(tester, code, _ended(folder));
-          expect(
-            textIn(_cards, strings.folderRememberedNote(path)),
-            findsOneWidget,
-          );
-          for (final other in [downloadsPath, otherPath, cautionPath]) {
-            if (other != path) {
-              expect(
-                textIn(_cards, strings.folderRememberedNote(other)),
-                findsNothing,
-              );
-            }
-          }
-          expect(buttonLabels(tester, _cards), [strings.closeButton]);
-          await arm(tester);
-          await _tap(tester, strings.closeButton);
-          expect(controller.calls, ['dismissFolderPanel s1']);
-        });
-      }
-
-      testWidgets('notUsable names the folder and offers Close', (
-        tester,
-      ) async {
-        await _pumpCards(
-          tester,
-          code,
-          _ended(
-            const FolderQuestionView(
-              kind: FolderQuestionKind.firstTime,
-              proposedPath: downloadsPath,
-              problemPath: otherPath,
-              afterEnd: AfterEndResult.notUsable,
-            ),
-          ),
-        );
-        expect(
-          textIn(_cards, strings.folderNotUsable(otherPath)),
-          findsOneWidget,
-        );
-        expect(buttonLabels(tester, _cards), [strings.closeButton]);
-      });
-
-      testWidgets('remembered and notUsable without any path show no note', (
-        tester,
-      ) async {
-        for (final result in [
-          AfterEndResult.remembered,
-          AfterEndResult.notUsable,
-        ]) {
-          await _pumpCards(
-            tester,
-            code,
-            _ended(
-              FolderQuestionView(
-                kind: FolderQuestionKind.firstTime,
-                proposedPath: '',
-                afterEnd: result,
-              ),
-            ),
-          );
-          expect(find.text(strings.folderRememberedNote('')), findsNothing);
-          expect(find.text(strings.folderNotUsable('')), findsNothing);
-          expect(textIn(_cards, strings.transferAlreadyEnded), findsOneWidget);
-          expect(buttonLabels(tester, _cards), [strings.closeButton]);
-        }
-      });
-
       testWidgets('needsConfirmation shows the cautions with Do not remember '
           'first and Remember anyway', (tester) async {
         final controller = await _pumpCards(
@@ -965,6 +867,207 @@ void main() {
       });
     });
 
+    group('[$code] E272 notes after the end use afterEndPath (RF-209)', () {
+      const windowsTemp = r'C:\Windows\Temp';
+
+      List<String> cardTexts(WidgetTester tester) => [
+        for (final text in tester.widgetList<Text>(
+          inside(_cards, find.byType(Text)),
+        ))
+          text.data ?? '',
+      ];
+
+      void expectNoPathBut(WidgetTester tester, String? shown) {
+        for (final path in [
+          downloadsPath,
+          otherPath,
+          cautionPath,
+          windowsTemp,
+        ]) {
+          if (path == shown) continue;
+          expect(
+            cardTexts(tester).where((text) => text.contains(path)),
+            isEmpty,
+            reason: path,
+          );
+        }
+      }
+
+      testWidgets('remembered names afterEndPath and never the proposed '
+          'folder', (tester) async {
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _ended(
+            const FolderQuestionView(
+              kind: FolderQuestionKind.firstTime,
+              proposedPath: downloadsPath,
+              afterEnd: AfterEndResult.remembered,
+              afterEndPath: otherPath,
+            ),
+          ),
+        );
+        expect(textIn(_cards, strings.transferAlreadyEnded), findsOneWidget);
+        expect(
+          textIn(_cards, strings.folderRememberedNote(otherPath)),
+          findsOneWidget,
+        );
+        expectNoPathBut(tester, otherPath);
+        expect(buttonLabels(tester, _cards), [strings.closeButton]);
+        await arm(tester);
+        await _tap(tester, strings.closeButton);
+        expect(controller.calls, ['dismissFolderPanel s1']);
+      });
+
+      testWidgets('the view of case g of E271 names the proposal it '
+          'remembered', (tester) async {
+        await _pumpCards(
+          tester,
+          code,
+          _ended(
+            const FolderQuestionView(
+              kind: FolderQuestionKind.firstTime,
+              proposedPath: downloadsPath,
+              afterEnd: AfterEndResult.remembered,
+              afterEndPath: downloadsPath,
+            ),
+          ),
+        );
+        expect(
+          textIn(_cards, strings.folderRememberedNote(downloadsPath)),
+          findsOneWidget,
+        );
+        expect(buttonLabels(tester, _cards), [strings.closeButton]);
+      });
+
+      testWidgets('notUsable names afterEndPath and offers Close', (
+        tester,
+      ) async {
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _ended(
+            const FolderQuestionView(
+              kind: FolderQuestionKind.firstTime,
+              proposedPath: downloadsPath,
+              afterEnd: AfterEndResult.notUsable,
+              afterEndPath: windowsTemp,
+            ),
+          ),
+        );
+        expect(
+          textIn(_cards, strings.folderNotUsable(windowsTemp)),
+          findsOneWidget,
+        );
+        expect(
+          textIn(_cards, strings.folderRememberedNote(windowsTemp)),
+          findsNothing,
+        );
+        expectNoPathBut(tester, windowsTemp);
+        expect(buttonLabels(tester, _cards), [strings.closeButton]);
+        await arm(tester);
+        await _tap(tester, strings.closeButton);
+        expect(controller.calls, ['dismissFolderPanel s1']);
+      });
+
+      for (final result in [
+        AfterEndResult.remembered,
+        AfterEndResult.notUsable,
+      ]) {
+        testWidgets('${result.name} ignores the problem, caution and '
+            'proposed paths', (tester) async {
+          await _pumpCards(
+            tester,
+            code,
+            _ended(
+              FolderQuestionView(
+                kind: FolderQuestionKind.firstTime,
+                proposedPath: downloadsPath,
+                problem: FolderProblem.cannotUse,
+                problemPath: otherPath,
+                cautionPath: cautionPath,
+                cautionNoMark: true,
+                afterEnd: result,
+                afterEndPath: windowsTemp,
+              ),
+            ),
+          );
+          final note = result == AfterEndResult.remembered
+              ? strings.folderRememberedNote(windowsTemp)
+              : strings.folderNotUsable(windowsTemp);
+          expect(textIn(_cards, note), findsOneWidget);
+          expectNoPathBut(tester, windowsTemp);
+          expect(buttonLabels(tester, _cards), [strings.closeButton]);
+        });
+
+        for (final missing in [null, '']) {
+          testWidgets('${result.name} with afterEndPath '
+              '${missing == null ? 'null' : 'empty'} shows only the end and '
+              'Close, with no fallback path', (tester) async {
+            await _pumpCards(
+              tester,
+              code,
+              _ended(
+                FolderQuestionView(
+                  kind: FolderQuestionKind.firstTime,
+                  proposedPath: downloadsPath,
+                  problemPath: otherPath,
+                  afterEnd: result,
+                  afterEndPath: missing,
+                ),
+              ),
+            );
+            expect(cardTexts(tester), [
+              strings.transferAlreadyEnded,
+              strings.closeButton,
+            ]);
+            expect(find.text(strings.folderRememberedNote('')), findsNothing);
+            expect(find.text(strings.folderNotUsable('')), findsNothing);
+            expectNoPathBut(tester, null);
+            expect(buttonLabels(tester, _cards), [strings.closeButton]);
+          });
+        }
+      }
+
+      testWidgets('two views that only differ in afterEndPath: the note '
+          'follows and Close is off again for 500 ms', (tester) async {
+        FolderQuestionView remembered(String path) => FolderQuestionView(
+          kind: FolderQuestionKind.firstTime,
+          proposedPath: downloadsPath,
+          afterEnd: AfterEndResult.remembered,
+          afterEndPath: path,
+        );
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _ended(remembered(otherPath)),
+        );
+        await arm(tester);
+        expect(buttonStates(tester, _cards), [true]);
+
+        controller.emit(_ended(remembered(cautionPath)));
+        await tester.pump();
+        expect(
+          textIn(_cards, strings.folderRememberedNote(cautionPath)),
+          findsOneWidget,
+        );
+        expect(
+          textIn(_cards, strings.folderRememberedNote(otherPath)),
+          findsNothing,
+        );
+        expect(buttonStates(tester, _cards), [false]);
+        await tester.pump(justBeforeArmed);
+        expect(buttonStates(tester, _cards), [false]);
+        await _tapOff(tester, strings.closeButton);
+        await tester.pump();
+        expect(controller.calls, isEmpty);
+        await tester.pump(lastMillisecond);
+        expect(buttonStates(tester, _cards), [true]);
+        await _tap(tester, strings.closeButton);
+        expect(controller.calls, ['dismissFolderPanel s1']);
+      });
+    });
+
     group('[$code] E246 session of the painted card', () {
       Future<void> check(
         WidgetTester tester,
@@ -1100,9 +1203,274 @@ void main() {
         await tester.pump(lastMillisecond);
         expect(buttonStates(tester, _cards), [true, true, true]);
       });
+    });
 
-      testWidgets('a new problem, path, caution or afterEnd disarms; picker '
-          'and checking do not', (tester) async {
+    group('[$code] E273 pickers and checking disarm the top cards (RF-151, '
+        'RF-198, RF-200, RF-202, RF-206, RF-209)', () {
+      Future<void> expectRearms(
+        WidgetTester tester,
+        FakeAppController controller,
+        String label,
+        String call,
+      ) async {
+        final labels = buttonLabels(tester, _cards);
+        expect(labels, isNotEmpty);
+        expect(buttonStates(tester, _cards), everyElement(isFalse));
+        await tester.pump(justBeforeArmed);
+        expect(buttonStates(tester, _cards), everyElement(isFalse));
+        for (final button in labels) {
+          await _tapOff(tester, button);
+        }
+        await tester.pump();
+        expect(controller.calls, isEmpty);
+        await tester.pump(lastMillisecond);
+        expect(buttonStates(tester, _cards), everyElement(isTrue));
+        await _tap(tester, label);
+        expect(controller.calls, [call]);
+      }
+
+      Future<void> expectStaysOff(
+        WidgetTester tester,
+        FakeAppController controller,
+      ) async {
+        expect(buttonStates(tester, _cards), everyElement(isFalse));
+        await tester.pump(const Duration(seconds: 1));
+        expect(buttonStates(tester, _cards), everyElement(isFalse));
+        for (final button in buttonLabels(tester, _cards)) {
+          await _tapOff(tester, button);
+        }
+        await tester.pump();
+        expect(controller.calls, isEmpty);
+      }
+
+      testWidgets('an armed warning goes off when the file picker opens, '
+          'stays off after 1 s and rearms 500 ms after it closes', (
+        tester,
+      ) async {
+        final controller = await _pumpCards(tester, code, _warning());
+        await arm(tester);
+        expect(buttonStates(tester, _cards), [true, true]);
+
+        controller.emit(_warning(pickerOpen: true));
+        await tester.pump();
+        expect(buttonLabels(tester, _cards), [
+          strings.rejectButton,
+          strings.acceptButton,
+        ]);
+        await expectStaysOff(tester, controller);
+
+        controller.emit(_warning());
+        await tester.pump();
+        await expectRearms(
+          tester,
+          controller,
+          strings.acceptButton,
+          'answerIncoming s1 true',
+        );
+      });
+
+      testWidgets('a warning that arrives with the file picker open stays '
+          'off and rearms 500 ms after it closes', (tester) async {
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _warning(pickerOpen: true),
+        );
+        await arm(tester);
+        await expectStaysOff(tester, controller);
+
+        controller.emit(_warning());
+        await tester.pump();
+        await expectRearms(
+          tester,
+          controller,
+          strings.rejectButton,
+          'answerIncoming s1 false',
+        );
+      });
+
+      testWidgets('the folder question goes off with the folder picker and '
+          'rearms 500 ms after it closes', (tester) async {
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _question(_firstTime),
+        );
+        await arm(tester);
+        expect(buttonStates(tester, _cards), [true, true, true]);
+
+        controller.emit(
+          _question(
+            const FolderQuestionView(
+              kind: FolderQuestionKind.firstTime,
+              proposedPath: downloadsPath,
+              pickerOpen: true,
+            ),
+          ),
+        );
+        await tester.pump();
+        await expectStaysOff(tester, controller);
+
+        controller.emit(_question(_firstTime));
+        await tester.pump();
+        await expectRearms(
+          tester,
+          controller,
+          strings.useThisFolderButton,
+          'useProposedFolder s1',
+        );
+      });
+
+      testWidgets('the folder question goes off while the folder is checked '
+          'and rearms 500 ms after the check ends', (tester) async {
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _question(_firstTime),
+        );
+        await arm(tester);
+
+        controller.emit(
+          _question(
+            const FolderQuestionView(
+              kind: FolderQuestionKind.firstTime,
+              proposedPath: downloadsPath,
+              inspecting: true,
+            ),
+          ),
+        );
+        await tester.pump();
+        await expectStaysOff(tester, controller);
+
+        controller.emit(_question(_caution));
+        await tester.pump();
+        await expectRearms(
+          tester,
+          controller,
+          strings.useAnywayButton,
+          'useFolderAnyway s1',
+        );
+      });
+
+      testWidgets('the folder question goes off with the file picker and '
+          'rearms 500 ms after it closes', (tester) async {
+        final controller = await _pumpCards(
+          tester,
+          code,
+          _question(_firstTime),
+        );
+        await arm(tester);
+
+        controller.emit(_question(_firstTime, pickerOpen: true));
+        await tester.pump();
+        await expectStaysOff(tester, controller);
+
+        controller.emit(_question(_firstTime));
+        await tester.pump();
+        await expectRearms(
+          tester,
+          controller,
+          strings.cancelButton,
+          'cancelFolderQuestion s1',
+        );
+      });
+
+      testWidgets('the ended panel goes off with the file picker and '
+          'Close rearms 500 ms after it closes', (tester) async {
+        const remembered = FolderQuestionView(
+          kind: FolderQuestionKind.firstTime,
+          proposedPath: downloadsPath,
+          afterEnd: AfterEndResult.remembered,
+          afterEndPath: otherPath,
+        );
+        final controller = await _pumpCards(tester, code, _ended(remembered));
+        await arm(tester);
+        expect(buttonStates(tester, _cards), [true]);
+
+        controller.emit(_ended(remembered, pickerOpen: true));
+        await tester.pump();
+        expect(buttonLabels(tester, _cards), [strings.closeButton]);
+        await expectStaysOff(tester, controller);
+
+        controller.emit(_ended(remembered));
+        await tester.pump();
+        await expectRearms(
+          tester,
+          controller,
+          strings.closeButton,
+          'dismissFolderPanel s1',
+        );
+      });
+
+      for (final (label, busy) in [
+        (
+          'the folder picker',
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            pickerOpen: true,
+          ),
+        ),
+        (
+          'the check',
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            inspecting: true,
+          ),
+        ),
+      ]) {
+        testWidgets('after $label of the ended panel, its buttons wait '
+            '500 ms', (tester) async {
+          final controller = await _pumpCards(tester, code, _ended(busy));
+          await arm(tester);
+          expect(buttonLabels(tester, _cards), isEmpty);
+
+          controller.emit(
+            _ended(
+              const FolderQuestionView(
+                kind: FolderQuestionKind.firstTime,
+                proposedPath: downloadsPath,
+                afterEnd: AfterEndResult.remembered,
+                afterEndPath: otherPath,
+              ),
+            ),
+          );
+          await tester.pump();
+          await expectRearms(
+            tester,
+            controller,
+            strings.closeButton,
+            'dismissFolderPanel s1',
+          );
+
+          controller.calls.clear();
+          controller.emit(_ended(busy));
+          await tester.pump();
+          await arm(tester);
+          controller.emit(
+            _ended(
+              const FolderQuestionView(
+                kind: FolderQuestionKind.firstTime,
+                proposedPath: downloadsPath,
+                cautionPath: cautionPath,
+                cautionNoMark: true,
+                afterEnd: AfterEndResult.needsConfirmation,
+              ),
+            ),
+          );
+          await tester.pump();
+          await expectRearms(
+            tester,
+            controller,
+            strings.rememberAnywayButton,
+            'rememberFolderAfterEnd s1 true',
+          );
+        });
+      }
+
+      testWidgets('a new problem, path, caution, afterEnd or afterEndPath '
+          'disarms, and so do the picker and the check', (tester) async {
         final controller = await _pumpCards(
           tester,
           code,
@@ -1122,6 +1490,22 @@ void main() {
             problemPath: otherPath,
           ),
           _caution,
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            cautionPath: cautionPath,
+            cautionNoMark: true,
+            inspecting: true,
+          ),
+          _caution,
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            cautionPath: cautionPath,
+            cautionNoMark: true,
+            pickerOpen: true,
+          ),
+          _caution,
         ]) {
           controller.emit(_question(folder));
           await tester.pump();
@@ -1131,43 +1515,44 @@ void main() {
             reason: '$folder',
           );
           await arm(tester);
+          if (!folder.inspecting && !folder.pickerOpen) {
+            expect(buttonStates(tester, _cards), everyElement(isTrue));
+          }
+        }
+
+        for (final folder in [
+          _caution,
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            cautionPath: cautionPath,
+            cautionNoMark: true,
+            afterEnd: AfterEndResult.needsConfirmation,
+          ),
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            afterEnd: AfterEndResult.remembered,
+            afterEndPath: cautionPath,
+          ),
+          const FolderQuestionView(
+            kind: FolderQuestionKind.firstTime,
+            proposedPath: downloadsPath,
+            afterEnd: AfterEndResult.remembered,
+            afterEndPath: otherPath,
+          ),
+        ]) {
+          controller.emit(_ended(folder));
+          await tester.pump();
+          expect(
+            buttonStates(tester, _cards),
+            everyElement(isFalse),
+            reason: '$folder',
+          );
+          await arm(tester);
           expect(buttonStates(tester, _cards), everyElement(isTrue));
         }
-        controller.emit(
-          _question(
-            const FolderQuestionView(
-              kind: FolderQuestionKind.firstTime,
-              proposedPath: downloadsPath,
-              cautionPath: cautionPath,
-              cautionNoMark: true,
-              inspecting: true,
-            ),
-          ),
-        );
-        await tester.pump();
-        controller.emit(_question(_caution));
-        await tester.pump();
-        expect(buttonStates(tester, _cards), everyElement(isTrue));
-
-        controller.emit(_ended(_caution));
-        await tester.pump();
-        expect(buttonStates(tester, _cards), everyElement(isFalse));
-        await arm(tester);
-        controller.emit(
-          _ended(
-            const FolderQuestionView(
-              kind: FolderQuestionKind.firstTime,
-              proposedPath: downloadsPath,
-              cautionPath: cautionPath,
-              cautionNoMark: true,
-              afterEnd: AfterEndResult.needsConfirmation,
-            ),
-          ),
-        );
-        await tester.pump();
-        expect(buttonStates(tester, _cards), everyElement(isFalse));
-        await arm(tester);
-        expect(buttonStates(tester, _cards), everyElement(isTrue));
+        expect(controller.calls, isEmpty);
       });
     });
 

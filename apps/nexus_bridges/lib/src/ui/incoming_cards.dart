@@ -51,6 +51,10 @@ class IncomingCards extends StatelessWidget {
       folder?.problemPath,
       folder?.cautionPath,
       folder?.afterEnd,
+      folder?.afterEndPath,
+      folder?.pickerOpen,
+      folder?.inspecting,
+      state.pickerOpen,
     );
     return Armed(
       armKey: armKey,
@@ -59,6 +63,7 @@ class IncomingCards extends StatelessWidget {
           controller: controller,
           view: view,
           namesake: state.incomingNamesake,
+          pickerOpen: state.pickerOpen,
           armed: armed,
         ),
         IncomingStage.folderQuestion => _FolderQuestionCard(
@@ -196,12 +201,14 @@ class _WarningCard extends StatelessWidget {
     required this.controller,
     required this.view,
     required this.namesake,
+    required this.pickerOpen,
     required this.armed,
   });
 
   final AppController controller;
   final IncomingTransferView view;
   final String? namesake;
+  final bool pickerOpen;
   final bool armed;
 
   @override
@@ -211,6 +218,7 @@ class _WarningCard extends StatelessWidget {
     final strings = AppStringsDelegate.of(context);
     final language = Localizations.localeOf(context).languageCode;
     final namesake = this.namesake;
+    final enabled = armed && !pickerOpen;
     return NbCard(
       ring: colors.warningRing,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -271,13 +279,13 @@ class _WarningCard extends StatelessWidget {
           _Buttons(
             children: [
               OutlinedButton(
-                onPressed: armed
+                onPressed: enabled
                     ? () => controller.answerIncoming(id, accept: false)
                     : null,
                 child: Text(strings.rejectButton),
               ),
               FilledButton(
-                onPressed: armed
+                onPressed: enabled
                     ? () => controller.answerIncoming(id, accept: true)
                     : null,
                 child: Text(strings.acceptButton),
@@ -487,18 +495,20 @@ class _EndedCard extends StatelessWidget {
     final busyPicker = folder?.pickerOpen ?? false;
     final inspecting = folder?.inspecting ?? false;
     final afterEnd = folder?.afterEnd;
-    final path = folder == null
-        ? ''
-        : folder.cautionPath ?? folder.problemPath ?? folder.proposedPath;
+    final path = folder?.afterEndPath;
     final enabled = armed && !pickerOpen;
     final notes = <String>[];
     var asksToConfirm = false;
     if (!busyPicker && !inspecting && folder != null) {
       switch (afterEnd) {
         case AfterEndResult.remembered:
-          if (path.isNotEmpty) notes.add(strings.folderRememberedNote(path));
+          if (path != null && path.isNotEmpty) {
+            notes.add(strings.folderRememberedNote(path));
+          }
         case AfterEndResult.notUsable:
-          if (path.isNotEmpty) notes.add(strings.folderNotUsable(path));
+          if (path != null && path.isNotEmpty) {
+            notes.add(strings.folderNotUsable(path));
+          }
         case AfterEndResult.needsConfirmation:
           asksToConfirm = true;
           notes.addAll(_cautionLines(strings, folder));

@@ -96,6 +96,10 @@ class AppController extends ChangeNotifier {
     _node?.cancelPairing();
   }
 
+  void cancelRequest() {
+    _node?.cancelRequest();
+  }
+
   void answerRequest(ReceiverAnswer answer) {
     _node?.answerRequest(answer);
   }

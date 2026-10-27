@@ -7,10 +7,11 @@ import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
+import 'lifecycle_fixtures.dart';
 import 'pairing_fixtures.dart';
 
 final String _oldFingerprint = fingerprintOf('9999AAAA');
-const String _oldName = 'Portátil de Ana · 9999AAAA';
+const String _oldName = 'Port\u00E1til de Ana \u00B7 9999AAAA';
 
 final MineQuestion _mine = MineQuestion(
   fingerprint: peerFingerprint,
@@ -227,8 +228,8 @@ void main() {
         ]);
       });
 
-      testWidgets('waitingPeer shows the code and the wait text with no '
-          'buttons, not even Cancel', (tester) async {
+      testWidgets('waitingPeer shows the code, the wait text and only '
+          'Cancel (RF-248)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -242,7 +243,7 @@ void main() {
         expect(find.text(formattedCode), findsOneWidget);
         expect(find.text(strings.waitingForPeer(peerName)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsNothing);
-        expect(dialogButtons(tester), isEmpty);
+        expect(dialogButtons(tester), [strings.cancelButton]);
       });
 
       for (final missing in [null, '']) {
@@ -457,8 +458,8 @@ void main() {
         expect(controller.calls, ['answerRequest matches']);
       });
 
-      testWidgets('waitingPeer shows the code and receiverWaiting with no '
-          'buttons', (tester) async {
+      testWidgets('waitingPeer shows the code, receiverWaiting and only '
+          'Cancel (RF-248)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -474,7 +475,7 @@ void main() {
         );
         expect(find.text(formattedCode), findsOneWidget);
         expect(find.text(strings.receiverWaiting(peerName)), findsOneWidget);
-        expect(dialogButtons(tester), isEmpty);
+        expect(dialogButtons(tester), [strings.cancelButton]);
       });
 
       testWidgets('a request without name is titled by its short '
@@ -965,6 +966,7 @@ void main() {
           warning,
           formattedCode,
           strings.receiverWaiting(peerName),
+          strings.cancelButton,
         ]);
         expect(_colorOf(tester, warning), _errorColor(tester, warning));
       });
@@ -1146,6 +1148,14 @@ void main() {
         'initiator comparing': view(
           role: PairingRole.initiator,
           phase: PairingPhase.comparing,
+        ),
+        'initiator waiting': view(
+          role: PairingRole.initiator,
+          phase: PairingPhase.waitingPeer,
+        ),
+        'receiver waiting': view(
+          role: PairingRole.receiver,
+          phase: PairingPhase.waitingPeer,
         ),
         'receiver comparing': receiverComparing,
         'receiver already paired': view(
@@ -1570,6 +1580,307 @@ void main() {
         expect(dialog, findsNothing);
         expect(tester.takeException(), isNull);
       });
+    });
+    group('[$code] E279 Cancel while waiting for the peer (RF-248)', () {
+      for (final (role, call, answer) in [
+        (PairingRole.initiator, 'cancelPairing', 'answerCode true'),
+        (PairingRole.receiver, 'cancelRequest', 'answerRequest matches'),
+      ]) {
+        final waiting = view(role: role, phase: PairingPhase.waitingPeer);
+
+        for (final namesake in [null, namesakeName]) {
+          testWidgets('the ${role.name} waiting'
+              '${namesake == null ? '' : ' with a namesake'} has a single '
+              'Cancel, armed, that calls $call', (tester) async {
+            final controller = await _pumpWith(
+              tester,
+              code,
+              pairing: waiting,
+              namesake: namesake,
+            );
+
+            expect(dialogButtons(tester), [strings.cancelButton]);
+            for (final absent in [
+              strings.matchesButton,
+              strings.doesNotMatchButton,
+              strings.ignoreDeviceButton,
+            ]) {
+              expect(find.text(absent), findsNothing);
+            }
+            expect(
+              find.text(strings.namesakeWarning(namesakeName)),
+              namesake == null ? findsNothing : findsOneWidget,
+            );
+            expect(find.text(formattedCode), findsOneWidget);
+            expect(_enabled(tester, strings.cancelButton), isTrue);
+
+            await _tapNow(tester, strings.cancelButton);
+            expect(controller.calls, [call]);
+          });
+        }
+
+        testWidgets('the ${role.name} going from comparing to waitingPeer: '
+            'Cancel is off at 0 and 499 ms and calls $call at 500 ms', (
+          tester,
+        ) async {
+          final controller = await _pumpWith(
+            tester,
+            code,
+            pairing: view(role: role, phase: PairingPhase.comparing),
+          );
+          await _tapNow(tester, strings.matchesButton);
+          expect(controller.calls, [answer]);
+
+          controller.emit(_with(pairing: waiting));
+          await tester.pump();
+          expect(_buttonStates(tester), {strings.cancelButton: false});
+          await _tapNow(tester, strings.cancelButton);
+          await _wait(tester, 499);
+          expect(_enabled(tester, strings.cancelButton), isFalse);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, [answer]);
+
+          await _wait(tester, 1);
+          expect(_enabled(tester, strings.cancelButton), isTrue);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, [answer, call]);
+        });
+
+        testWidgets('Esc and a tap outside do not close the ${role.name} '
+            'wait and call nothing', (tester) async {
+          final controller = await _pumpWith(tester, code, pairing: waiting);
+
+          await _escape(tester);
+          await _tapOutside(tester);
+
+          expect(dialog, findsOneWidget);
+          expect(dialogButtons(tester), [strings.cancelButton]);
+          expect(controller.calls, isEmpty);
+        });
+
+        testWidgets('with the file picker open, Cancel of the ${role.name} '
+            'wait stays off and rearms 500 ms after it closes', (tester) async {
+          final controller = await _pumpWith(tester, code, pairing: waiting);
+          expect(_enabled(tester, strings.cancelButton), isTrue);
+
+          controller.emit(NodeState(pairing: waiting, pickerOpen: true));
+          await tester.pump();
+          expect(_enabled(tester, strings.cancelButton), isFalse);
+          await _wait(tester, 1000);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, isEmpty);
+
+          controller.emit(_with(pairing: waiting));
+          await tester.pump();
+          await _wait(tester, 499);
+          expect(_enabled(tester, strings.cancelButton), isFalse);
+          await _wait(tester, 1);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, [call]);
+        });
+      }
+    });
+
+    group('[$code] E275 dialogs of 003 out of the foreground or with a '
+        'picker (RF-83, RF-98, RF-125)', () {
+      final receiverComparing = view(
+        role: PairingRole.receiver,
+        phase: PairingPhase.comparing,
+      );
+
+      Future<void> expectRearmsAfterResume(
+        WidgetTester tester,
+        FakeAppController controller,
+        String label,
+      ) async {
+        await stepLifecycle(tester, AppLifecycleState.resumed);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 499);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, label);
+        expect(controller.calls, isEmpty);
+        await _wait(tester, 1);
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+      }
+
+      testWidgets('the receiver notice goes off in the background and It '
+          'matches counts 500 ms after resumed', (tester) async {
+        resumeOnTearDown(tester);
+        await stepLifecycle(tester, AppLifecycleState.resumed);
+        final controller = await _pumpWith(
+          tester,
+          code,
+          pairing: receiverComparing,
+        );
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+
+        await stepLifecycle(tester, AppLifecycleState.inactive);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 1000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        for (final label in dialogButtons(tester)) {
+          await _tapNow(tester, label);
+        }
+        expect(controller.calls, isEmpty);
+
+        await expectRearmsAfterResume(
+          tester,
+          controller,
+          strings.matchesButton,
+        );
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      testWidgets('a request that arrives in the background does not arm '
+          'until 500 ms after resumed', (tester) async {
+        resumeOnTearDown(tester);
+        await goToLifecycle(tester, AppLifecycleState.inactive);
+        final controller = await _openLater(
+          tester,
+          code,
+          _with(pairing: receiverComparing),
+        );
+        await _wait(tester, 2000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+
+        await expectRearmsAfterResume(
+          tester,
+          controller,
+          strings.matchesButton,
+        );
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      testWidgets('with the file picker open the notice stays off after 1 s '
+          'and It matches counts 500 ms after it closes', (tester) async {
+        final controller = await _pumpWith(
+          tester,
+          code,
+          pairing: receiverComparing,
+        );
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+
+        controller.emit(
+          NodeState(pairing: receiverComparing, pickerOpen: true),
+        );
+        await tester.pump();
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 1000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+
+        controller.emit(_with(pairing: receiverComparing));
+        await tester.pump();
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 499);
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+        await _wait(tester, 1);
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      testWidgets('a request that arrives with the file picker open stays '
+          'off until 500 ms after it closes', (tester) async {
+        final controller = await _openLater(
+          tester,
+          code,
+          NodeState(pairing: receiverComparing, pickerOpen: true),
+        );
+        await _wait(tester, 1000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+
+        controller.emit(_with(pairing: receiverComparing));
+        await tester.pump();
+        await _wait(tester, 499);
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+        await _wait(tester, 1);
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      for (final (name, question, yes, answer) in [
+        (
+          'is it yours?',
+          _mine,
+          strings.mineYesButton,
+          'answerMine $peerFingerprint',
+        ),
+        (
+          'replace?',
+          _replace,
+          strings.replaceButton,
+          'answerReplace $peerFingerprint',
+        ),
+      ]) {
+        testWidgets('$name goes off in the background and its yes counts '
+            '500 ms after resumed', (tester) async {
+          resumeOnTearDown(tester);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          final controller = await _pumpWith(
+            tester,
+            code,
+            questions: [question],
+          );
+          expect(_buttonStates(tester).values, everyElement(isTrue));
+
+          await stepLifecycle(tester, AppLifecycleState.inactive);
+          expect(_buttonStates(tester).values, everyElement(isFalse));
+          await _wait(tester, 1000);
+          await _tapNow(tester, yes);
+          expect(controller.calls, isEmpty);
+          expect(dialog, findsOneWidget);
+
+          await expectRearmsAfterResume(tester, controller, yes);
+          await _tapNow(tester, yes);
+          await tester.pumpAndSettle();
+          expect(controller.calls, ['$answer true']);
+          expect(dialog, findsNothing);
+        });
+
+        testWidgets('$name: Esc right after resumed gives the safe answer at '
+            'once', (tester) async {
+          resumeOnTearDown(tester);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          final controller = await _pumpWith(
+            tester,
+            code,
+            questions: [question],
+          );
+          await stepLifecycle(tester, AppLifecycleState.inactive);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          expect(_buttonStates(tester).values, everyElement(isFalse));
+
+          await _escape(tester);
+
+          expect(controller.calls, ['$answer false']);
+          expect(dialog, findsNothing);
+        });
+
+        testWidgets('$name follows only the lifecycle: the file picker does '
+            'not disarm it', (tester) async {
+          final controller = await _pumpWith(
+            tester,
+            code,
+            questions: [question],
+          );
+          expect(_buttonStates(tester).values, everyElement(isTrue));
+
+          controller.emit(NodeState(questions: [question], pickerOpen: true));
+          await tester.pump();
+          expect(find.byType(AlertDialog), findsOneWidget);
+          expect(_buttonStates(tester).values, everyElement(isTrue));
+        });
+      }
     });
   }
 

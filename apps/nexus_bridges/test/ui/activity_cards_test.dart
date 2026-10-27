@@ -5,7 +5,6 @@ import 'package:nexus_bridges/src/ui/activity_cards.dart';
 import 'package:nexus_bridges/src/ui/armed.dart';
 import 'package:nexus_bridges/src/ui/format.dart';
 import 'package:nexus_bridges/src/ui/icons/glyphs.dart';
-import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
 import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
