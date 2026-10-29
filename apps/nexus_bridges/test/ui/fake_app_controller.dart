@@ -211,7 +211,11 @@ class FakeAppController extends AppController {
   }
 }
 
-Widget homeApp(AppController controller, String languageCode) {
+Widget homeApp(
+  AppController controller,
+  String languageCode, {
+  bool reduceMotion = false,
+}) {
   return MaterialApp(
     locale: Locale(languageCode),
     supportedLocales: const [Locale('en'), Locale('es')],
@@ -225,6 +229,12 @@ Widget homeApp(AppController controller, String languageCode) {
     darkTheme: buildTheme(Brightness.dark),
     themeMode: ThemeMode.system,
     themeAnimationDuration: Duration.zero,
+    builder: reduceMotion
+        ? (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          )
+        : null,
     home: NetworkPromptHost(
       controller: controller,
       child: PairingHost(controller: controller, child: HomeScreen(controller)),
@@ -237,8 +247,11 @@ Future<void> pumpHome(
   AppController controller,
   String languageCode, {
   bool settle = true,
+  bool reduceMotion = false,
 }) async {
-  await tester.pumpWidget(homeApp(controller, languageCode));
+  await tester.pumpWidget(
+    homeApp(controller, languageCode, reduceMotion: reduceMotion),
+  );
   if (settle) {
     await tester.pumpAndSettle();
   } else {
