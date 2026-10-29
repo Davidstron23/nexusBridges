@@ -76,7 +76,7 @@ class _NexusBridgesAppState extends State<NexusBridgesApp> {
       ],
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       themeAnimationDuration: Duration.zero,
       home: NetworkPromptHost(
         controller: widget.controller,

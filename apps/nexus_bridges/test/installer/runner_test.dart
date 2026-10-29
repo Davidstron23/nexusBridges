@@ -219,7 +219,7 @@ void main() {
     });
   });
 
-  group('E254: minimum client area and live title bar theme', () {
+  group('E254 and E280: minimum client area and an always dark title bar', () {
     late String rawWindow;
     late String window;
 
@@ -235,16 +235,58 @@ void main() {
       expect(_count(window, 'kMinWindowHeight = '), 1);
     });
 
-    test('both messages are handled in Win32Window::MessageHandler', () {
+    test('WM_GETMINMAXINFO is handled once in Win32Window::MessageHandler', () {
       final handler = _indexOf(window, 'Win32Window::MessageHandler(');
-      for (final message in ['WM_GETMINMAXINFO', 'WM_SETTINGCHANGE']) {
-        expect(_count(window, 'case $message:'), 1, reason: message);
-        expect(
-          _indexOf(window, 'case $message:'),
-          greaterThan(handler),
-          reason: message,
-        );
+      expect(_count(window, 'case WM_GETMINMAXINFO:'), 1);
+      expect(_indexOf(window, 'case WM_GETMINMAXINFO:'), greaterThan(handler));
+    });
+
+    test('there is no WM_SETTINGCHANGE handler any more', () {
+      expect(rawWindow.contains('WM_SETTINGCHANGE'), isFalse);
+      expect(rawWindow.contains('ImmersiveColorSet'), isFalse);
+      expect(rawWindow.contains('wcscmp'), isFalse);
+      expect(rawWindow.contains('#include <cwchar>'), isFalse);
+    });
+
+    test('UpdateTheme sets TRUE in DWMWA_USE_IMMERSIVE_DARK_MODE without '
+        'reading the registry', () {
+      final start = _indexOf(
+        window,
+        'void Win32Window::UpdateTheme(HWND const window) {',
+      );
+      final open = window.indexOf('{', start);
+      final close = window.indexOf('\n}', open);
+      expect(close, isNonNegative);
+      final body = window
+          .substring(open + 1, close)
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      expect(
+        body,
+        'BOOL enable_dark_mode = TRUE; '
+        'DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, '
+        '&enable_dark_mode, sizeof(enable_dark_mode));',
+      );
+      expect(_count(window, 'void Win32Window::UpdateTheme('), 1);
+    });
+
+    test('nothing reads the Windows theme from the registry', () {
+      for (final gone in [
+        'RegGetValue',
+        'AppsUseLightTheme',
+        'kGetPreferredBrightnessRegKey',
+        'kGetPreferredBrightnessRegValue',
+        r'Themes\\Personalize',
+        'Registry key for app theme preference',
+        'light_mode',
+      ]) {
+        expect(rawWindow.contains(gone), isFalse, reason: gone);
       }
+    });
+
+    test('the window still applies the theme when it is created', () {
+      final create = _indexOf(window, 'Win32Window::Create(');
+      expect(_indexOf(window, 'UpdateTheme(window);', create), greaterThan(0));
     });
 
     test('WM_GETMINMAXINFO sets ptMinTrackSize from the client area scaled '
@@ -295,34 +337,6 @@ void main() {
       expect(block.indexOf('return 0;'), greaterThan(assigned));
     });
 
-    test('WM_SETTINGCHANGE updates the title bar theme on '
-        'ImmersiveColorSet', () {
-      final block = _caseBlock(window, 'WM_SETTINGCHANGE');
-      expect(
-        block.contains(RegExp(r'lparam\s*!=\s*(0|NULL|nullptr)\b')),
-        isTrue,
-      );
-      expect(
-        block.contains(
-          RegExp(
-            r'wcscmp\(\s*reinterpret_cast<LPCWSTR>\(lparam\),\s*'
-            r'L"ImmersiveColorSet"\s*\)\s*==\s*0',
-          ),
-        ),
-        isTrue,
-      );
-      final check = _indexOf(block, 'L"ImmersiveColorSet"');
-      expect(_indexOf(block, 'UpdateTheme(hwnd);', check), greaterThan(check));
-      expect(_count(block, 'UpdateTheme(hwnd);'), 1);
-    });
-
-    test('WM_SETTINGCHANGE lets the message go on to the default '
-        'handler', () {
-      final block = _caseBlock(window, 'WM_SETTINGCHANGE').trimRight();
-      expect(block.contains('return'), isFalse);
-      expect(block, endsWith('break;'));
-    });
-
     test('the colorization message still updates the theme', () {
       expect(
         window.contains(
@@ -335,11 +349,14 @@ void main() {
     });
 
     test('the new C++ has no comments', () {
-      for (final message in ['WM_GETMINMAXINFO', 'WM_SETTINGCHANGE']) {
-        final block = _caseBlock(rawWindow, message);
-        expect(block.contains('//'), isFalse, reason: message);
-        expect(block.contains('/*'), isFalse, reason: message);
-      }
+      final block = _caseBlock(rawWindow, 'WM_GETMINMAXINFO');
+      expect(block.contains('//'), isFalse);
+      expect(block.contains('/*'), isFalse);
+      final start = _indexOf(rawWindow, 'void Win32Window::UpdateTheme(');
+      final end = rawWindow.indexOf('\n}', start);
+      final updateTheme = rawWindow.substring(start, end);
+      expect(updateTheme.contains('//'), isFalse);
+      expect(updateTheme.contains('/*'), isFalse);
       for (final line in rawWindow.split('\n')) {
         if (line.contains('kMinWindow')) {
           expect(line.contains('//'), isFalse, reason: line);

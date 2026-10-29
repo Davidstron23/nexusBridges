@@ -40,6 +40,31 @@ final class NbColors extends ThemeExtension<NbColors> {
     required this.popoverShadow,
     required this.discShadow,
     required this.nodeShadow,
+    required this.primaryButtonHover,
+    required this.dangerFill,
+    required this.ice,
+    required this.iceWeak,
+    required this.scrim,
+    required this.segment,
+    required this.keyFill,
+    required this.keyShadow,
+    required this.keyOkBorder,
+    required this.okShadow,
+    required this.sheen,
+    required this.neutralWeak,
+    required this.stageBorder,
+    required this.stageTrack,
+    required this.stageWeak,
+    required this.stageHint,
+    required this.stageDashedRing,
+    required this.discTint,
+    required this.haloOpacity,
+    required this.primaryButtonShadow,
+    required this.primaryButtonHoverShadow,
+    required this.dangerButtonHoverShadow,
+    required this.buttonHighlight,
+    required this.buttonHighlightHover,
+    required this.headingWeight,
   });
 
   final Color primary;
@@ -80,70 +105,175 @@ final class NbColors extends ThemeExtension<NbColors> {
   final List<BoxShadow> popoverShadow;
   final List<BoxShadow> discShadow;
   final Color nodeShadow;
+  final Color primaryButtonHover;
+  final Color dangerFill;
+  final Color ice;
+  final Color iceWeak;
+  final Color scrim;
+  final Color segment;
+  final Color keyFill;
+  final List<BoxShadow> keyShadow;
+  final Color keyOkBorder;
+  final List<BoxShadow> okShadow;
+  final Color sheen;
+  final Color neutralWeak;
+  final Color stageBorder;
+  final Color stageTrack;
+  final Color stageWeak;
+  final Color stageHint;
+  final Color stageDashedRing;
+  final double discTint;
+  final double haloOpacity;
+  final List<BoxShadow> primaryButtonShadow;
+  final List<BoxShadow> primaryButtonHoverShadow;
+  final List<BoxShadow> dangerButtonHoverShadow;
+  final Color buttonHighlight;
+  final Color buttonHighlightHover;
+  final double headingWeight;
 
   static const NbColors light = NbColors(
     primary: Color(0xFF6D4AFF),
     primaryHover: Color(0xFF5B3AEB),
-    primaryWeak: Color(0xFFEEEBFF),
-    primaryInk: Color(0xFF5B3AEB),
+    primaryWeak: Color(0xFFE0DBFF),
+    primaryInk: Color(0xFF6336E1),
     onPrimary: Color(0xFFFFFFFF),
-    hubTop: Color(0xFF7B5CFF),
-    hubBottom: Color(0xFF5A35F0),
-    glow: Color.fromRGBO(109, 74, 255, 0.16),
-    halo: Color.fromRGBO(109, 74, 255, 0.07),
-    success: Color(0xFF178567),
-    successWeak: Color(0xFFE2F4EC),
+    hubTop: Color(0xFF7E5FFF),
+    hubBottom: Color(0xFF622FF3),
+    glow: Color.fromRGBO(109, 74, 255, 0.13),
+    halo: Color.fromRGBO(109, 74, 255, 0.06),
+    success: Color(0xFF008B68),
+    successWeak: Color(0xFFB0F3D8),
     onSuccessDisc: Color(0xFFFFFFFF),
-    netSurface: Color(0xFFE2F4EB),
-    netDiscTop: Color(0xFF22B08A),
-    netDiscBottom: Color(0xFF127256),
-    warning: Color(0xFFA35F00),
-    warningRing: Color(0xFFFF9900),
-    warningWeak: Color(0xFFFFF2DE),
-    danger: Color(0xFFC2273F),
-    dangerWeak: Color(0xFFFCE8EB),
-    ground: Color(0xFFF3F2F7),
-    card: Color(0xFFFFFFFF),
-    surfaceWeak: Color(0xFFF4F3F8),
-    track: Color(0xFFE9E7F0),
-    nodeTop: Color(0xFFFFFFFF),
-    nodeBottom: Color(0xFFF3F1FA),
-    border: Color(0xFFDEDBE7),
-    borderWeak: Color(0xFFECEAF2),
-    text: Color(0xFF0C0C14),
-    textWeak: Color(0xFF5A5766),
-    hint: Color(0xFF8B8898),
+    netSurface: Color(0xFFD4F1E9),
+    netDiscTop: Color(0xFF2BB18B),
+    netDiscBottom: Color(0xFF007A5B),
+    warning: Color(0xFF8C5700),
+    warningRing: Color(0xFFD48300),
+    warningWeak: Color(0xFFFFE0AE),
+    danger: Color(0xFFB72649),
+    dangerWeak: Color(0xFFFFD6DB),
+    ground: Color(0xFFF3F1FB),
+    card: Color(0xFFFEFDFF),
+    surfaceWeak: Color(0xFFF1EFFA),
+    track: Color(0xFFDDDAEB),
+    nodeTop: Color(0xFFFEFEFF),
+    nodeBottom: Color(0xFFEEEBFB),
+    border: Color(0xFFD0CCE2),
+    borderWeak: Color(0xFFE0DDED),
+    text: Color(0xFF161420),
+    textWeak: Color(0xFF5B586A),
+    hint: Color(0xFF878493),
     tooltip: Color(0xFF0C0C14),
-    successInk: Color(0xFF127256),
+    successInk: Color(0xFF007455),
     primaryButton: Color(0xFF6D4AFF),
     cardShadow: [
+      BoxShadow(color: Color.fromRGBO(35, 28, 56, 0.05), spreadRadius: 1),
       BoxShadow(
-        color: Color.fromRGBO(20, 14, 60, 0.05),
+        color: Color.fromRGBO(35, 28, 56, 0.06),
         offset: Offset(0, 1),
         blurRadius: 2,
       ),
       BoxShadow(
-        color: Color.fromRGBO(20, 14, 60, 0.06),
+        color: Color.fromRGBO(35, 28, 56, 0.07),
         offset: Offset(0, 6),
         blurRadius: 18,
       ),
     ],
     popoverShadow: [
-      BoxShadow(color: Color.fromRGBO(20, 14, 60, 0.08), spreadRadius: 1),
+      BoxShadow(color: Color.fromRGBO(35, 28, 56, 0.11), spreadRadius: 1),
       BoxShadow(
-        color: Color.fromRGBO(20, 14, 60, 0.18),
+        color: Color.fromRGBO(35, 28, 56, 0.06),
+        offset: Offset(0, 2),
+        blurRadius: 6,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.18),
         offset: Offset(0, 18),
         blurRadius: 40,
       ),
     ],
     discShadow: [
       BoxShadow(
-        color: Color.fromRGBO(18, 114, 86, 0.3),
+        color: Color.fromRGBO(0, 109, 76, 0.28),
         offset: Offset(0, 4),
         blurRadius: 10,
       ),
     ],
-    nodeShadow: Color.fromRGBO(42, 31, 107, 0.16),
+    nodeShadow: Color.fromRGBO(35, 28, 56, 0.16),
+    primaryButtonHover: Color(0xFF7958FF),
+    dangerFill: Color(0xFFB72649),
+    ice: Color(0xFF4378AD),
+    iceWeak: Color(0xFFE2F2FF),
+    scrim: Color.fromRGBO(35, 28, 56, 0.32),
+    segment: Color(0xFFE4E2F0),
+    keyFill: Color(0xFFFEFDFF),
+    keyShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.08),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+    ],
+    keyOkBorder: Color.fromRGBO(0, 139, 104, 0.6),
+    okShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(0, 139, 104, 0.5),
+        offset: Offset(0, 6),
+        blurRadius: 14,
+        spreadRadius: -6,
+      ),
+    ],
+    sheen: Color.fromRGBO(255, 255, 255, 0.85),
+    neutralWeak: Color(0xFFE3E1EF),
+    stageBorder: Color(0xFFBBB7CF),
+    stageTrack: Color(0xFFD6D3E7),
+    stageWeak: Color(0xFFEAE7F6),
+    stageHint: Color(0xFF817D91),
+    stageDashedRing: Color.fromRGBO(129, 125, 145, 0.8),
+    discTint: 0.1,
+    haloOpacity: 0.12,
+    primaryButtonShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.2),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(109, 74, 255, 0.55),
+        offset: Offset(0, 8),
+        blurRadius: 18,
+        spreadRadius: -8,
+      ),
+    ],
+    primaryButtonHoverShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.18),
+        offset: Offset(0, 2),
+        blurRadius: 4,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(109, 74, 255, 0.6),
+        offset: Offset(0, 12),
+        blurRadius: 24,
+        spreadRadius: -10,
+      ),
+    ],
+    dangerButtonHoverShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.18),
+        offset: Offset(0, 2),
+        blurRadius: 4,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(192, 47, 80, 0.5),
+        offset: Offset(0, 12),
+        blurRadius: 24,
+        spreadRadius: -10,
+      ),
+    ],
+    buttonHighlight: Color.fromRGBO(255, 255, 255, 0.2),
+    buttonHighlightHover: Color.fromRGBO(255, 255, 255, 0.24),
+    headingWeight: 650,
   );
 
   static const NbColors dark = NbColors(
@@ -209,6 +339,67 @@ final class NbColors extends ThemeExtension<NbColors> {
       ),
     ],
     nodeShadow: Color.fromRGBO(0, 0, 0, 0.5),
+    primaryButtonHover: Color(0xFF7958FF),
+    dangerFill: Color(0xFFC9324B),
+    ice: Color(0xFF8EC5FF),
+    iceWeak: Color.fromRGBO(142, 197, 255, 0.16),
+    scrim: Color.fromRGBO(0, 0, 0, 0.56),
+    segment: Color(0xFF292633),
+    keyFill: Color(0xFF292633),
+    keyShadow: [],
+    keyOkBorder: Color.fromRGBO(61, 214, 169, 0.45),
+    okShadow: [],
+    sheen: Color.fromRGBO(255, 255, 255, 0.22),
+    neutralWeak: Color(0xFF292633),
+    stageBorder: Color(0xFF3A3648),
+    stageTrack: Color(0xFF33303F),
+    stageWeak: Color(0xFF292633),
+    stageHint: Color(0xFF8E8A9E),
+    stageDashedRing: Color(0xFF3A3648),
+    discTint: 0,
+    haloOpacity: 0.13,
+    primaryButtonShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(40, 18, 140, 0.35),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(109, 74, 255, 0.7),
+        offset: Offset(0, 10),
+        blurRadius: 22,
+        spreadRadius: -8,
+      ),
+    ],
+    primaryButtonHoverShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(40, 18, 140, 0.3),
+        offset: Offset(0, 2),
+        blurRadius: 4,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(109, 74, 255, 0.8),
+        offset: Offset(0, 16),
+        blurRadius: 30,
+        spreadRadius: -10,
+      ),
+    ],
+    dangerButtonHoverShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(120, 10, 30, 0.3),
+        offset: Offset(0, 2),
+        blurRadius: 4,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(194, 39, 63, 0.75),
+        offset: Offset(0, 16),
+        blurRadius: 30,
+        spreadRadius: -10,
+      ),
+    ],
+    buttonHighlight: Color.fromRGBO(255, 255, 255, 0.22),
+    buttonHighlightHover: Color.fromRGBO(255, 255, 255, 0.26),
+    headingWeight: 600,
   );
 
   static NbColors of(BuildContext context) {
@@ -257,6 +448,31 @@ final class NbColors extends ThemeExtension<NbColors> {
     List<BoxShadow>? popoverShadow,
     List<BoxShadow>? discShadow,
     Color? nodeShadow,
+    Color? primaryButtonHover,
+    Color? dangerFill,
+    Color? ice,
+    Color? iceWeak,
+    Color? scrim,
+    Color? segment,
+    Color? keyFill,
+    List<BoxShadow>? keyShadow,
+    Color? keyOkBorder,
+    List<BoxShadow>? okShadow,
+    Color? sheen,
+    Color? neutralWeak,
+    Color? stageBorder,
+    Color? stageTrack,
+    Color? stageWeak,
+    Color? stageHint,
+    Color? stageDashedRing,
+    double? discTint,
+    double? haloOpacity,
+    List<BoxShadow>? primaryButtonShadow,
+    List<BoxShadow>? primaryButtonHoverShadow,
+    List<BoxShadow>? dangerButtonHoverShadow,
+    Color? buttonHighlight,
+    Color? buttonHighlightHover,
+    double? headingWeight,
   }) {
     return NbColors(
       primary: primary ?? this.primary,
@@ -297,6 +513,33 @@ final class NbColors extends ThemeExtension<NbColors> {
       popoverShadow: popoverShadow ?? this.popoverShadow,
       discShadow: discShadow ?? this.discShadow,
       nodeShadow: nodeShadow ?? this.nodeShadow,
+      primaryButtonHover: primaryButtonHover ?? this.primaryButtonHover,
+      dangerFill: dangerFill ?? this.dangerFill,
+      ice: ice ?? this.ice,
+      iceWeak: iceWeak ?? this.iceWeak,
+      scrim: scrim ?? this.scrim,
+      segment: segment ?? this.segment,
+      keyFill: keyFill ?? this.keyFill,
+      keyShadow: keyShadow ?? this.keyShadow,
+      keyOkBorder: keyOkBorder ?? this.keyOkBorder,
+      okShadow: okShadow ?? this.okShadow,
+      sheen: sheen ?? this.sheen,
+      neutralWeak: neutralWeak ?? this.neutralWeak,
+      stageBorder: stageBorder ?? this.stageBorder,
+      stageTrack: stageTrack ?? this.stageTrack,
+      stageWeak: stageWeak ?? this.stageWeak,
+      stageHint: stageHint ?? this.stageHint,
+      stageDashedRing: stageDashedRing ?? this.stageDashedRing,
+      discTint: discTint ?? this.discTint,
+      haloOpacity: haloOpacity ?? this.haloOpacity,
+      primaryButtonShadow: primaryButtonShadow ?? this.primaryButtonShadow,
+      primaryButtonHoverShadow:
+          primaryButtonHoverShadow ?? this.primaryButtonHoverShadow,
+      dangerButtonHoverShadow:
+          dangerButtonHoverShadow ?? this.dangerButtonHoverShadow,
+      buttonHighlight: buttonHighlight ?? this.buttonHighlight,
+      buttonHighlightHover: buttonHighlightHover ?? this.buttonHighlightHover,
+      headingWeight: headingWeight ?? this.headingWeight,
     );
   }
 

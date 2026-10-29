@@ -945,7 +945,7 @@ void main() {
           expect(zoneColor(tester, strings.devicesTab), Colors.transparent);
         });
 
-        testWidgets('the tabs sit on surfaceWeak and the badge uses '
+        testWidgets('the tabs sit on segment and the badge uses '
             'primaryInk on primaryWeak', (tester) async {
           await mount(tester);
 
@@ -955,8 +955,7 @@ void main() {
               (widget) =>
                   widget is DecoratedBox &&
                   widget.decoration is BoxDecoration &&
-                  (widget.decoration as BoxDecoration).color ==
-                      colors.surfaceWeak,
+                  (widget.decoration as BoxDecoration).color == colors.segment,
             ),
           );
           expect(track, findsOneWidget);

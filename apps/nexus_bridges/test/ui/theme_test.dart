@@ -67,53 +67,152 @@ Map<String, Color> _colorsOf(NbColors c) => {
   'successInk': c.successInk,
   'primaryButton': c.primaryButton,
   'nodeShadow': c.nodeShadow,
+  'primaryButtonHover': c.primaryButtonHover,
+  'dangerFill': c.dangerFill,
+  'ice': c.ice,
+  'iceWeak': c.iceWeak,
+  'scrim': c.scrim,
+  'segment': c.segment,
+  'keyFill': c.keyFill,
+  'keyOkBorder': c.keyOkBorder,
+  'sheen': c.sheen,
+  'neutralWeak': c.neutralWeak,
+  'stageBorder': c.stageBorder,
+  'stageTrack': c.stageTrack,
+  'stageWeak': c.stageWeak,
+  'stageHint': c.stageHint,
+  'stageDashedRing': c.stageDashedRing,
+  'buttonHighlight': c.buttonHighlight,
+  'buttonHighlightHover': c.buttonHighlightHover,
 };
+
+Map<String, double> _numbersOf(NbColors c) => {
+  'discTint': c.discTint,
+  'haloOpacity': c.haloOpacity,
+  'headingWeight': c.headingWeight,
+};
+
+Map<String, List<BoxShadow>> _shadowsOf(NbColors c) => {
+  'cardShadow': c.cardShadow,
+  'popoverShadow': c.popoverShadow,
+  'discShadow': c.discShadow,
+  'keyShadow': c.keyShadow,
+  'okShadow': c.okShadow,
+  'primaryButtonShadow': c.primaryButtonShadow,
+  'primaryButtonHoverShadow': c.primaryButtonHoverShadow,
+  'dangerButtonHoverShadow': c.dangerButtonHoverShadow,
+};
+
+Map<String, Object> _fieldsOf(NbColors c) => {
+  ..._colorsOf(c),
+  ..._numbersOf(c),
+  ..._shadowsOf(c),
+};
+
+const Set<String> _newFields = {
+  'primaryButtonHover',
+  'dangerFill',
+  'ice',
+  'iceWeak',
+  'scrim',
+  'segment',
+  'keyFill',
+  'keyShadow',
+  'keyOkBorder',
+  'okShadow',
+  'sheen',
+  'neutralWeak',
+  'stageBorder',
+  'stageTrack',
+  'stageWeak',
+  'stageHint',
+  'stageDashedRing',
+  'discTint',
+  'haloOpacity',
+  'primaryButtonShadow',
+  'primaryButtonHoverShadow',
+  'dangerButtonHoverShadow',
+  'buttonHighlight',
+  'buttonHighlightHover',
+  'headingWeight',
+};
+
+Color _white(double alpha) => _hex(0xFFFFFF).withValues(alpha: alpha);
 
 final Map<String, (Color, Color)> _designColors = {
   'primary': (_hex(0x6D4AFF), _hex(0x8A6EFF)),
   'primaryHover': (_hex(0x5B3AEB), _hex(0x9D85FF)),
-  'primaryWeak': (_hex(0xEEEBFF), const Color.fromRGBO(138, 110, 255, 0.18)),
-  'primaryInk': (_hex(0x5B3AEB), _hex(0xA891FF)),
+  'primaryWeak': (_hex(0xE0DBFF), const Color.fromRGBO(138, 110, 255, 0.18)),
+  'primaryInk': (_hex(0x6336E1), _hex(0xA891FF)),
   'onPrimary': (_hex(0xFFFFFF), _hex(0xFFFFFF)),
-  'hubTop': (_hex(0x7B5CFF), _hex(0x9479FF)),
-  'hubBottom': (_hex(0x5A35F0), _hex(0x6D4AFF)),
+  'hubTop': (_hex(0x7E5FFF), _hex(0x9479FF)),
+  'hubBottom': (_hex(0x622FF3), _hex(0x6D4AFF)),
   'glow': (
-    const Color.fromRGBO(109, 74, 255, 0.16),
+    const Color.fromRGBO(109, 74, 255, 0.13),
     const Color.fromRGBO(138, 110, 255, 0.24),
   ),
   'halo': (
-    const Color.fromRGBO(109, 74, 255, 0.07),
+    const Color.fromRGBO(109, 74, 255, 0.06),
     const Color.fromRGBO(138, 110, 255, 0.06),
   ),
-  'success': (_hex(0x178567), _hex(0x3DD6A9)),
-  'successWeak': (_hex(0xE2F4EC), const Color.fromRGBO(30, 168, 133, 0.16)),
+  'success': (_hex(0x008B68), _hex(0x3DD6A9)),
+  'successWeak': (_hex(0xB0F3D8), const Color.fromRGBO(30, 168, 133, 0.16)),
   'onSuccessDisc': (_hex(0xFFFFFF), _hex(0x1F1D27)),
-  'netSurface': (_hex(0xE2F4EB), const Color.fromRGBO(30, 168, 133, 0.16)),
-  'netDiscTop': (_hex(0x22B08A), _hex(0x5AE8BF)),
-  'netDiscBottom': (_hex(0x127256), _hex(0x1EA885)),
-  'warning': (_hex(0xA35F00), _hex(0xFFB547)),
-  'warningRing': (_hex(0xFF9900), _hex(0xFF9900)),
-  'warningWeak': (_hex(0xFFF2DE), const Color.fromRGBO(255, 153, 0, 0.14)),
-  'danger': (_hex(0xC2273F), _hex(0xFF6B82)),
-  'dangerWeak': (_hex(0xFCE8EB), const Color.fromRGBO(220, 50, 81, 0.18)),
-  'ground': (_hex(0xF3F2F7), _hex(0x16141C)),
-  'card': (_hex(0xFFFFFF), _hex(0x1F1D27)),
-  'surfaceWeak': (_hex(0xF4F3F8), _hex(0x292633)),
-  'track': (_hex(0xE9E7F0), _hex(0x33303F)),
-  'nodeTop': (_hex(0xFFFFFF), _hex(0x2F2C3B)),
-  'nodeBottom': (_hex(0xF3F1FA), _hex(0x262330)),
-  'border': (_hex(0xDEDBE7), _hex(0x3A3648)),
-  'borderWeak': (_hex(0xECEAF2), _hex(0x2E2B39)),
-  'text': (_hex(0x0C0C14), _hex(0xFFFFFF)),
-  'textWeak': (_hex(0x5A5766), _hex(0xB4B0C4)),
-  'hint': (_hex(0x8B8898), _hex(0x8E8A9E)),
+  'netSurface': (_hex(0xD4F1E9), const Color.fromRGBO(30, 168, 133, 0.16)),
+  'netDiscTop': (_hex(0x2BB18B), _hex(0x5AE8BF)),
+  'netDiscBottom': (_hex(0x007A5B), _hex(0x1EA885)),
+  'warning': (_hex(0x8C5700), _hex(0xFFB547)),
+  'warningRing': (_hex(0xD48300), _hex(0xFF9900)),
+  'warningWeak': (_hex(0xFFE0AE), const Color.fromRGBO(255, 153, 0, 0.14)),
+  'danger': (_hex(0xB72649), _hex(0xFF6B82)),
+  'dangerWeak': (_hex(0xFFD6DB), const Color.fromRGBO(220, 50, 81, 0.18)),
+  'ground': (_hex(0xF3F1FB), _hex(0x16141C)),
+  'card': (_hex(0xFEFDFF), _hex(0x1F1D27)),
+  'surfaceWeak': (_hex(0xF1EFFA), _hex(0x292633)),
+  'track': (_hex(0xDDDAEB), _hex(0x33303F)),
+  'nodeTop': (_hex(0xFEFEFF), _hex(0x2F2C3B)),
+  'nodeBottom': (_hex(0xEEEBFB), _hex(0x262330)),
+  'border': (_hex(0xD0CCE2), _hex(0x3A3648)),
+  'borderWeak': (_hex(0xE0DDED), _hex(0x2E2B39)),
+  'text': (_hex(0x161420), _hex(0xFFFFFF)),
+  'textWeak': (_hex(0x5B586A), _hex(0xB4B0C4)),
+  'hint': (_hex(0x878493), _hex(0x8E8A9E)),
   'tooltip': (_hex(0x0C0C14), _hex(0x0C0C14)),
-  'successInk': (_hex(0x127256), _hex(0x3DD6A9)),
+  'successInk': (_hex(0x007455), _hex(0x3DD6A9)),
   'primaryButton': (_hex(0x6D4AFF), _hex(0x6D4AFF)),
   'nodeShadow': (
-    const Color.fromRGBO(42, 31, 107, 0.16),
+    const Color.fromRGBO(35, 28, 56, 0.16),
     const Color.fromRGBO(0, 0, 0, 0.5),
   ),
+  'primaryButtonHover': (_hex(0x7958FF), _hex(0x7958FF)),
+  'dangerFill': (_hex(0xB72649), _hex(0xC9324B)),
+  'ice': (_hex(0x4378AD), _hex(0x8EC5FF)),
+  'iceWeak': (_hex(0xE2F2FF), const Color.fromRGBO(142, 197, 255, 0.16)),
+  'scrim': (
+    const Color.fromRGBO(35, 28, 56, 0.32),
+    const Color.fromRGBO(0, 0, 0, 0.56),
+  ),
+  'segment': (_hex(0xE4E2F0), _hex(0x292633)),
+  'keyFill': (_hex(0xFEFDFF), _hex(0x292633)),
+  'keyOkBorder': (
+    _hex(0x008B68).withValues(alpha: 0.6),
+    _hex(0x3DD6A9).withValues(alpha: 0.45),
+  ),
+  'sheen': (_white(0.85), _white(0.22)),
+  'neutralWeak': (_hex(0xE3E1EF), _hex(0x292633)),
+  'stageBorder': (_hex(0xBBB7CF), _hex(0x3A3648)),
+  'stageTrack': (_hex(0xD6D3E7), _hex(0x33303F)),
+  'stageWeak': (_hex(0xEAE7F6), _hex(0x292633)),
+  'stageHint': (_hex(0x817D91), _hex(0x8E8A9E)),
+  'stageDashedRing': (const Color.fromRGBO(129, 125, 145, 0.8), _hex(0x3A3648)),
+  'buttonHighlight': (_white(0.2), _white(0.22)),
+  'buttonHighlightHover': (_white(0.24), _white(0.26)),
+};
+
+const Map<String, (double, double)> _designNumbers = {
+  'discTint': (0.1, 0),
+  'haloOpacity': (0.12, 0.13),
+  'headingWeight': (650, 600),
 };
 
 List<(String, Color, Color)> _textPairs(NbColors c) => [
@@ -154,6 +253,45 @@ List<(String, Color, Color)> _textPairs(NbColors c) => [
   ),
   ('card on text', c.card, c.text),
 ];
+
+List<(String, Color, Color)> _modalPairs(NbColors c) => [
+  ('onPrimary on primaryButtonHover', c.onPrimary, c.primaryButtonHover),
+  ('onPrimary on dangerFill', c.onPrimary, c.dangerFill),
+  ('successInk on card', c.successInk, c.card),
+  ('danger on card', c.danger, c.card),
+  ('warning on card', c.warning, c.card),
+  ('ice on card', c.ice, c.card),
+  ('textWeak on card for the eyebrow', c.textWeak, c.card),
+  (
+    'successInk on successWeak over card for the confirmed keys',
+    c.successInk,
+    Color.alphaBlend(c.successWeak, c.card),
+  ),
+  ('text on keyFill over card', c.text, Color.alphaBlend(c.keyFill, c.card)),
+  (
+    'danger on dangerWeak over card for the homonym alert',
+    c.danger,
+    Color.alphaBlend(c.dangerWeak, c.card),
+  ),
+  (
+    'primaryInk on primaryWeak over card for the chip and the tile',
+    c.primaryInk,
+    Color.alphaBlend(c.primaryWeak, c.card),
+  ),
+];
+
+String _functionBody(String source, String signature) {
+  final start = source.indexOf(signature);
+  expect(start, isNonNegative, reason: 'missing "$signature"');
+  final open = source.indexOf('{', start);
+  var depth = 0;
+  for (var i = open; i < source.length; i++) {
+    if (source[i] == '{') depth++;
+    if (source[i] == '}') depth--;
+    if (depth == 0) return source.substring(open + 1, i);
+  }
+  fail('unbalanced braces after "$signature"');
+}
 
 const Map<String, NbColors> _themes = {
   'light': NbColors.light,
@@ -207,7 +345,7 @@ bool _mayHoldColors(String path) {
 }
 
 void main() {
-  group('E253: tokens follow DESIGN.md', () {
+  group('E253 and E280: tokens follow the design', () {
     for (final entry in _themes.entries) {
       test('every color of ${entry.key} has the value of the design', () {
         final actual = _colorsOf(entry.value);
@@ -218,34 +356,191 @@ void main() {
           expect(actual[name], expected, reason: name);
         }
       });
+
+      test('every number of ${entry.key} has the value of point 183', () {
+        final actual = _numbersOf(entry.value);
+        expect(actual.keys.toSet(), _designNumbers.keys.toSet());
+        for (final name in _designNumbers.keys) {
+          final (light, dark) = _designNumbers[name]!;
+          expect(
+            actual[name],
+            entry.key == 'dark' ? dark : light,
+            reason: name,
+          );
+        }
+      });
     }
+
+    test('the dark values that point 183 ties to another token match it', () {
+      final c = NbColors.dark;
+      expect(c.segment, c.surfaceWeak);
+      expect(c.keyFill, c.surfaceWeak);
+      expect(c.neutralWeak, c.surfaceWeak);
+      expect(c.stageWeak, c.surfaceWeak);
+      expect(c.stageBorder, c.border);
+      expect(c.stageDashedRing, c.border);
+      expect(c.stageTrack, c.track);
+      expect(c.stageHint, c.hint);
+      expect(c.keyShadow, isEmpty);
+      expect(c.okShadow, isEmpty);
+    });
+
+    test('keyOkBorder is success at 60 % in light and 45 % in dark', () {
+      expect(
+        NbColors.light.keyOkBorder,
+        NbColors.light.success.withValues(alpha: 0.6),
+      );
+      expect(
+        NbColors.dark.keyOkBorder,
+        NbColors.dark.success.withValues(alpha: 0.45),
+      );
+    });
+
+    test('the light values that stay are the same as before point 183', () {
+      final c = NbColors.light;
+      expect(c.primary, _hex(0x6D4AFF));
+      expect(c.primaryButton, _hex(0x6D4AFF));
+      expect(c.primaryHover, _hex(0x5B3AEB));
+      expect(c.onPrimary, _hex(0xFFFFFF));
+      expect(c.onSuccessDisc, _hex(0xFFFFFF));
+      expect(c.tooltip, _hex(0x0C0C14));
+    });
 
     test('the shadows follow the shadow vocabulary in light', () {
       expect(NbColors.light.cardShadow, const [
+        BoxShadow(color: Color.fromRGBO(35, 28, 56, 0.05), spreadRadius: 1),
         BoxShadow(
-          color: Color.fromRGBO(20, 14, 60, 0.05),
+          color: Color.fromRGBO(35, 28, 56, 0.06),
           offset: Offset(0, 1),
           blurRadius: 2,
         ),
         BoxShadow(
-          color: Color.fromRGBO(20, 14, 60, 0.06),
+          color: Color.fromRGBO(35, 28, 56, 0.07),
           offset: Offset(0, 6),
           blurRadius: 18,
         ),
       ]);
       expect(NbColors.light.popoverShadow, const [
-        BoxShadow(color: Color.fromRGBO(20, 14, 60, 0.08), spreadRadius: 1),
+        BoxShadow(color: Color.fromRGBO(35, 28, 56, 0.11), spreadRadius: 1),
         BoxShadow(
-          color: Color.fromRGBO(20, 14, 60, 0.18),
+          color: Color.fromRGBO(35, 28, 56, 0.06),
+          offset: Offset(0, 2),
+          blurRadius: 6,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(35, 28, 56, 0.18),
           offset: Offset(0, 18),
           blurRadius: 40,
         ),
       ]);
       expect(NbColors.light.discShadow, const [
         BoxShadow(
-          color: Color.fromRGBO(18, 114, 86, 0.3),
+          color: Color.fromRGBO(0, 109, 76, 0.28),
           offset: Offset(0, 4),
           blurRadius: 10,
+        ),
+      ]);
+    });
+
+    test('the new shadows of point 183 in light', () {
+      final c = NbColors.light;
+      expect(c.keyShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(35, 28, 56, 0.08),
+          offset: Offset(0, 1),
+          blurRadius: 2,
+        ),
+      ]);
+      expect(c.okShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(0, 139, 104, 0.5),
+          offset: Offset(0, 6),
+          blurRadius: 14,
+          spreadRadius: -6,
+        ),
+      ]);
+      expect(c.primaryButtonShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(35, 28, 56, 0.2),
+          offset: Offset(0, 1),
+          blurRadius: 2,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(109, 74, 255, 0.55),
+          offset: Offset(0, 8),
+          blurRadius: 18,
+          spreadRadius: -8,
+        ),
+      ]);
+      expect(c.primaryButtonHoverShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(35, 28, 56, 0.18),
+          offset: Offset(0, 2),
+          blurRadius: 4,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(109, 74, 255, 0.6),
+          offset: Offset(0, 12),
+          blurRadius: 24,
+          spreadRadius: -10,
+        ),
+      ]);
+      expect(c.dangerButtonHoverShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(35, 28, 56, 0.18),
+          offset: Offset(0, 2),
+          blurRadius: 4,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(192, 47, 80, 0.5),
+          offset: Offset(0, 12),
+          blurRadius: 24,
+          spreadRadius: -10,
+        ),
+      ]);
+    });
+
+    test('the new shadows of point 183 in dark', () {
+      final c = NbColors.dark;
+      expect(c.keyShadow, const <BoxShadow>[]);
+      expect(c.okShadow, const <BoxShadow>[]);
+      expect(c.primaryButtonShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(40, 18, 140, 0.35),
+          offset: Offset(0, 1),
+          blurRadius: 2,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(109, 74, 255, 0.7),
+          offset: Offset(0, 10),
+          blurRadius: 22,
+          spreadRadius: -8,
+        ),
+      ]);
+      expect(c.primaryButtonHoverShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(40, 18, 140, 0.3),
+          offset: Offset(0, 2),
+          blurRadius: 4,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(109, 74, 255, 0.8),
+          offset: Offset(0, 16),
+          blurRadius: 30,
+          spreadRadius: -10,
+        ),
+      ]);
+      expect(c.dangerButtonHoverShadow, const [
+        BoxShadow(
+          color: Color.fromRGBO(120, 10, 30, 0.3),
+          offset: Offset(0, 2),
+          blurRadius: 4,
+        ),
+        BoxShadow(
+          color: Color.fromRGBO(194, 39, 63, 0.75),
+          offset: Offset(0, 16),
+          blurRadius: 30,
+          spreadRadius: -10,
         ),
       ]);
     });
@@ -302,11 +597,118 @@ void main() {
       expect(copy.popoverShadow, NbColors.light.popoverShadow);
       expect(copy.discShadow, NbColors.light.discShadow);
     });
+
+    test('copyWith without arguments keeps every field', () {
+      expect(_fieldsOf(NbColors.light.copyWith()), _fieldsOf(NbColors.light));
+      expect(_fieldsOf(NbColors.dark.copyWith()), _fieldsOf(NbColors.dark));
+    });
+
+    test('copyWith carries every new field of point 183 and keeps the '
+        'rest', () {
+      final d = NbColors.dark;
+      final copy = NbColors.light.copyWith(
+        primaryButtonHover: d.primaryButtonHover,
+        dangerFill: d.dangerFill,
+        ice: d.ice,
+        iceWeak: d.iceWeak,
+        scrim: d.scrim,
+        segment: d.segment,
+        keyFill: d.keyFill,
+        keyShadow: d.keyShadow,
+        keyOkBorder: d.keyOkBorder,
+        okShadow: d.okShadow,
+        sheen: d.sheen,
+        neutralWeak: d.neutralWeak,
+        stageBorder: d.stageBorder,
+        stageTrack: d.stageTrack,
+        stageWeak: d.stageWeak,
+        stageHint: d.stageHint,
+        stageDashedRing: d.stageDashedRing,
+        discTint: d.discTint,
+        haloOpacity: d.haloOpacity,
+        primaryButtonShadow: d.primaryButtonShadow,
+        primaryButtonHoverShadow: d.primaryButtonHoverShadow,
+        dangerButtonHoverShadow: d.dangerButtonHoverShadow,
+        buttonHighlight: d.buttonHighlight,
+        buttonHighlightHover: d.buttonHighlightHover,
+        headingWeight: d.headingWeight,
+      );
+      final actual = _fieldsOf(copy);
+      final light = _fieldsOf(NbColors.light);
+      final dark = _fieldsOf(d);
+      expect(_newFields.difference(actual.keys.toSet()), isEmpty);
+      for (final name in actual.keys) {
+        expect(
+          actual[name],
+          _newFields.contains(name) ? dark[name] : light[name],
+          reason: name,
+        );
+      }
+    });
+
+    for (final name in _newFields) {
+      test('copyWith changes only $name when it is the only argument', () {
+        final d = NbColors.dark;
+        final copy = switch (name) {
+          'primaryButtonHover' => NbColors.light.copyWith(
+            primaryButtonHover: _hex(0x123456),
+          ),
+          'dangerFill' => NbColors.light.copyWith(dangerFill: _hex(0x123456)),
+          'ice' => NbColors.light.copyWith(ice: _hex(0x123456)),
+          'iceWeak' => NbColors.light.copyWith(iceWeak: _hex(0x123456)),
+          'scrim' => NbColors.light.copyWith(scrim: _hex(0x123456)),
+          'segment' => NbColors.light.copyWith(segment: _hex(0x123456)),
+          'keyFill' => NbColors.light.copyWith(keyFill: _hex(0x123456)),
+          'keyShadow' => NbColors.light.copyWith(
+            keyShadow: d.primaryButtonShadow,
+          ),
+          'keyOkBorder' => NbColors.light.copyWith(keyOkBorder: _hex(0x123456)),
+          'okShadow' => NbColors.light.copyWith(
+            okShadow: d.primaryButtonShadow,
+          ),
+          'sheen' => NbColors.light.copyWith(sheen: _hex(0x123456)),
+          'neutralWeak' => NbColors.light.copyWith(neutralWeak: _hex(0x123456)),
+          'stageBorder' => NbColors.light.copyWith(stageBorder: _hex(0x123456)),
+          'stageTrack' => NbColors.light.copyWith(stageTrack: _hex(0x123456)),
+          'stageWeak' => NbColors.light.copyWith(stageWeak: _hex(0x123456)),
+          'stageHint' => NbColors.light.copyWith(stageHint: _hex(0x123456)),
+          'stageDashedRing' => NbColors.light.copyWith(
+            stageDashedRing: _hex(0x123456),
+          ),
+          'discTint' => NbColors.light.copyWith(discTint: 0.37),
+          'haloOpacity' => NbColors.light.copyWith(haloOpacity: 0.37),
+          'primaryButtonShadow' => NbColors.light.copyWith(
+            primaryButtonShadow: d.dangerButtonHoverShadow,
+          ),
+          'primaryButtonHoverShadow' => NbColors.light.copyWith(
+            primaryButtonHoverShadow: d.dangerButtonHoverShadow,
+          ),
+          'dangerButtonHoverShadow' => NbColors.light.copyWith(
+            dangerButtonHoverShadow: d.primaryButtonShadow,
+          ),
+          'buttonHighlight' => NbColors.light.copyWith(
+            buttonHighlight: _hex(0x123456),
+          ),
+          'buttonHighlightHover' => NbColors.light.copyWith(
+            buttonHighlightHover: _hex(0x123456),
+          ),
+          'headingWeight' => NbColors.light.copyWith(headingWeight: 700),
+          _ => fail('no copyWith case for $name'),
+        };
+        final before = _fieldsOf(NbColors.light);
+        final after = _fieldsOf(copy);
+        expect(after[name], isNot(before[name]), reason: name);
+        expect(after..remove(name), before..remove(name));
+      });
+    }
   });
 
-  group('E253: every text pair reaches 4.5:1', () {
+  group('E253 and E280: every text pair reaches 4.5:1', () {
     for (final entry in _themes.entries) {
-      for (final (name, foreground, background) in _textPairs(entry.value)) {
+      for (final (name, foreground, background) in [
+        ..._textPairs(entry.value),
+        ..._modalPairs(entry.value),
+      ]) {
         test('$name in ${entry.key}', () {
           expect(
             _contrast(foreground, background),
@@ -543,10 +945,10 @@ void main() {
     });
   });
 
-  group('E253: the app follows the Windows theme live', () {
+  group('E280: the app is dark by default, whatever the Windows theme', () {
     for (final code in languageCodes) {
-      testWidgets('NexusBridgesApp switches from light to dark after one '
-          'pump, without animation ($code)', (tester) async {
+      testWidgets('NexusBridgesApp uses ThemeMode.dark and keeps the light '
+          'theme ready, without animation ($code)', (tester) async {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         tester.platformDispatcher.platformBrightnessTestValue =
             Brightness.light;
@@ -554,30 +956,45 @@ void main() {
         await tester.pumpAndSettle();
 
         final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
-        expect(app.themeMode, ThemeMode.system);
+        expect(app.themeMode, ThemeMode.dark);
         expect(app.themeAnimationDuration, Duration.zero);
         expect(app.theme!.extension<NbColors>(), same(NbColors.light));
+        expect(app.theme!.brightness, Brightness.light);
         expect(app.darkTheme!.extension<NbColors>(), same(NbColors.dark));
-
-        BuildContext home() => tester.element(find.byType(HomeScreen));
-        expect(NbColors.of(home()), same(NbColors.light));
-        expect(Theme.of(home()).brightness, Brightness.light);
+        expect(app.darkTheme!.brightness, Brightness.dark);
         expect(
-          AppStringsDelegate.of(home()).runtimeType,
+          AppStringsDelegate.of(tester.element(find.byType(HomeScreen)))
+              .runtimeType,
           stringsFor(code).runtimeType,
         );
+      });
 
+      testWidgets('NexusBridgesApp stays dark with the platform in light, in '
+          'dark and back in light ($code)', (tester) async {
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        tester.platformDispatcher.platformBrightnessTestValue =
+            Brightness.light;
+        await tester.pumpWidget(NexusBridgesApp(_LanguageController(code)));
+        await tester.pumpAndSettle();
+
+        BuildContext home() => tester.element(find.byType(HomeScreen));
+        void expectDark() {
+          expect(NbColors.of(home()), same(NbColors.dark));
+          expect(Theme.of(home()).brightness, Brightness.dark);
+          expect(
+            Theme.of(home()).scaffoldBackgroundColor,
+            NbColors.dark.ground,
+          );
+        }
+
+        expectDark();
         tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
         await tester.pump();
-        expect(NbColors.of(home()), same(NbColors.dark));
-        expect(Theme.of(home()).brightness, Brightness.dark);
-        expect(Theme.of(home()).scaffoldBackgroundColor, NbColors.dark.ground);
-
+        expectDark();
         tester.platformDispatcher.platformBrightnessTestValue =
             Brightness.light;
         await tester.pump();
-        expect(NbColors.of(home()), same(NbColors.light));
-        expect(Theme.of(home()).scaffoldBackgroundColor, NbColors.light.ground);
+        expectDark();
       });
 
       testWidgets('pumpHome follows the platform brightness too ($code)', (
@@ -598,6 +1015,98 @@ void main() {
         expect(NbColors.of(home()), same(NbColors.light));
       });
     }
+  });
+
+  group('E280: the tabs and the diagram header use the new tokens', () {
+    for (final entry in _themes.entries) {
+      for (final code in languageCodes) {
+        testWidgets('the tab rail is segment and both tab labels weigh '
+            '${entry.value.headingWeight.toInt()} over w600 '
+            '(${entry.key}, $code)', (tester) async {
+          final strings = stringsFor(code);
+          final c = entry.value;
+          addTearDown(
+            tester.platformDispatcher.clearPlatformBrightnessTestValue,
+          );
+          tester.platformDispatcher.platformBrightnessTestValue = _brightnessOf(
+            entry.key,
+          );
+          await pumpHome(
+            tester,
+            FakeAppController(state: const NodeState()),
+            code,
+          );
+          expect(NbColors.of(tester.element(find.byType(HomeScreen))), same(c));
+
+          final expectedWeight = entry.key == 'dark' ? 600.0 : 650.0;
+          for (final label in [strings.devicesTab, strings.activityTab]) {
+            final style = tester.widget<Text>(find.text(label)).style!;
+            expect(style.fontWeight, FontWeight.w600, reason: label);
+            expect(style.fontVariations, [
+              FontVariation.weight(expectedWeight),
+            ], reason: label);
+          }
+
+          final rails = find.ancestor(
+            of: find.text(strings.devicesTab),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is DecoratedBox &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration as BoxDecoration).color == c.segment,
+            ),
+          );
+          expect(rails, findsOneWidget);
+          expect(
+            find.descendant(
+              of: rails,
+              matching: find.text(strings.activityTab),
+            ),
+            findsOneWidget,
+          );
+          if (entry.key == 'light') {
+            expect(c.segment, isNot(c.surfaceWeak));
+            expect(
+              find.ancestor(
+                of: find.text(strings.devicesTab),
+                matching: find.byWidgetPredicate(
+                  (widget) =>
+                      widget is DecoratedBox &&
+                      widget.decoration is BoxDecoration &&
+                      (widget.decoration as BoxDecoration).color ==
+                          c.surfaceWeak,
+                ),
+              ),
+              findsNothing,
+            );
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+
+    test('FlowPainter paints the "My network" header with headingWeight over '
+        'NbText.title', () {
+      final source = File(
+        'lib${Platform.pathSeparator}src${Platform.pathSeparator}ui'
+        '${Platform.pathSeparator}diagram${Platform.pathSeparator}'
+        'flow_painter.dart',
+      ).readAsStringSync();
+      final header = _functionBody(source, 'void _paintHeader(');
+      final compact = header.replaceAll(RegExp(r'\s+'), '');
+      expect(
+        compact.contains(
+          RegExp(
+            r'NbText\.title\.copyWith\(fontVariations:\['
+            r'FontVariation\.weight\(colors\.headingWeight\)\],?\)',
+          ),
+        ),
+        isTrue,
+      );
+      expect(compact.contains('NbText.title,'), isFalse);
+      expect(compact.contains('NbText.title)'), isFalse);
+      expect(NbText.title.fontWeight, FontWeight.w600);
+    });
   });
 
   group('E253: NbColors.of without the extension', () {

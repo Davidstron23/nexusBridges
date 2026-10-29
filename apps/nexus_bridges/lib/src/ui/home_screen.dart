@@ -379,7 +379,7 @@ class _ColumnTabs extends StatelessWidget {
     final colors = NbColors.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: colors.surfaceWeak,
+        color: colors.segment,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Padding(
@@ -460,6 +460,9 @@ class _TabZone extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: NbText.button.copyWith(
                         color: active ? colors.text : colors.textWeak,
+                        fontVariations: [
+                          FontVariation.weight(colors.headingWeight),
+                        ],
                       ),
                     ),
                   ),

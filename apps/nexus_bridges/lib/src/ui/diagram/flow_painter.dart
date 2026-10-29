@@ -687,14 +687,17 @@ class FlowPainter extends CustomPainter {
   }
 
   void _paintHeader(Canvas canvas) {
-    final title = _text(scene.title, NbText.title, color: colors.text);
+    final titleStyle = NbText.title.copyWith(
+      fontVariations: [FontVariation.weight(colors.headingWeight)],
+    );
+    final title = _text(scene.title, titleStyle, color: colors.text);
     final baseline =
         _headerTop +
         title.computeDistanceToActualBaseline(TextBaseline.alphabetic);
     _drawText(
       canvas,
       scene.title,
-      NbText.title,
+      titleStyle,
       colors.text,
       Offset(_headerLeft, baseline),
     );
