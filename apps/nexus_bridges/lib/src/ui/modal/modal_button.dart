@@ -461,7 +461,7 @@ class _ChoiceTileState extends State<ChoiceTile> with _PressStates {
       ring: keyboardFocused && enabled ? colors.primary : null,
       lift: lifted ? -2 : 0,
       scale: squeezed ? 0.97 : 1,
-      opacity: widget.dimmed ? 0.35 : (enabled ? 1 : 0.5),
+      opacity: widget.dimmed ? 0.35 : (enabled || widget.selected ? 1 : 0.5),
       opacityDuration: widget.dimmed ? _dimDuration : _boxDuration,
       animate: animate,
       child: TextButton(
