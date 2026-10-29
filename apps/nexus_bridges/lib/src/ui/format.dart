@@ -10,7 +10,7 @@ const String _zeroWidthSpace = '\u200B';
 
 const String _nonBreakingSpace = '\u00A0';
 
-const String _wordJoiner = '⁠';
+const String _wordJoiner = '\u2060';
 
 const String _backslash = r'\';
 
