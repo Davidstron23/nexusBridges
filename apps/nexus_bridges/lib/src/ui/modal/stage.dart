@@ -59,6 +59,7 @@ class StagePainter extends CustomPainter {
     required this.colors,
     required this.still,
     required this.changes,
+    this.size,
     required ValueListenable<double> elapsed,
   }) : _elapsed = elapsed,
        super(repaint: elapsed);
@@ -68,10 +69,11 @@ class StagePainter extends CustomPainter {
   final NbColors colors;
   final bool still;
   final StageChanges changes;
+  final StageSize? size;
   final ValueListenable<double> _elapsed;
 
   @override
-  void paint(Canvas canvas, Size size) {
+  void paint(Canvas canvas, Size canvasSize) {
     final spec = stageSpecOf(scene, input);
     final time = _elapsed.value;
     final frame = StageFrame(
@@ -82,8 +84,9 @@ class StagePainter extends CustomPainter {
       changes: changes,
     );
     canvas.save();
-    canvas.scale(size.width / _viewWidth);
-    if (spec.size.viewTop != 0) canvas.translate(0, -spec.size.viewTop);
+    canvas.scale(canvasSize.width / _viewWidth);
+    final viewTop = (size ?? spec.size).viewTop;
+    if (viewTop != 0) canvas.translate(0, -viewTop);
     paintHalo(canvas, frame, _toneOf(scene, input, colors));
     _painterOf(scene)(canvas, frame);
     canvas.restore();
@@ -95,18 +98,21 @@ class StagePainter extends CustomPainter {
       oldDelegate.input != input ||
       !identical(oldDelegate.colors, colors) ||
       oldDelegate.still != still ||
-      oldDelegate.changes != changes;
+      oldDelegate.changes != changes ||
+      oldDelegate.size != size;
 }
 
 class ModalStage extends StatefulWidget {
   const ModalStage({
     required this.scene,
     this.input = const StageInput(),
+    this.size,
     super.key,
   });
 
   final StageScene scene;
   final StageInput input;
+  final StageSize? size;
 
   @override
   State<ModalStage> createState() => _ModalStageState();
@@ -236,7 +242,7 @@ class _ModalStageState extends State<ModalStage>
   @override
   Widget build(BuildContext context) {
     final input = _input;
-    final size = stageSpecOf(widget.scene, input).size;
+    final size = widget.size ?? stageSpecOf(widget.scene, input).size;
     return ExcludeSemantics(
       child: RepaintBoundary(
         child: SizedBox(
@@ -252,6 +258,7 @@ class _ModalStageState extends State<ModalStage>
                 colors: NbColors.of(context),
                 still: _reduceMotion,
                 changes: _changes,
+                size: size,
                 elapsed: _elapsed,
               ),
             ),

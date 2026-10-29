@@ -411,9 +411,11 @@ class _PairingViewState extends State<_PairingView>
       stage: ModalStage(
         scene: StageScene.comparing,
         input: StageInput(peer: widget.peer),
+        size: StageSize.small,
       ),
       title: _titleOf(strings, name, isInitiator),
       body: [
+        if (code != null) CodeBoxes(code: code),
         if (!isInitiator)
           _FingerprintLine(
             strings: strings,
@@ -422,7 +424,6 @@ class _PairingViewState extends State<_PairingView>
         if (namesake != null)
           ModalAlert(text: strings.namesakeWarning(namesake)),
         ModalLead(text: strings.compareCode(name)),
-        if (code != null) CodeBoxes(code: code),
         if (!isInitiator && view.alreadyPaired)
           ModalNote(text: strings.alreadyPairedNote),
       ],
@@ -481,12 +482,13 @@ class _PairingViewState extends State<_PairingView>
       stage: ModalStage(
         scene: StageScene.waiting,
         input: StageInput(peer: widget.peer),
+        size: StageSize.small,
       ),
       title: _titleOf(strings, name, isInitiator),
       body: [
+        if (code != null) CodeBoxes(code: code, confirmed: true),
         if (namesake != null)
           ModalAlert(text: strings.namesakeWarning(namesake)),
-        if (code != null) CodeBoxes(code: code, confirmed: true),
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: ModalLead(

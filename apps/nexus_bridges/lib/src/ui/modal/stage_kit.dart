@@ -52,7 +52,8 @@ enum StageSize {
   normal(width: 300, height: 170, margin: 14, viewTop: 0),
   mid(width: 247, height: 140, margin: 10, viewTop: 0),
   big(width: 344, height: 195, margin: 16, viewTop: 0),
-  wide(width: 344, height: 110, margin: 8, viewTop: 37);
+  wide(width: 344, height: 110, margin: 8, viewTop: 37),
+  small(width: 144, height: 60, margin: 8, viewTop: 22.5);
 
   const StageSize({
     required this.width,

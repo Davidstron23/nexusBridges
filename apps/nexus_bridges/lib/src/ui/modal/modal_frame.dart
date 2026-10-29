@@ -270,31 +270,10 @@ class ModalView extends StatelessWidget {
       ...body,
       if (titleFirst && stage != null) stage,
     ];
-    final zone = ScrollConfiguration(
-      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            primary: false,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth: constraints.maxWidth,
-                minHeight: centered ? 0 : constraints.maxHeight,
-              ),
-              child: Padding(
-                padding: EdgeInsets.only(top: titleFirst ? 16 : 0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: titleFirst
-                      ? MainAxisAlignment.start
-                      : MainAxisAlignment.center,
-                  children: topChildren,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
+    final zone = _ScrollZone(
+      centered: centered,
+      titleFirst: titleFirst,
+      children: topChildren,
     );
     final buttons = <Widget>[
       if (pair.isNotEmpty)
@@ -340,6 +319,70 @@ class ModalView extends StatelessWidget {
           if (eyebrow != null)
             Positioned(top: 36, left: 0, right: 0, child: eyebrow),
         ],
+      ),
+    );
+  }
+}
+
+class _ScrollZone extends StatefulWidget {
+  const _ScrollZone({
+    required this.centered,
+    required this.titleFirst,
+    required this.children,
+  });
+
+  final bool centered;
+  final bool titleFirst;
+  final List<Widget> children;
+
+  @override
+  State<_ScrollZone> createState() => _ScrollZoneState();
+}
+
+class _ScrollZoneState extends State<_ScrollZone> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+      child: RawScrollbar(
+        controller: _controller,
+        thumbVisibility: true,
+        thickness: 4,
+        radius: const Radius.circular(2),
+        thumbColor: colors.hint,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              controller: _controller,
+              primary: false,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: constraints.maxWidth,
+                  minHeight: widget.centered ? 0 : constraints.maxHeight,
+                ),
+                child: Padding(
+                  padding: EdgeInsets.only(top: widget.titleFirst ? 16 : 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: widget.titleFirst
+                        ? MainAxisAlignment.start
+                        : MainAxisAlignment.center,
+                    children: widget.children,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
