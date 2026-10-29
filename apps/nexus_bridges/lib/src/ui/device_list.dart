@@ -5,11 +5,11 @@ import '../app_controller.dart';
 import '../l10n/app_strings.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
-import 'pairing_dialogs.dart';
 import 'send_action.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
+import 'unpair_modal.dart';
 
 DiscTone discToneFor(NodeState state, DeviceEntry entry) {
   final incoming = state.incoming;
@@ -132,9 +132,12 @@ class DeviceRow extends StatelessWidget {
   }
 
   Future<void> _unpair(BuildContext context) async {
-    final confirmed = await confirmUnpair(context, entry.displayName);
-    if (!confirmed) return;
-    await controller.unpair(entry.fingerprint);
+    await confirmUnpairDevice(
+      context,
+      name: entry.displayName,
+      type: entry.deviceType,
+      onConfirm: () => controller.unpair(entry.fingerprint),
+    );
   }
 
   void _onMenu(BuildContext context, _RowAction action) {
