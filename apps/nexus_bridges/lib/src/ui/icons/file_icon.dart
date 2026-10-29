@@ -106,7 +106,7 @@ Color _sheetColorOf(FileKind kind) => switch (kind) {
 const double _boxWidth = 32;
 const double _boxHeight = 38;
 
-final Path _sheetPath = parseSvgPath(
+final Path fileSheetPath = parseSvgPath(
   'M4 2h17l7 7v25a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z',
 );
 final Path _foldPath = parseSvgPath('M21 2v5a2 2 0 0 0 2 2h5');
@@ -159,7 +159,7 @@ void paintFileIcon(Canvas canvas, Rect rect, FileKind kind) {
   canvas.translate(rect.left + (rect.width - _boxWidth * scale) / 2, rect.top);
   canvas.scale(scale);
 
-  canvas.drawPath(_sheetPath, Paint()..color = _sheetColorOf(kind));
+  canvas.drawPath(fileSheetPath, Paint()..color = _sheetColorOf(kind));
   canvas.drawPath(
     _foldPath,
     Paint()

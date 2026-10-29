@@ -385,7 +385,7 @@ void paintHalo(Canvas canvas, StageFrame frame, Color tone) {
   canvas.restore();
 }
 
-Glyph _glyphOf(DeviceGlyph glyph) =>
+Glyph glyphOfDevice(DeviceGlyph glyph) =>
     glyph == DeviceGlyph.phone ? Glyphs.phone : Glyphs.pc;
 
 void paintDisc(
@@ -446,7 +446,7 @@ void paintDisc(
   final side = _discGlyphBox * (glyphScale ?? radius / _discGlyphRadius);
   paintGlyph(
     canvas,
-    _glyphOf(glyph),
+    glyphOfDevice(glyph),
     Rect.fromCenter(center: center, width: side, height: side),
     ink ?? colors.text,
     strokeScale: _discGlyphStroke,
