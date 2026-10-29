@@ -898,6 +898,7 @@ Widget _stage(
   StageInput input = const StageInput(),
   Brightness brightness = Brightness.light,
   bool reduceMotion = false,
+  StageSize? size,
 }) => Directionality(
   textDirection: TextDirection.ltr,
   child: MediaQuery(
@@ -905,7 +906,7 @@ Widget _stage(
     child: Theme(
       data: buildTheme(brightness),
       child: Center(
-        child: ModalStage(scene: scene, input: input),
+        child: ModalStage(scene: scene, input: input, size: size),
       ),
     ),
   ),
@@ -2522,6 +2523,173 @@ void main() {
           make(changes: const StageChanges(hoveredAt: 2)).shouldRepaint(base),
           isTrue,
         );
+      });
+    });
+  }
+
+  for (final (theme, colors, brightness) in _themes) {
+    group('E290 the small stage of the code first (point 244, $theme)', () {
+      const small = StageSize.small;
+      final s = small.width / 300;
+      const box = Rect.fromLTWH(0, 0, 144, 60);
+      const input = StageInput(peer: DeviceGlyph.phone);
+
+      StagePainter painterOf(
+        StageScene scene,
+        double t, {
+        bool still = false,
+        StageSize? size = small,
+      }) => StagePainter(
+        scene: scene,
+        input: input,
+        colors: colors,
+        still: still,
+        changes: const StageChanges(),
+        size: size,
+        elapsed: ValueNotifier<double>(t),
+      );
+
+      testWidgets('a given size wins over the size of the scene, with its '
+          'margin below, in every scene', (tester) async {
+        for (final scene in StageScene.values) {
+          await tester.pumpWidget(
+            _stage(scene, brightness: brightness, size: small),
+          );
+          expect(
+            tester.getSize(find.byType(ModalStage)),
+            Size(small.width, small.height + small.margin),
+            reason: scene.name,
+          );
+          expect(
+            tester.getSize(_customPaint()),
+            Size(small.width, small.height),
+          );
+          expect(
+            tester.getTopLeft(_customPaint()),
+            tester.getTopLeft(find.byType(ModalStage)),
+          );
+          expect(_painter(tester).size, small, reason: scene.name);
+          expect(tester.takeException(), isNull);
+        }
+      });
+
+      testWidgets('without a size each scene keeps its own', (tester) async {
+        for (final scene in StageScene.values) {
+          await tester.pumpWidget(_stage(scene, brightness: brightness));
+          final own = _boxOf(scene);
+          expect(
+            tester.getSize(find.byType(ModalStage)),
+            Size(own.width, own.height + own.margin),
+            reason: scene.name,
+          );
+        }
+      });
+
+      for (final scene in [StageScene.comparing, StageScene.waiting]) {
+        test('${scene.name}: the viewBox is scaled to 144 px and its centre '
+            'is the centre of the box', () {
+          for (final t in [0.0, 1.7, 4.2]) {
+            for (final still in [false, true]) {
+              final canvas = _StageCanvas();
+              painterOf(
+                scene,
+                t,
+                still: still,
+              ).paint(canvas, Size(small.width, small.height));
+              final halo = canvas.draws.first;
+              expect(halo.name, #drawCircle);
+              expect(halo.baseRadius, closeTo(140, 1e-9));
+              expect(halo.matrix.entry(0, 0), closeTo(s, 1e-9));
+              expect(halo.matrix.entry(0, 3), closeTo(box.center.dx, 1e-9));
+              expect(halo.matrix.entry(1, 3), closeTo(box.center.dy, 1e-9));
+              final frame = _frame(colors, t: t, still: still, input: input);
+              final expected = _record((canvas) {
+                canvas.save();
+                canvas.scale(s);
+                canvas.translate(0, -small.viewTop);
+                paintHalo(canvas, frame, _toneOf(scene, colors));
+                _scenePainters[scene]!(canvas, frame);
+                canvas.restore();
+              });
+              expect(_picture(canvas), _picture(expected), reason: '$t $still');
+              _expectSound(canvas, reason: '${scene.name} $t $still');
+            }
+          }
+        });
+
+        test('${scene.name}: the ring is whole inside the box and about '
+            '56 px wide', () {
+          for (final t in [0.0, 1.7, 4.2]) {
+            for (final still in [false, true]) {
+              final canvas = _StageCanvas();
+              painterOf(
+                scene,
+                t,
+                still: still,
+              ).paint(canvas, Size(small.width, small.height));
+              final rings = [
+                for (final draw in canvas.draws)
+                  if (draw.stroked &&
+                      (draw.localBounds.width - 112).abs() < 1 &&
+                      (draw.localBounds.center - _center).distance < 0.5)
+                    draw,
+              ];
+              expect(rings, isNotEmpty, reason: '$t $still');
+              for (final ring in rings) {
+                final bounds = ring.name == #drawPath
+                    ? ring.path
+                          .transform(ring.matrix.storage)
+                          .getBounds()
+                          .inflate(ring.paint.strokeWidth / 2 * ring.scale)
+                    : ring.stageBounds;
+                expect(bounds.width, inInclusiveRange(52, 60));
+                expect(bounds.center.dx, closeTo(box.center.dx, 0.3));
+                expect(bounds.center.dy, closeTo(box.center.dy, 0.3));
+                expect(bounds.left, greaterThanOrEqualTo(box.left));
+                expect(bounds.right, lessThanOrEqualTo(box.right));
+                expect(bounds.top, greaterThanOrEqualTo(box.top));
+                expect(bounds.bottom, lessThanOrEqualTo(box.bottom));
+              }
+            }
+          }
+        });
+      }
+
+      test('without a size the painter keeps the viewBox of the scene', () {
+        for (final scene in StageScene.values) {
+          final own = _boxOf(scene);
+          final canvas = _StageCanvas();
+          painterOf(
+            scene,
+            1.1,
+            size: null,
+          ).paint(canvas, Size(own.width, own.height));
+          final halo = canvas.draws.first;
+          final scale = own.width / 300;
+          expect(halo.matrix.entry(0, 0), closeTo(scale, 1e-9));
+          expect(
+            halo.matrix.entry(1, 3),
+            closeTo((85 - own.top) * scale, 1e-9),
+            reason: scene.name,
+          );
+        }
+      });
+
+      test('shouldRepaint also compares the size', () {
+        final elapsed = ValueNotifier<double>(0);
+        StagePainter make(StageSize? size) => StagePainter(
+          scene: StageScene.comparing,
+          input: const StageInput(),
+          colors: colors,
+          still: false,
+          changes: const StageChanges(),
+          size: size,
+          elapsed: elapsed,
+        );
+        expect(make(small).shouldRepaint(make(small)), isFalse);
+        expect(make(null).shouldRepaint(make(null)), isFalse);
+        expect(make(small).shouldRepaint(make(StageSize.mid)), isTrue);
+        expect(make(small).shouldRepaint(make(null)), isTrue);
       });
     });
   }

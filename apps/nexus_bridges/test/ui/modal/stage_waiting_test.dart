@@ -515,8 +515,8 @@ const List<StageInput> _inputs = [
 
 void main() {
   group('E284 stage sizes and specs', () {
-    test('the four sizes match the lab', () {
-      expect(StageSize.values, hasLength(4));
+    test('the five sizes match the lab and point 244', () {
+      expect(StageSize.values, hasLength(5));
       expect(
         [
           StageSize.normal.width,
@@ -537,10 +537,31 @@ void main() {
         [StageSize.wide.width, StageSize.wide.height, StageSize.wide.margin],
         [344, 110, 8],
       );
+      expect(
+        [StageSize.small.width, StageSize.small.height, StageSize.small.margin],
+        [144, 60, 8],
+      );
       expect(StageSize.wide.viewTop, 37);
+      expect(StageSize.small.viewTop, 22.5);
       for (final size in [StageSize.normal, StageSize.mid, StageSize.big]) {
         expect(size.viewTop, 0);
       }
+    });
+
+    test('small frames the centre of the viewBox and a ring of about 56 px '
+        '(point 244)', () {
+      const size = StageSize.small;
+      final scale = size.width / 300;
+      expect(_center.dx * scale, closeTo(size.width / 2, 1e-9));
+      expect(
+        (_center.dy - size.viewTop) * scale,
+        closeTo(size.height / 2, 1e-9),
+      );
+      const outer = 56 + 5 / 2;
+      final diameter = 2 * outer * scale;
+      expect(diameter, inInclusiveRange(52, 60));
+      expect(diameter, lessThanOrEqualTo(size.height));
+      expect(diameter, lessThan(2 * outer * StageSize.mid.width / 300));
     });
 
     test('the table covers the 18 scenes', () {

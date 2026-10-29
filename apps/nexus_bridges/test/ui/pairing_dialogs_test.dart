@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/main.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/modal/code_boxes.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges/src/ui/modal/stage.dart';
 import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
@@ -126,6 +127,35 @@ bool _enabled(WidgetTester tester, String label) {
     ),
   );
   return button.onPressed != null;
+}
+
+void _expectCodeRightUnderTitle(WidgetTester tester, String title) {
+  final titleRect = tester.getRect(
+    find.descendant(of: dialog, matching: find.text(title)),
+  );
+  final codeRect = tester.getRect(
+    find.descendant(of: dialog, matching: find.byType(CodeBoxes)),
+  );
+  expect(codeRect.top, greaterThanOrEqualTo(titleRect.bottom - 0.5));
+  for (final element
+      in find.descendant(of: dialog, matching: find.byType(Text)).evaluate()) {
+    final target = find.byElementPredicate((candidate) => candidate == element);
+    if (find
+        .ancestor(of: target, matching: find.byType(CodeBoxes))
+        .evaluate()
+        .isNotEmpty) {
+      continue;
+    }
+    final text = element.widget as Text;
+    final data = text.data ?? text.textSpan?.toPlainText() ?? '';
+    if (data == title) continue;
+    final rect = tester.getRect(target);
+    expect(
+      rect.bottom <= titleRect.top + 0.5 || rect.top >= codeRect.bottom - 0.5,
+      isTrue,
+      reason: '"$data" sits between the title and the code',
+    );
+  }
 }
 
 String _labelOf(WidgetTester tester, Element button) => [
@@ -992,8 +1022,9 @@ void main() {
     group('[$code] C133 namesake line (RF-73, RF-83)', () {
       final warning = strings.namesakeWarning(namesakeName);
 
-      testWidgets('the receiver comparing shows it in red right after the '
-          'fingerprint line', (tester) async {
+      testWidgets('the receiver comparing shows the code right under the '
+          'title, then the fingerprint line and the warning in red (point '
+          '244)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -1007,12 +1038,17 @@ void main() {
         expect(find.text(warning), findsOneWidget);
         expect(warning, contains(namesakeName));
         final texts = textsIn(tester, dialog);
-        expect(texts.sublist(0, 4), [
+        expect(texts.sublist(0, 5), [
           strings.pairingRequestTitle(peerName),
+          formattedCode,
           strings.fingerprintLine(peerShort),
           warning,
           strings.compareCode(peerName),
         ]);
+        _expectCodeRightUnderTitle(
+          tester,
+          strings.pairingRequestTitle(peerName),
+        );
         expect(_colorOf(tester, warning), _errorColor(tester, warning));
         expect(dialogButtons(tester), [
           strings.doesNotMatchButton,
@@ -1021,9 +1057,8 @@ void main() {
         ]);
       });
 
-      testWidgets('the receiver waiting shows it in red as the first line', (
-        tester,
-      ) async {
+      testWidgets('the receiver waiting shows the code right under the title '
+          'and then the warning in red (point 244)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -1037,17 +1072,23 @@ void main() {
         final texts = textsIn(tester, dialog);
         expect(texts, [
           strings.pairingRequestTitle(peerName),
-          warning,
           formattedCode,
+          warning,
           strings.receiverWaiting(peerName),
           strings.cancelButton,
         ]);
+        _expectCodeRightUnderTitle(
+          tester,
+          strings.pairingRequestTitle(peerName),
+        );
         expect(_colorOf(tester, warning), _errorColor(tester, warning));
       });
 
       for (final phase in [PairingPhase.comparing, PairingPhase.waitingPeer]) {
-        testWidgets('the initiator ${phase.name} shows it in red as the first '
-            'line', (tester) async {
+        testWidgets('the initiator ${phase.name} shows the code right under '
+            'the title and then the warning in red (point 244)', (
+          tester,
+        ) async {
           await _pumpWith(
             tester,
             code,
@@ -1056,9 +1097,19 @@ void main() {
           );
 
           final texts = textsIn(tester, dialog);
-          expect(texts.first, strings.pairingWithTitle(peerName));
-          expect(texts[1], warning);
+          expect(texts.sublist(0, 4), [
+            strings.pairingWithTitle(peerName),
+            formattedCode,
+            warning,
+            phase == PairingPhase.comparing
+                ? strings.compareCode(peerName)
+                : strings.waitingForPeer(peerName),
+          ]);
           expect(texts.where((text) => text == warning), hasLength(1));
+          _expectCodeRightUnderTitle(
+            tester,
+            strings.pairingWithTitle(peerName),
+          );
           expect(_colorOf(tester, warning), _errorColor(tester, warning));
           expect(codeIn(tester, dialog), formattedCode);
         });

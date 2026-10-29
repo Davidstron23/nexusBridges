@@ -16,10 +16,12 @@ import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
 import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
 import 'package:nexus_bridges/src/ui/pairing_questions.dart';
 import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
+import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
 import 'pairing_fixtures.dart';
+import 'zone_scrollbar.dart';
 
 const String _otherName = 'Torre';
 final String _otherFingerprint = fingerprintOf('7777BBBB');
@@ -294,6 +296,39 @@ void _expectWhole(WidgetTester tester, Element text, String reason) {
   );
   expect(paragraph.didExceedMaxLines, isFalse, reason: reason);
 }
+
+const List<String> _codeFirstNames = [
+  'Torre Luis',
+  'Portátil de Ana',
+  'Sobremesa de Lucía',
+  'Portátil del salón de Ana',
+  'Portátil del estudio de Andrea',
+  'Portátil del estudio de Ana en casa',
+];
+
+const List<(Size, double)> _codeFirstWindows = [
+  (Size(800, 600), 1.0),
+  (Size(760, 520), 1.3),
+];
+
+Finder _liveZone() {
+  final zones = _live(_inModal(find.byType(SingleChildScrollView)));
+  expect(zones, hasLength(1), reason: 'live zone');
+  return _element(zones.single);
+}
+
+Finder _rowAround(Element element) => find
+    .ancestor(
+      of: _element(element),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is Container &&
+            widget.decoration is BoxDecoration &&
+            (widget.decoration! as BoxDecoration).borderRadius ==
+                BorderRadius.circular(16),
+      ),
+    )
+    .first;
 
 void main() {
   setUpAll(_loadSegoe);
@@ -1607,6 +1642,360 @@ void main() {
             expect(titleParagraph.maxLines, 2);
           });
         }
+      }
+    });
+
+    group('[$code] E287 the code first (point 244, Q-2 and Q-3; RF-83, '
+        'RF-86, RF-125)', () {
+      test('the names go from 10 to 35 characters', () {
+        expect(
+          [for (final name in _codeFirstNames) name.length],
+          [10, 15, 18, 25, 30, 35],
+        );
+      });
+
+      for (final role in PairingRole.values) {
+        for (final phase in [
+          PairingPhase.comparing,
+          PairingPhase.waitingPeer,
+        ]) {
+          for (final namesake in [false, true]) {
+            for (final (window, scale) in _codeFirstWindows) {
+              for (final name in _codeFirstNames) {
+                final where =
+                    '${window.width.toInt()}x${window.height.toInt()} at '
+                    '${(scale * 100).round()} %';
+                testWidgets('${role.name} ${phase.name}'
+                    '${namesake ? ' with a namesake' : ''}, ${name.length} '
+                    'characters, $where: the code is whole in the zone when '
+                    'it opens, the bar shows only with more content and the '
+                    'end is reached by scrolling', (tester) async {
+                  await _mount(
+                    tester,
+                    code,
+                    pairingState(
+                      pairing: view(role: role, phase: phase, name: name),
+                      namesake: namesake ? name : null,
+                    ),
+                    reduceMotion: true,
+                    textScale: scale,
+                    window: window,
+                  );
+                  await _openArmed(tester);
+                  await tester.pump(barFadeIn);
+                  expect(tester.takeException(), isNull);
+
+                  final zoneFinder = _liveZone();
+                  final zone = tester.getRect(zoneFinder);
+                  final frame = _frameRect(tester);
+                  expectWholeInside(zone, frame, 'zone');
+                  final position = zonePosition(tester, zoneFinder);
+                  expect(position.pixels, 0);
+
+                  final stage = _live(_inModal(find.byType(ModalStage)));
+                  expect(stage, hasLength(1));
+                  expect(
+                    tester.getSize(_element(stage.single)),
+                    Size(
+                      StageSize.small.width,
+                      StageSize.small.height + StageSize.small.margin,
+                    ),
+                  );
+                  final title = _live(_inModal(find.text(_view().title)));
+                  expect(title, hasLength(1));
+                  final boxes = _live(_inModal(find.byType(CodeBoxes)));
+                  expect(boxes, hasLength(1));
+                  final codeRect = tester.getRect(_element(boxes.single));
+                  final titleRect = tester.getRect(_element(title.single));
+                  expect(codeIn(tester, _modal), formattedCode);
+                  expect(
+                    codeRect.top,
+                    greaterThanOrEqualTo(titleRect.bottom - 0.5),
+                  );
+                  expectWholeInside(
+                    tester.getRect(_element(stage.single)),
+                    zone,
+                    'stage',
+                  );
+                  expectWholeInside(titleRect, zone, 'title');
+                  expectWholeInside(codeRect, zone, 'code');
+                  for (final digit in _live(
+                    find.descendant(
+                      of: _element(boxes.single),
+                      matching: find.byType(Text),
+                    ),
+                  )) {
+                    expectWholeInside(
+                      tester.getRect(_element(digit)),
+                      zone,
+                      'digit',
+                    );
+                  }
+
+                  final overflow = position.maxScrollExtent > 0;
+                  final hint = NbColors.of(tester.element(zoneFinder)).hint;
+                  expect(
+                    thumbsOf(tester, zoneFinder, hint),
+                    hasLength(overflow ? 1 : 0),
+                  );
+                  if (!overflow) {
+                    expect(
+                      tester.getCenter(_element(boxes.single)).dx,
+                      closeTo(frame.center.dx, 0.5),
+                    );
+                    expect(titleRect.center.dx, closeTo(frame.center.dx, 0.5));
+                  }
+
+                  final texts = _live(
+                    find.descendant(
+                      of: zoneFinder,
+                      matching: find.byType(Text),
+                    ),
+                  );
+                  for (final text in texts) {
+                    expect(
+                      tester.getSize(_element(text)).height,
+                      lessThanOrEqualTo(zone.height),
+                    );
+                  }
+                  final last = texts.reduce(
+                    (a, b) =>
+                        tester.getRect(_element(a)).bottom >=
+                            tester.getRect(_element(b)).bottom
+                        ? a
+                        : b,
+                  );
+                  final lastText = last.widget as Text;
+                  final lead = role == PairingRole.initiator
+                      ? (phase == PairingPhase.comparing
+                            ? strings.compareCode(name)
+                            : strings.waitingForPeer(name))
+                      : (phase == PairingPhase.comparing
+                            ? strings.compareCode(name)
+                            : strings.receiverWaiting(name));
+                  expect(
+                    lastText.data ?? lastText.textSpan?.toPlainText(),
+                    lead,
+                  );
+                  if (overflow) {
+                    await tester.drag(zoneFinder, const Offset(0, -2000));
+                    await tester.pump();
+                    await tester.pump(const Duration(seconds: 1));
+                    expect(position.pixels, position.maxScrollExtent);
+                  }
+                  expectWholeInside(
+                    tester.getRect(_element(last)),
+                    zone,
+                    'last line',
+                  );
+                  _expectWhole(tester, last, 'last line');
+                  expect(tester.takeException(), isNull);
+                });
+              }
+            }
+          }
+        }
+      }
+
+      testWidgets('the short case fits: no bar and the code centred', (
+        tester,
+      ) async {
+        await _mount(
+          tester,
+          code,
+          pairingState(
+            pairing: view(
+              role: PairingRole.initiator,
+              phase: PairingPhase.comparing,
+              name: _codeFirstNames.first,
+            ),
+          ),
+          reduceMotion: true,
+        );
+        await _openArmed(tester);
+        await tester.pump(barFadeIn);
+
+        final zoneFinder = _liveZone();
+        expect(zonePosition(tester, zoneFinder).maxScrollExtent, 0);
+        expect(
+          thumbsOf(
+            tester,
+            zoneFinder,
+            NbColors.of(tester.element(zoneFinder)).hint,
+          ),
+          isEmpty,
+        );
+      });
+
+      testWidgets('the long case with a namesake at 130 % overflows: the bar '
+          'is there', (tester) async {
+        await _mount(
+          tester,
+          code,
+          pairingState(
+            pairing: view(
+              role: PairingRole.receiver,
+              phase: PairingPhase.comparing,
+              name: _codeFirstNames.last,
+            ),
+            namesake: _codeFirstNames.last,
+          ),
+          reduceMotion: true,
+          textScale: 1.3,
+          window: const Size(760, 520),
+        );
+        await _openArmed(tester);
+        await tester.pump(barFadeIn);
+
+        final zoneFinder = _liveZone();
+        expect(
+          zonePosition(tester, zoneFinder).maxScrollExtent,
+          greaterThan(0),
+        );
+        final thumbs = thumbsOf(
+          tester,
+          zoneFinder,
+          NbColors.of(tester.element(zoneFinder)).hint,
+        );
+        expect(thumbs, hasLength(1));
+        expect(thumbs.single.width, closeTo(4, 1e-6));
+        expectWholeInside(thumbs.single, _frameRect(tester), 'thumb');
+      });
+
+      testWidgets('receiver comparing: the fingerprint line and the warning '
+          'go below the code, and the note of an already paired peer last', (
+        tester,
+      ) async {
+        await _mount(
+          tester,
+          code,
+          pairingState(
+            pairing: view(
+              role: PairingRole.receiver,
+              phase: PairingPhase.comparing,
+              alreadyPaired: true,
+            ),
+            namesake: peerName,
+          ),
+          reduceMotion: true,
+        );
+        await _openArmed(tester);
+
+        final codeRect = tester.getRect(
+          _element(_live(_inModal(find.byType(CodeBoxes))).single),
+        );
+        final tops = [
+          for (final text in [
+            strings.fingerprintLine(peerShort),
+            strings.namesakeWarning(peerName),
+            strings.compareCode(peerName),
+            strings.alreadyPairedNote,
+          ])
+            tester
+                .getRect(_element(_live(_inModal(find.text(text))).single))
+                .top,
+        ];
+        expect(tops.first, greaterThanOrEqualTo(codeRect.bottom - 0.5));
+        for (var i = 1; i < tops.length; i++) {
+          expect(tops[i], greaterThan(tops[i - 1]));
+        }
+      });
+
+      final otherScenes = <String, NodeState>{
+        'connecting': pairingState(
+          pairing: view(
+            role: PairingRole.initiator,
+            phase: PairingPhase.connecting,
+          ),
+        ),
+        for (final outcome in PairingOutcome.values)
+          'result ${outcome.name}': pairingState(
+            pairing: view(
+              role: PairingRole.initiator,
+              phase: PairingPhase.finished,
+              outcome: outcome,
+            ),
+          ),
+        'is it yours?': pairingState(questions: [_mine]),
+      };
+      for (final MapEntry(key: label, value: state) in otherScenes.entries) {
+        testWidgets('$label keeps the stage of its scene', (tester) async {
+          await _mount(tester, code, state, reduceMotion: true);
+          await _openArmed(tester);
+
+          final stage = _stage();
+          final expected = stageSpecOf(stage.scene, stage.input).size;
+          expect(expected, isNot(StageSize.small));
+          expect(
+            tester.getSize(
+              _element(_live(_inModal(find.byType(ModalStage))).single),
+            ),
+            Size(expected.width, expected.height + expected.margin),
+          );
+        });
+      }
+
+      for (final (window, scale) in _codeFirstWindows) {
+        final where =
+            '${window.width.toInt()}x${window.height.toInt()} at '
+            '${(scale * 100).round()} %';
+        testWidgets('Q-3 "Replace?" with names of 35 characters, $where: a '
+            'bar when the new row is not whole, and scrolling reaches the new '
+            'row and its short fingerprint', (tester) async {
+          final name = _codeFirstNames.last;
+          await _mount(
+            tester,
+            code,
+            pairingState(
+              questions: [
+                ReplaceQuestion(
+                  fingerprint: peerFingerprint,
+                  deviceName: name,
+                  oldFingerprint: _oldFingerprint,
+                  oldName: name,
+                ),
+              ],
+            ),
+            reduceMotion: true,
+            textScale: scale,
+            window: window,
+          );
+          await _openArmed(tester);
+          await tester.pump(barFadeIn);
+          expect(tester.takeException(), isNull);
+
+          final zoneFinder = _liveZone();
+          final zone = tester.getRect(zoneFinder);
+          final position = zonePosition(tester, zoneFinder);
+          final hint = NbColors.of(tester.element(zoneFinder)).hint;
+          final short = _live(_inModal(find.text(peerShort)));
+          expect(short, hasLength(1));
+          final row = _rowAround(short.single);
+          final rowWhole = isWholeInside(tester.getRect(row), zone);
+          final overflow = position.maxScrollExtent > 0;
+          expect(
+            thumbsOf(tester, zoneFinder, hint),
+            hasLength(overflow ? 1 : 0),
+          );
+          if (!rowWhole) {
+            expect(overflow, isTrue);
+            expect(thumbsOf(tester, zoneFinder, hint), hasLength(1));
+          }
+          if (overflow) {
+            await tester.drag(zoneFinder, const Offset(0, -2000));
+            await tester.pump();
+            await tester.pump(const Duration(seconds: 1));
+            expect(position.pixels, position.maxScrollExtent);
+          }
+          expectWholeInside(tester.getRect(row), zone, 'new row');
+          expectWholeInside(
+            tester.getRect(_element(short.single)),
+            zone,
+            'short fingerprint',
+          );
+          _expectWhole(tester, short.single, 'short fingerprint');
+          expect(tester.takeException(), isNull);
+        });
       }
     });
   }

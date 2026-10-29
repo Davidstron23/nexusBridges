@@ -13,6 +13,7 @@ import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
 import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 
 import '../fake_app_controller.dart';
+import '../zone_scrollbar.dart';
 
 const Cubic _labEaseOut = Cubic(0.23, 1, 0.32, 1);
 
@@ -830,6 +831,126 @@ void main() {
         });
       }
     }
+  });
+
+  group('E282: the bar of the top zone (point 244)', () {
+    List<Widget> longBody() => [
+      for (var i = 0; i < 12; i++)
+        ModalLead(text: 'A long line of the body number $i'),
+    ];
+
+    for (final layout in ModalViewLayout.values) {
+      for (final MapEntry(key: name, value: brightness) in _themes.entries) {
+        testWidgets('[$name] ${layout.name}: with more content than room a '
+            'bar of 4 px in hint sits on the right edge of the zone after '
+            'opening, without hover or scroll, and follows the scroll', (
+          tester,
+        ) async {
+          await _mount(
+            tester,
+            window: const Size(760, 520),
+            brightness: brightness,
+            reduceMotion: true,
+            textScale: 1.3,
+          );
+          await _open(tester, (_) => _fullView(layout, body: longBody()));
+          await tester.pump(barFadeIn);
+
+          final hint = _colorsFor(brightness).hint;
+          final zone = tester.getRect(_zone);
+          final position = zonePosition(tester, _zone);
+          expect(position.maxScrollExtent, greaterThan(0));
+          expect(position.pixels, 0);
+
+          final thumbs = thumbsOf(tester, _zone, hint);
+          expect(thumbs, hasLength(1));
+          final thumb = thumbs.single;
+          expect(thumb.width, closeTo(4, 1e-6));
+          expect(thumb.height, greaterThan(4));
+          expect(thumb.height, lessThan(zone.height));
+          expect(thumb.right, closeTo(zone.right, 0.5));
+          expect(thumb.top, closeTo(zone.top, 0.5));
+          expectWholeInside(thumb, zone, 'thumb');
+          expectWholeInside(thumb, tester.getRect(_frame), 'thumb');
+
+          await tester.drag(_zone, const Offset(0, -2000));
+          await tester.pump();
+          await tester.pump(const Duration(seconds: 1));
+          expect(position.pixels, position.maxScrollExtent);
+          final moved = thumbsOf(tester, _zone, hint);
+          expect(moved, hasLength(1));
+          expect(moved.single.bottom, closeTo(zone.bottom, 0.5));
+          expect(moved.single.top, greaterThan(thumb.top));
+          expect(tester.takeException(), isNull);
+        });
+      }
+
+      testWidgets('${layout.name}: when everything fits there is no bar and '
+          'the centred content does not move', (tester) async {
+        await _mount(tester, reduceMotion: true);
+        await _open(tester, (_) => _fullView(layout));
+        await tester.pump(barFadeIn);
+
+        final frame = tester.getRect(_frame);
+        final zone = tester.getRect(_zone);
+        final position = zonePosition(tester, _zone);
+        expect(position.maxScrollExtent, 0);
+        expect(
+          thumbsOf(tester, _zone, _colorsFor(Brightness.light).hint),
+          isEmpty,
+        );
+        expect(zone.left, frame.left + modalPadding.left);
+        expect(zone.width, frame.width - modalPadding.horizontal);
+        for (final finder in [
+          find.text('Title'),
+          find.byKey(_bodyKey),
+          find.byKey(_stageKey),
+        ]) {
+          expect(
+            tester.getCenter(finder).dx,
+            closeTo(frame.center.dx, 0.5),
+            reason: '$finder',
+          );
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('the same zone shows the bar once the text grows and hides '
+        'it when it shrinks again', (tester) async {
+      final lines = ValueNotifier<int>(1);
+      addTearDown(lines.dispose);
+      await _mount(tester, reduceMotion: true);
+      await _open(
+        tester,
+        (_) => ValueListenableBuilder<int>(
+          valueListenable: lines,
+          builder: (context, count, _) => _fullView(
+            ModalViewLayout.standard,
+            body: [
+              for (var i = 0; i < count; i++)
+                ModalLead(text: 'A long line of the body number $i'),
+            ],
+          ),
+        ),
+      );
+      await tester.pump(barFadeIn);
+      final hint = _colorsFor(Brightness.light).hint;
+      expect(thumbsOf(tester, _zone, hint), isEmpty);
+
+      lines.value = 14;
+      await tester.pump();
+      await tester.pump(barFadeIn);
+      expect(zonePosition(tester, _zone).maxScrollExtent, greaterThan(0));
+      expect(thumbsOf(tester, _zone, hint), hasLength(1));
+
+      lines.value = 1;
+      await tester.pump();
+      await tester.pump(barFadeIn);
+      expect(zonePosition(tester, _zone).maxScrollExtent, 0);
+      expect(thumbsOf(tester, _zone, hint), isEmpty);
+      expect(tester.takeException(), isNull);
+    });
   });
 
   group('E282: ModalEyebrow (points 185 and 232)', () {
