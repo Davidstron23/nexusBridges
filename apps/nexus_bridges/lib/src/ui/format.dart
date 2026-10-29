@@ -10,12 +10,20 @@ const String _zeroWidthSpace = '\u200B';
 
 const String _nonBreakingSpace = '\u00A0';
 
+const String _wordJoiner = '⁠';
+
 const String _backslash = r'\';
+
+const String _driveColon = ':';
 
 const String _separatorDot = '·';
 
-String breakablePath(String path) =>
-    path.replaceAll(_backslash, '$_backslash$_zeroWidthSpace');
+String breakablePath(String path) => path
+    .replaceAll(
+      '$_driveColon$_backslash',
+      '$_driveColon$_wordJoiner$_backslash',
+    )
+    .replaceAll(_backslash, '$_backslash$_zeroWidthSpace');
 
 String glueFingerprint(String label, String short) {
   final tail = ' $_separatorDot $short';

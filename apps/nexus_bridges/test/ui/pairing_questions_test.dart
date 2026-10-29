@@ -1161,7 +1161,9 @@ void main() {
     }
 
     testWidgets('the chip is StatusChip "Mine" with tone run and 20 px high, '
-        '8 px after the name', (tester) async {
+        'on the line of the fingerprint and 8 px after it (point 245)', (
+      tester,
+    ) async {
       await _mount(tester, reduceMotion: true);
       await _open(
         tester,
@@ -1185,10 +1187,13 @@ void main() {
       expect(chip.tone, ChipTone.run);
       expect(chip.height, 20);
       final name = tester.getRect(find.text(_oldName));
+      final short = tester.getRect(_in(_rowOf(_oldName), find.text(_oldShort)));
       final chipRect = tester.getRect(
         _in(_rowOf(_oldName), find.byType(StatusChip)),
       );
-      expect(chipRect.left - name.right, 8);
+      expect(chipRect.left - short.right, 8);
+      expect(chipRect.top, greaterThanOrEqualTo(name.bottom));
+      expect(chipRect.center.dy, closeTo(short.center.dy, 0.5));
       expect(_in(_rowOf(_newName), find.byType(StatusChip)), findsNothing);
     });
 
@@ -1753,6 +1758,263 @@ void main() {
         expect(tester.takeException(), isNull);
       }
     });
+  });
+
+  group('E288: visual review fixes with Segoe UI (point 245)', () {
+    setUpAll(_loadSegoe);
+
+    const baseName = 'Port\u00E1til de Ana';
+    const normalNames = [
+      'DESKTOP-4F7K2QX',
+      'Torre Luis',
+      'Port\u00E1til de Ana',
+      'Sobremesa de Luc\u00EDa',
+    ];
+
+    String visibleText(String text) => text.replaceAll('\u00A0', ' ');
+
+    List<String> textsOf(WidgetTester tester, Finder scope) => [
+      for (final text in tester.widgetList<Text>(_in(scope, find.byType(Text))))
+        visibleText(text.data ?? text.textSpan?.toPlainText() ?? ''),
+    ];
+
+    for (final code in languageCodes) {
+      testWidgets('[$code] "Replace?" with namesakes: each row shows the base '
+          'name and its short fingerprint once, without repeating it, and '
+          'the title keeps the fingerprint glued', (tester) async {
+        const oldLabel = '$baseName \u00B7 $_oldShort';
+        const newLabel = '$baseName \u00B7 $_newShort';
+        await _mount(tester, code: code, reduceMotion: true);
+        await _open(
+          tester,
+          controller: _controllerWith([
+            _entry(
+              fingerprint: _oldFp,
+              name: oldLabel,
+              visible: false,
+              mine: true,
+            ),
+            _entry(fingerprint: _newFp, name: newLabel, mine: true),
+          ]),
+          question: ReplaceQuestion(
+            fingerprint: _newFp,
+            deviceName: newLabel,
+            oldFingerprint: _oldFp,
+            oldName: oldLabel,
+          ),
+          log: _Log(),
+        );
+        final strings = _strings(tester);
+
+        expect(tester.takeException(), isNull);
+        expect(find.text(baseName), findsNWidgets(2));
+        expect(find.text(oldLabel), findsNothing);
+        expect(find.text(newLabel), findsNothing);
+        for (final (short, other) in [
+          (_oldShort, _newShort),
+          (_newShort, _oldShort),
+        ]) {
+          final row = _rowOf(short);
+          final texts = textsOf(tester, row);
+          expect(texts.where((text) => text == baseName), hasLength(1));
+          expect(texts.where((text) => text.contains(short)).toList(), [
+            short,
+          ], reason: short);
+          expect(texts.where((text) => text.contains(other)), isEmpty);
+          expect(texts.where((text) => text.contains('\u00B7')), isEmpty);
+          final name = tester.getRect(_in(row, find.text(baseName)));
+          final line = tester.getRect(_in(row, find.text(short)));
+          expect(line.top, greaterThanOrEqualTo(name.bottom));
+          expect(line.left, closeTo(name.left, 0.5));
+        }
+
+        final title = strings.replaceTitle(
+          '$baseName\u00A0\u00B7\u00A0$_oldShort',
+        );
+        expect(find.text(title), findsOneWidget);
+        expect(visibleText(title), strings.replaceTitle(oldLabel));
+        final paragraph = tester.renderObject<RenderParagraph>(
+          _in(find.text(title), find.byType(RichText)),
+        );
+        expect(paragraph.didExceedMaxLines, isFalse);
+        final text = paragraph.text.toPlainText();
+        final dot = text.indexOf('\u00B7');
+        final glued = [
+          for (final i in [dot - 2, dot - 1, dot, dot + 1, dot + 2])
+            paragraph
+                .getBoxesForSelection(
+                  TextSelection(baseOffset: i, extentOffset: i + 1),
+                )
+                .first
+                .top,
+        ];
+        expect(glued.toSet(), hasLength(1));
+      });
+
+      testWidgets('[$code] "Replace?" at 800x600: when the title wraps, the '
+          'last word, the dot and the fingerprint stay on the same line', (
+        tester,
+      ) async {
+        var wrapped = 0;
+        for (var extra = 0; extra <= 12; extra++) {
+          final base = 'Port\u00E1til ${'a' * extra} de Ana';
+          final label = '$base \u00B7 $_oldShort';
+          await _mount(tester, code: code, reduceMotion: true);
+          await _open(
+            tester,
+            controller: _controllerWith(const []),
+            question: ReplaceQuestion(
+              fingerprint: _newFp,
+              deviceName: _newName,
+              oldFingerprint: _oldFp,
+              oldName: label,
+            ),
+            log: _Log(),
+          );
+          final strings = _strings(tester);
+          expect(tester.takeException(), isNull, reason: base);
+          final title = strings.replaceTitle(
+            '$base\u00A0\u00B7\u00A0$_oldShort',
+          );
+          expect(find.text(title), findsOneWidget, reason: base);
+          final paragraph = tester.renderObject<RenderParagraph>(
+            _in(find.text(title), find.byType(RichText)),
+          );
+          expect(paragraph.didExceedMaxLines, isFalse, reason: base);
+          final text = paragraph.text.toPlainText();
+          double top(int i) => paragraph
+              .getBoxesForSelection(
+                TextSelection(baseOffset: i, extentOffset: i + 1),
+              )
+              .first
+              .top;
+          final ana = text.indexOf('Ana\u00A0');
+          final end = text.indexOf(_oldShort) + _oldShort.length - 1;
+          if (top(text.length - 1) > top(0)) wrapped++;
+          for (var i = ana; i <= end; i++) {
+            expect(top(i), top(ana), reason: '$base: ${text[i]}');
+          }
+          await tester.pumpWidget(const SizedBox());
+        }
+        expect(wrapped, greaterThan(0));
+      });
+
+      for (final window in const [Size(800, 600), Size(1180, 720)]) {
+        testWidgets('[$code] "Replace?" at ${window.width.toInt()}x'
+            '${window.height.toInt()} and 100 %: normal names are whole in '
+            'their rows, with the chip "Mine" and the pills', (tester) async {
+          for (final name in normalNames) {
+            await _mount(
+              tester,
+              code: code,
+              reduceMotion: true,
+              window: window,
+            );
+            await _open(
+              tester,
+              controller: _controllerWith([
+                _entry(
+                  fingerprint: _oldFp,
+                  name: name,
+                  visible: false,
+                  mine: true,
+                ),
+                _entry(fingerprint: _newFp, name: name, mine: true),
+              ]),
+              question: ReplaceQuestion(
+                fingerprint: _newFp,
+                deviceName: name,
+                oldFingerprint: _oldFp,
+                oldName: name,
+              ),
+              log: _Log(),
+            );
+
+            expect(tester.takeException(), isNull, reason: name);
+            for (final short in [_oldShort, _newShort]) {
+              final row = _rowOf(short);
+              expect(
+                _in(row, find.byType(StatusChip)),
+                findsOneWidget,
+                reason: name,
+              );
+              final nameText = _in(row, find.text(name));
+              final paragraph = tester.renderObject<RenderParagraph>(
+                _in(nameText, find.byType(RichText)),
+              );
+              final column = tester.getRect(
+                find
+                    .ancestor(of: nameText, matching: find.byType(Column))
+                    .first,
+              );
+              expect(
+                paragraph.constraints.maxWidth,
+                closeTo(column.width, 0.01),
+                reason: name,
+              );
+              final chip = tester.getRect(_in(row, find.byType(StatusChip)));
+              expect(
+                chip.top,
+                greaterThanOrEqualTo(tester.getRect(nameText).bottom),
+                reason: name,
+              );
+              expect(paragraph.didExceedMaxLines, isFalse, reason: name);
+              expect(
+                paragraph.getMaxIntrinsicWidth(double.infinity),
+                lessThanOrEqualTo(paragraph.size.width + 0.01),
+                reason: name,
+              );
+            }
+            await tester.pumpWidget(const SizedBox());
+          }
+        });
+      }
+
+      for (final window in const [Size(800, 600), Size(760, 520)]) {
+        testWidgets('[$code] "Is it yours?" at ${window.width.toInt()}x'
+            '${window.height.toInt()} and 100 %: the question is whole in '
+            'the zone without scrolling', (tester) async {
+          final question = _specTexts[code]!['question']!;
+          for (final name in normalNames) {
+            await _mount(
+              tester,
+              code: code,
+              reduceMotion: true,
+              window: window,
+            );
+            await _open(
+              tester,
+              controller: _controllerWith([
+                _entry(fingerprint: _newFp, name: name),
+              ]),
+              question: MineQuestion(fingerprint: _newFp, deviceName: name),
+              log: _Log(),
+            );
+
+            expect(tester.takeException(), isNull, reason: name);
+            final zoneFinder = _in(
+              find.byType(ModalView),
+              find.byType(SingleChildScrollView),
+            );
+            final zone = tester.getRect(zoneFinder);
+            final position = tester
+                .state<ScrollableState>(
+                  _in(zoneFinder, find.byType(Scrollable)),
+                )
+                .position;
+            expect(position.pixels, 0, reason: name);
+            final lead = tester.getRect(find.text(question));
+            expect(lead.top, greaterThanOrEqualTo(zone.top - 0.5));
+            expect(lead.bottom, lessThanOrEqualTo(zone.bottom + 0.5));
+            expect(lead.left, greaterThanOrEqualTo(zone.left - 0.5));
+            expect(lead.right, lessThanOrEqualTo(zone.right + 0.5));
+            final stage = tester.widget<ModalStage>(find.byType(ModalStage));
+            expect(stage.size, StageSize.mid, reason: name);
+            await tester.pumpWidget(const SizedBox());
+          }
+        });
+      }
+    }
   });
 
   group(

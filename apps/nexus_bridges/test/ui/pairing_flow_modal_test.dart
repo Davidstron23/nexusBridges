@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/format.dart';
 import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
 import 'package:nexus_bridges/src/ui/icons/glyphs.dart';
 import 'package:nexus_bridges/src/ui/modal/code_boxes.dart';
@@ -28,6 +29,7 @@ final String _otherFingerprint = fingerprintOf('7777BBBB');
 const String _oldShort = '9999AAAA';
 final String _oldFingerprint = fingerprintOf(_oldShort);
 const String _oldName = 'Port\u00E1til de Ana \u00B7 9999AAAA';
+final String _oldTitleName = glueFingerprint(_oldName, _oldShort);
 
 final MineQuestion _mine = MineQuestion(
   fingerprint: peerFingerprint,
@@ -788,12 +790,14 @@ void main() {
         );
         await step(600);
         expect(_view().title, strings.outcomePaired(peerName));
-        expect(find.text(strings.replaceTitle(_oldName)), findsNothing);
+        for (final name in [_oldName, _oldTitleName]) {
+          expect(find.text(strings.replaceTitle(name)), findsNothing);
+        }
 
         controller.afterDismiss = pairingState(questions: [_replace, _mine]);
         await _tapLive(tester, strings.closeButton);
         await step(600);
-        expect(_view().title, strings.replaceTitle(_oldName));
+        expect(_view().title, strings.replaceTitle(_oldTitleName));
         expect(_live(_inModal(find.byType(PairingQuestionView))), hasLength(1));
 
         controller.afterReplace = pairingState(questions: [_mine]);
@@ -840,7 +844,7 @@ void main() {
 
         controller.afterDismiss = pairingState(questions: [_replace, _mine]);
         await _tapLive(tester, strings.closeButton);
-        expect(_view().title, strings.replaceTitle(_oldName));
+        expect(_view().title, strings.replaceTitle(_oldTitleName));
         expect(_inModal(find.byType(ModalView)), findsOneWidget);
         expect(identical(_routeOf(tester), route), isTrue);
 
@@ -1431,7 +1435,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         await _ms(tester, 450);
-        expect(_view().title, strings.replaceTitle(_oldName));
+        expect(_view().title, strings.replaceTitle(_oldTitleName));
 
         await _escape(tester);
         await _escape(tester);
@@ -1639,9 +1643,96 @@ void main() {
                 matching: find.byType(RichText),
               ),
             );
-            expect(titleParagraph.maxLines, 2);
+            if (_view().layout == ModalViewLayout.result) {
+              expect(titleParagraph.maxLines, isNull);
+              expect(titleParagraph.didExceedMaxLines, isFalse);
+              expect(
+                titleParagraph.size.height,
+                closeTo(
+                  titleParagraph.getMinIntrinsicHeight(
+                    titleParagraph.size.width,
+                  ),
+                  0.5,
+                ),
+              );
+            } else {
+              expect(titleParagraph.maxLines, 2);
+            }
           });
         }
+      }
+
+      for (final outcome in [
+        PairingOutcome.paused,
+        PairingOutcome.notSaved,
+        PairingOutcome.cancelledByPeer,
+      ]) {
+        testWidgets('result ${outcome.name} at 800x600 and 100 % (point 245): '
+            'the title is whole, without an ellipsis, in the zone when it '
+            'opens, and the buttons are whole', (tester) async {
+          for (final name in _codeFirstNames) {
+            await _mount(
+              tester,
+              code,
+              pairingState(
+                pairing: view(
+                  role: PairingRole.initiator,
+                  phase: PairingPhase.finished,
+                  outcome: outcome,
+                  name: name,
+                ),
+              ),
+              reduceMotion: true,
+            );
+            await _openArmed(tester);
+
+            expect(tester.takeException(), isNull, reason: name);
+            expect(_view().layout, ModalViewLayout.result);
+            expect(_view().title, _outcomeText(strings, outcome, name));
+            final title = _live(_inModal(find.text(_view().title)));
+            expect(title, hasLength(1), reason: name);
+            final paragraph = tester.renderObject<RenderParagraph>(
+              find.descendant(
+                of: _element(title.single),
+                matching: find.byType(RichText),
+              ),
+            );
+            expect(paragraph.maxLines, isNull, reason: name);
+            expect(paragraph.didExceedMaxLines, isFalse, reason: name);
+            expect(
+              paragraph.size.height,
+              closeTo(
+                paragraph.getMinIntrinsicHeight(paragraph.size.width),
+                0.5,
+              ),
+              reason: name,
+            );
+            final zoneFinder = _liveZone();
+            expect(zonePosition(tester, zoneFinder).pixels, 0, reason: name);
+            expectWholeInside(
+              tester.getRect(_element(title.single)),
+              tester.getRect(zoneFinder),
+              '$name title',
+            );
+            final frame = _frameRect(tester);
+            for (final button in _live(_inModal(find.byType(ModalButton)))) {
+              expectWholeInside(tester.getRect(_element(button)), frame, name);
+              final label = (button.widget as ModalButton).label;
+              _expectWhole(
+                tester,
+                find
+                    .descendant(
+                      of: _element(button),
+                      matching: find.text(label),
+                    )
+                    .evaluate()
+                    .single,
+                label,
+              );
+            }
+            await tester.pumpWidget(const SizedBox());
+          }
+        });
       }
     });
 
@@ -1924,8 +2015,12 @@ void main() {
           await _openArmed(tester);
 
           final stage = _stage();
-          final expected = stageSpecOf(stage.scene, stage.input).size;
+          final expected =
+              stage.size ?? stageSpecOf(stage.scene, stage.input).size;
           expect(expected, isNot(StageSize.small));
+          if (label == 'is it yours?') {
+            expect(stage.size, StageSize.mid);
+          }
           expect(
             tester.getSize(
               _element(_live(_inModal(find.byType(ModalStage))).single),

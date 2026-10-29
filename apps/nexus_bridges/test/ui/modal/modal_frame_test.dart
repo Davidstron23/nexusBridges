@@ -673,9 +673,13 @@ void main() {
     for (final MapEntry(key: name, value: brightness) in _themes.entries) {
       for (final layout in ModalViewLayout.values) {
         final (size, line, maxWidth) = titles[layout]!;
+        final lines = layout == ModalViewLayout.result
+            ? 'every line it needs (point 245)'
+            : 'two lines';
         testWidgets('[$name] ${layout.name}: the title is $size/$line, '
             'centered, in text with headingWeight, at most ${maxWidth.toInt()} '
-            'px wide and two lines, and is a header', (tester) async {
+            'px wide and $lines, and is a '
+            'header', (tester) async {
           final colors = _colorsFor(brightness);
           final longTitle = List.filled(30, 'Wide').join(' ');
           await _mount(tester, brightness: brightness, reduceMotion: true);
@@ -695,8 +699,6 @@ void main() {
             contains(FontVariation.weight(colors.headingWeight)),
           );
           expect(text.textAlign, TextAlign.center);
-          expect(text.maxLines, 2);
-          expect(text.overflow, TextOverflow.ellipsis);
           expect(
             tester.getSize(find.text(longTitle)).width,
             lessThanOrEqualTo(maxWidth),
@@ -704,7 +706,27 @@ void main() {
           final paragraph = tester.renderObject<RenderParagraph>(
             _in(find.text(longTitle), find.byType(RichText)),
           );
-          expect(paragraph.didExceedMaxLines, isTrue);
+          if (layout == ModalViewLayout.result) {
+            expect(text.maxLines, isNull);
+            expect(text.overflow, isNot(TextOverflow.ellipsis));
+            expect(paragraph.didExceedMaxLines, isFalse);
+            expect(paragraph.size.height, greaterThan(2 * line + 0.5));
+            expect(tester.takeException(), isNull);
+            final zone = tester.getRect(_zone);
+            final frame = tester.getRect(_frame);
+            expect(frame.bottom, lessThanOrEqualTo(600));
+            for (final key in [_leftKey, _rightKey, _firstKey, _secondKey]) {
+              final button = tester.getRect(find.byKey(key));
+              expect(button.top, greaterThanOrEqualTo(zone.bottom - 0.5));
+              expect(button.left, greaterThanOrEqualTo(frame.left - 0.5));
+              expect(button.right, lessThanOrEqualTo(frame.right + 0.5));
+              expect(button.bottom, lessThanOrEqualTo(frame.bottom + 0.5));
+            }
+          } else {
+            expect(text.maxLines, 2);
+            expect(text.overflow, TextOverflow.ellipsis);
+            expect(paragraph.didExceedMaxLines, isTrue);
+          }
           expect(
             find.ancestor(
               of: find.text(longTitle),

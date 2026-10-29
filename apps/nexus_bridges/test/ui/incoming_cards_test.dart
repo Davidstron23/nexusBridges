@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/activity_cards.dart';
@@ -14,6 +15,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
 import 'pairing_fixtures.dart' show entry, namesakeName;
+import 'segoe_font.dart';
 import 'transfer_fixtures.dart';
 
 final NbColors _colors = NbColors.light;
@@ -388,6 +390,14 @@ void main() {
           textIn(_cards, strings.proposedFolderLine(downloadsPath)),
           findsOneWidget,
         );
+        expect(
+          tester
+              .widget<Text>(
+                textIn(_cards, strings.proposedFolderLine(downloadsPath)),
+              )
+              .data,
+          strings.proposedFolderLine(breakablePath(downloadsPath)),
+        );
         expect(textIn(_cards, strings.incomingExpiresNote), findsNothing);
         expect(buttonLabels(tester, _cards), [
           strings.cancelButton,
@@ -440,7 +450,14 @@ void main() {
           textIn(_cards, strings.proposedFolderLine(downloadsPath)),
           findsOneWidget,
         );
-        expect(find.textContaining(downloadsPath), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is Text &&
+                shownText(textOf(widget)).contains(downloadsPath),
+          ),
+          findsOneWidget,
+        );
         expect(buttonLabels(tester, _cards).length, 3);
       });
 
@@ -507,6 +524,13 @@ void main() {
                   expected ? findsOneWidget : findsNothing,
                   reason: '$reason ${other(path)}',
                 );
+                if (expected) {
+                  expect(
+                    tester.widget<Text>(textIn(_cards, other(path))).data,
+                    other(breakablePath(path)),
+                    reason: '$reason ${other(path)}',
+                  );
+                }
               }
             }
             expect(tester.takeException(), isNull, reason: reason);
@@ -564,6 +588,16 @@ void main() {
             textIn(_cards, strings.cautionRemote(cautionPath)),
             remote ? findsOneWidget : findsNothing,
           );
+          for (final (shown, line) in [
+            (noMark, strings.cautionNoMark),
+            (remote, strings.cautionRemote),
+          ]) {
+            if (!shown) continue;
+            expect(
+              tester.widget<Text>(textIn(_cards, line(cautionPath))).data,
+              line(breakablePath(cautionPath)),
+            );
+          }
           expect(buttonLabels(tester, _cards), [
             strings.useAnywayButton,
             strings.chooseOtherFolderButton,
@@ -876,7 +910,7 @@ void main() {
         for (final text in tester.widgetList<Text>(
           inside(_cards, find.byType(Text)),
         ))
-          text.data ?? '',
+          shownText(textOf(text)),
       ];
 
       void expectNoPathBut(WidgetTester tester, String? shown) {
@@ -1880,5 +1914,100 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     }
     expect(rendered['es']!.intersection(rendered['en']!), isEmpty);
+  });
+
+  group('point 245: with Segoe UI the path of the folder question only breaks '
+      'after a separator, never after the drive', () {
+    setUpAll(loadSegoe);
+
+    const longPath = r'C:\Users\Ana\Documents\Proyectos\NexusBridges\Recibidos';
+
+    final cases = <String, (FolderQuestionView, String Function(AppStrings))>{
+      'proposal': (
+        const FolderQuestionView(
+          kind: FolderQuestionKind.firstTime,
+          proposedPath: longPath,
+        ),
+        (strings) => strings.proposedFolderLine(longPath),
+      ),
+      'problem': (
+        const FolderQuestionView(
+          kind: FolderQuestionKind.firstTime,
+          proposedPath: downloadsPath,
+          problem: FolderProblem.forbidden,
+          problemPath: longPath,
+        ),
+        (strings) => strings.folderForbidden(longPath),
+      ),
+      'caution': (
+        const FolderQuestionView(
+          kind: FolderQuestionKind.firstTime,
+          proposedPath: downloadsPath,
+          cautionPath: longPath,
+          cautionNoMark: true,
+        ),
+        (strings) => strings.cautionNoMark(longPath),
+      ),
+    };
+
+    List<int> lineStarts(RenderParagraph paragraph) {
+      final data = paragraph.text.toPlainText();
+      final starts = <int>[];
+      double? previousTop;
+      for (var i = 0; i < data.length; i++) {
+        if (data[i] == zeroWidthSpace) continue;
+        final boxes = paragraph.getBoxesForSelection(
+          TextSelection(baseOffset: i, extentOffset: i + 1),
+        );
+        if (boxes.isEmpty) continue;
+        final top = boxes.first.top;
+        if (previousTop != null && top > previousTop + 1) starts.add(i);
+        previousTop = top;
+      }
+      return starts;
+    }
+
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+      for (final MapEntry(key: name, value: (folder, line)) in cases.entries) {
+        for (final scale in [1.0, 1.3]) {
+          testWidgets('[$code] $name at ${(scale * 100).round()} %: from 280 '
+              'to 400 px every break inside the path follows a backslash and '
+              'the path is whole', (tester) async {
+            tester.platformDispatcher.textScaleFactorTestValue = scale;
+            addTearDown(
+              tester.platformDispatcher.clearTextScaleFactorTestValue,
+            );
+            var breaksInPath = 0;
+            for (var width = 280.0; width <= 400; width += 1) {
+              await _pumpCards(tester, code, _question(folder), width: width);
+              expect(tester.takeException(), isNull, reason: '$width');
+              final text = textIn(_cards, line(strings));
+              expect(text, findsOneWidget, reason: '$width');
+              final paragraph = tester.renderObject<RenderParagraph>(
+                inside(text, find.byType(RichText)),
+              );
+              expect(paragraph.didExceedMaxLines, isFalse, reason: '$width');
+              final data = paragraph.text.toPlainText();
+              expect(shownText(data), line(strings), reason: '$width');
+              final start = data.indexOf(breakablePath(longPath));
+              expect(start, greaterThanOrEqualTo(0), reason: '$width');
+              final end = start + breakablePath(longPath).length;
+              for (final lineStart in lineStarts(paragraph)) {
+                if (lineStart <= start || lineStart >= end) continue;
+                breaksInPath++;
+                expect(
+                  data.substring(lineStart - 2, lineStart),
+                  '\\$zeroWidthSpace',
+                  reason: '$width: ${data.substring(start, lineStart)}',
+                );
+                expect(lineStart, isNot(start + 2), reason: '$width');
+              }
+            }
+            expect(breaksInPath, greaterThan(0));
+          });
+        }
+      }
+    }
   });
 }

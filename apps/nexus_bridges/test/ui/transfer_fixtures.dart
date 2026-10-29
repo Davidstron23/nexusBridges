@@ -162,7 +162,23 @@ Future<void> arm(WidgetTester tester) => tester.pump(dialogActivationDelay);
 Finder inside(Finder scope, Finder finder) =>
     find.descendant(of: scope, matching: finder);
 
-Finder textIn(Finder scope, String text) => inside(scope, find.text(text));
+const String zeroWidthSpace = '\u200B';
+
+const String wordJoiner = '\u2060';
+
+String shownText(String text) =>
+    text.replaceAll(zeroWidthSpace, '').replaceAll(wordJoiner, '');
+
+String textOf(Text widget) =>
+    widget.data ?? widget.textSpan?.toPlainText() ?? '';
+
+Finder textIn(Finder scope, String text) => inside(
+  scope,
+  find.byWidgetPredicate(
+    (widget) => widget is Text && shownText(textOf(widget)) == text,
+    description: 'text "$text" without zero-width spaces',
+  ),
+);
 
 Finder buttonIn(Finder scope, String label) => find.ancestor(
   of: textIn(scope, label),

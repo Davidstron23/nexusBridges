@@ -6,6 +6,12 @@ final String _ellipsis = String.fromCharCode(0x2026);
 final String _grin = String.fromCharCode(0x1F600);
 final String _flagPart = String.fromCharCode(0x1F1EA);
 
+const String _zeroWidthSpace = '\u200B';
+
+const String _wordJoiner = '\u2060';
+
+const String _noBreakSpace = '\u00A0';
+
 const int _kib = 1024;
 const int _mib = 1024 * _kib;
 const int _gib = 1024 * _mib;
@@ -247,6 +253,169 @@ void main() {
       expect(formatOverflow(2), '+2');
       expect(formatOverflow(19), '+19');
       expect(formatOverflow(1000), '+1000');
+    });
+  });
+
+  group('point 245: breakablePath', () {
+    String visible(String text) =>
+        text.replaceAll(_zeroWidthSpace, '').replaceAll(_wordJoiner, '');
+
+    const paths = [
+      r'C:\Users\Ana\Downloads\NexusBridges',
+      r'D:\Recibidos',
+      r'E:\',
+      r'\\servidor\compartida\carpeta',
+      r'C:\Users\Ana\Mis cosas\Fotos de 2026',
+    ];
+
+    const backslash = r'\';
+
+    test('only adds invisible characters: the path is the same once they '
+        'are removed', () {
+      for (final path in paths) {
+        expect(visible(breakablePath(path)), path, reason: path);
+      }
+    });
+
+    test('every backslash is followed by a zero-width space and there is no '
+        'other one', () {
+      for (final path in paths) {
+        final shown = breakablePath(path);
+        final backslashes = backslash.allMatches(path).length;
+        expect(_zeroWidthSpace.allMatches(shown).length, backslashes);
+        expect(
+          '$backslash$_zeroWidthSpace'.allMatches(shown).length,
+          backslashes,
+          reason: path,
+        );
+      }
+    });
+
+    test('a path without separators and an empty path stay the same', () {
+      expect(breakablePath('Recibidos'), 'Recibidos');
+      expect(breakablePath('C:'), 'C:');
+      expect(breakablePath(''), '');
+    });
+
+    test('a network path keeps its two backslashes, each with its break', () {
+      expect(
+        breakablePath(r'\\servidor\compartida'),
+        '$backslash$_zeroWidthSpace$backslash${_zeroWidthSpace}servidor'
+        '$backslash${_zeroWidthSpace}compartida',
+      );
+    });
+
+    test('the other spaces of the path are not touched', () {
+      expect(
+        visible(breakablePath(r'C:\Mis cosas\Fotos')).contains('Mis cosas'),
+        isTrue,
+      );
+      expect(breakablePath(r'C:\Mis cosas').contains(_noBreakSpace), isFalse);
+    });
+  });
+
+  group('point 245: glueFingerprint', () {
+    const short = 'ABCD1234';
+
+    test('joins the last word, the dot and the fingerprint with no-break '
+        'spaces and leaves the rest of the name alone', () {
+      final glued = glueFingerprint(
+        'Port\u00E1til de Ana \u00B7 $short',
+        short,
+      );
+      expect(
+        glued,
+        'Port\u00E1til de Ana$_noBreakSpace\u00B7$_noBreakSpace$short',
+      );
+      expect(glued.split(' '), [
+        'Port\u00E1til',
+        'de',
+        'Ana$_noBreakSpace\u00B7$_noBreakSpace$short',
+      ]);
+    });
+
+    test('a name of one word sticks to its fingerprint', () {
+      expect(
+        glueFingerprint('Torre \u00B7 $short', short),
+        'Torre$_noBreakSpace\u00B7$_noBreakSpace$short',
+      );
+    });
+
+    test('a name without a fingerprint stays the same', () {
+      for (final name in ['Port\u00E1til de Ana', 'Torre', '']) {
+        expect(glueFingerprint(name, short), name);
+      }
+    });
+
+    test('a fingerprint that does not match the end stays the same', () {
+      for (final name in [
+        'Port\u00E1til de Ana \u00B7 WXYZ9876',
+        'Port\u00E1til de Ana \u00B7 ${short.toLowerCase()}',
+        'Port\u00E1til de Ana \u00B7 $short extra',
+        'Port\u00E1til de Ana\u00B7$short',
+        'Port\u00E1til de Ana $short',
+        '$short \u00B7 Port\u00E1til de Ana',
+      ]) {
+        expect(glueFingerprint(name, short), name, reason: name);
+      }
+    });
+
+    test('only the last dot is glued when the name has another one', () {
+      expect(
+        glueFingerprint('Casa \u00B7 Ana \u00B7 $short', short),
+        'Casa \u00B7 Ana$_noBreakSpace\u00B7$_noBreakSpace$short',
+      );
+    });
+  });
+
+  group('point 245: withoutFingerprint', () {
+    const short = 'ABCD1234';
+
+    test('removes the dot and the fingerprint at the end of the name', () {
+      expect(
+        withoutFingerprint('Port\u00E1til de Ana \u00B7 $short', short),
+        'Port\u00E1til de Ana',
+      );
+      expect(withoutFingerprint('Torre \u00B7 $short', short), 'Torre');
+    });
+
+    test('a name without a fingerprint stays the same', () {
+      for (final name in ['Port\u00E1til de Ana', 'Torre', '']) {
+        expect(withoutFingerprint(name, short), name);
+      }
+    });
+
+    test('a fingerprint that does not match the end stays the same', () {
+      for (final name in [
+        'Port\u00E1til de Ana \u00B7 WXYZ9876',
+        'Port\u00E1til de Ana \u00B7 ${short.toLowerCase()}',
+        'Port\u00E1til de Ana \u00B7 $short extra',
+        'Port\u00E1til de Ana\u00B7$short',
+        'Port\u00E1til de Ana $short',
+        '$short \u00B7 Port\u00E1til de Ana',
+      ]) {
+        expect(withoutFingerprint(name, short), name, reason: name);
+      }
+    });
+
+    test('only the last fingerprint is removed when the name has another '
+        'dot', () {
+      expect(
+        withoutFingerprint('Casa \u00B7 Ana \u00B7 $short', short),
+        'Casa \u00B7 Ana',
+      );
+    });
+
+    test('glueFingerprint and withoutFingerprint agree on when a name has '
+        'the fingerprint', () {
+      for (final name in [
+        'Port\u00E1til de Ana \u00B7 $short',
+        'Port\u00E1til de Ana \u00B7 WXYZ9876',
+        'Port\u00E1til de Ana',
+      ]) {
+        final hasIt = withoutFingerprint(name, short) != name;
+        expect(glueFingerprint(name, short) != name, hasIt, reason: name);
+      }
     });
   });
 }

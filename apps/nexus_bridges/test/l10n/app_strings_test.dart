@@ -843,8 +843,8 @@ final Map<String, (String, String)> _expectedPairing = {
     'Conectando con $_sampleName…',
   ),
   'compareCode': (
-    'Check that $_sampleName shows this code:',
-    'Comprueba que $_sampleName muestra este código:',
+    'Check that $_sampleName shows the same code.',
+    'Comprueba que $_sampleName muestra el mismo código.',
   ),
   'matchesButton': ('It matches', 'Coincide'),
   'doesNotMatchButton': ("It doesn't match", 'No coincide'),

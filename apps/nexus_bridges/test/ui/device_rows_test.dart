@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/rendering.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/device_list.dart';
+import 'package:nexus_bridges/src/ui/format.dart';
 import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
@@ -32,6 +33,7 @@ const String _newName = 'Movil';
 const String _mismatchName = 'Torre';
 const String _reinstallName = 'Port\u00E1til';
 const String _oldName = 'Port\u00E1til \u00B7 9999AAAA';
+final String _oldTitleName = glueFingerprint(_oldName, '9999AAAA');
 const String _longName = 'Portatil del salon con un nombre largo X';
 
 final List<DeviceEntry> _allRows = [
@@ -859,7 +861,9 @@ void main() {
         final withdrawn = strings.noticeReplaceWithdrawn(_oldName);
         expect(find.text(withdrawn), findsOneWidget);
         expect(withdrawn, contains(_oldName));
-        expect(find.text(strings.replaceTitle(_oldName)), findsNothing);
+        for (final name in [_oldName, _oldTitleName]) {
+          expect(find.text(strings.replaceTitle(name)), findsNothing);
+        }
         expect(buttonLabelsIn(tester, _noticeCard(withdrawn)), [
           strings.closeButton,
         ]);

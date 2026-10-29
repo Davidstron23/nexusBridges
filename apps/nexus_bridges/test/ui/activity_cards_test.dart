@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/activity_cards.dart';
@@ -9,6 +10,7 @@ import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
+import 'segoe_font.dart';
 import 'transfer_fixtures.dart';
 
 const ValueKey<String> _outgoingKey = ValueKey('activity-outgoing');
@@ -1372,4 +1374,79 @@ void main() {
       }, timeout: const Timeout(Duration(seconds: 60)));
     });
   }
+
+  group('point 245: header of the transfer cards', () {
+    setUpAll(loadSegoe);
+
+    const longPeer =
+        'Port\u00E1til del estudio de Andrea en casa de Luc\u00EDa';
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+      final cards =
+          <
+            String,
+            (Finder, NodeState Function(String), String Function(String))
+          >{
+            'outgoing': (
+              _outgoing,
+              (name) => NodeState(outgoing: outgoingView(name: name)),
+              strings.sendingToTitle,
+            ),
+            'incoming': (
+              _incoming,
+              (name) => NodeState(
+                incoming: incomingView(
+                  stage: IncomingStage.receiving,
+                  name: name,
+                ),
+              ),
+              strings.receivingFromTitle,
+            ),
+          };
+      for (final MapEntry(key: label, value: (card, state, title))
+          in cards.entries) {
+        for (final name in ['Ana', longPeer]) {
+          final long = name == longPeer;
+          testWidgets('[$code] $label with a ${long ? 'long' : 'short'} '
+              'name: the title takes the free space in one line'
+              '${long ? ' with an ellipsis' : ''} and the chip is whole at '
+              'the end of the row', (tester) async {
+            await _pumpPanel(tester, code, state(name));
+            expect(tester.takeException(), isNull);
+
+            final titleFinder = textIn(card, title(name));
+            expect(titleFinder, findsOneWidget);
+            final text = tester.widget<Text>(titleFinder);
+            expect(text.maxLines, 1);
+            expect(text.overflow, TextOverflow.ellipsis);
+            final paragraph = tester.renderObject<RenderParagraph>(
+              inside(titleFinder, find.byType(RichText)),
+            );
+            expect(paragraph.didExceedMaxLines, long);
+
+            final chipFinder = inside(card, find.byType(StatusChip));
+            final chip = tester.getRect(chipFinder);
+            final titleRect = tester.getRect(titleFinder);
+            final row = tester.getRect(inside(card, find.byType(FileRow)));
+            expect(chip.right, closeTo(row.right, 0.5));
+            expect(chip.left - titleRect.right, closeTo(8, 0.5));
+            expect(titleRect.left, closeTo(row.left, 0.5));
+            expect(chip.center.dy, closeTo(titleRect.center.dy, 1));
+            final chipLabel = tester.widget<StatusChip>(chipFinder).label;
+            final chipText = tester.renderObject<RenderParagraph>(
+              inside(
+                inside(chipFinder, find.text(chipLabel)),
+                find.byType(RichText),
+              ),
+            );
+            expect(chipText.didExceedMaxLines, isFalse);
+            expect(
+              chipText.getMaxIntrinsicWidth(double.infinity),
+              lessThanOrEqualTo(chipText.size.width + 0.01),
+            );
+          });
+        }
+      }
+    }
+  });
 }

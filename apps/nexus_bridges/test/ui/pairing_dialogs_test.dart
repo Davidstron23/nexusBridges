@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/main.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/format.dart';
 import 'package:nexus_bridges/src/ui/modal/code_boxes.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges/src/ui/modal/stage.dart';
@@ -17,6 +18,7 @@ import 'pairing_fixtures.dart';
 final String _oldFingerprint = fingerprintOf('9999AAAA');
 const String _oldShort = '9999AAAA';
 const String _oldName = 'Port\u00E1til de Ana \u00B7 9999AAAA';
+final String _oldTitleName = glueFingerprint(_oldName, _oldShort);
 
 final MineQuestion _mine = MineQuestion(
   fingerprint: peerFingerprint,
@@ -882,14 +884,18 @@ void main() {
       ) async {
         await _pumpWith(tester, code, questions: [_replace]);
 
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
+        expect(
+          strings.replaceTitle(_oldTitleName).replaceAll('\u00A0', ' '),
+          strings.replaceTitle(_oldName),
+        );
         expect(find.text(strings.replaceShortBody(peerName)), findsOneWidget);
         expect(
           find.text(strings.replaceBody(peerName, _oldName)),
           findsNothing,
         );
-        expect(find.text(_oldName), findsOneWidget);
-        expect(find.text(peerName), findsOneWidget);
+        expect(find.text(_oldName), findsNothing);
+        expect(find.text(peerName), findsNWidgets(2));
         expect(find.text(_oldShort), findsOneWidget);
         expect(find.text(peerShort), findsOneWidget);
         expect(dialogButtons(tester), [
@@ -949,7 +955,7 @@ void main() {
           questions: [_replace, _mine],
         );
 
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
         expect(find.text(strings.mineTitle(peerName)), findsNothing);
         expect(dialog, findsOneWidget);
 
@@ -957,7 +963,9 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(dialog, findsOneWidget);
-        expect(find.text(strings.replaceTitle(_oldName)), findsNothing);
+        for (final name in [_oldName, _oldTitleName]) {
+          expect(find.text(strings.replaceTitle(name)), findsNothing);
+        }
         expect(find.text(strings.mineTitle(peerName)), findsOneWidget);
 
         await tester.pump(dialogActivationDelay);
@@ -1561,7 +1569,7 @@ void main() {
           code,
           _with(questions: [_replace]),
         );
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
         expect(_buttonStates(tester), {
           strings.keepBothButton: false,
           strings.replaceButton: false,
@@ -1571,7 +1579,7 @@ void main() {
         await _tapNow(tester, strings.replaceButton);
         await _tapNow(tester, strings.keepBothButton);
         expect(controller.calls, isEmpty);
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
 
         await _wait(tester, 400);
         await _tapNow(tester, strings.replaceButton);
@@ -2015,7 +2023,7 @@ void main() {
   }
 
   group('C91 rendered texts of the dialogs', () {
-    const names = [peerName, peerShort, _oldName, namesakeName];
+    final names = [peerName, peerShort, _oldName, _oldTitleName, namesakeName];
     const userTexts = {peerName, formattedCode, _oldName, peerShort, _oldShort};
     final scenarios = <String, (PairingView?, List<PairingQuestion>, String?)>{
       'initiator connecting': (
