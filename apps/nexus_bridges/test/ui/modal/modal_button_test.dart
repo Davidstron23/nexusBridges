@@ -237,7 +237,7 @@ void _expectLook(
   } else {
     expect(box.color, look.fill, reason: '$reason fill');
   }
-  expect(box.boxShadow ?? const <BoxShadow>[], look.shadows, reason: reason);
+  expect(_visibleShadows(box), look.shadows, reason: reason);
   expect(box.borderRadius, BorderRadius.circular(14), reason: reason);
   expect(_ink(tester, label), look.ink, reason: '$reason ink');
   final border = _border(tester, _button);
@@ -263,6 +263,91 @@ void _expectLook(
 }
 
 bool _sameColor(Color a, Color b) => a.toARGB32() == b.toARGB32();
+
+List<BoxShadow> _visibleShadows(BoxDecoration box) => [
+  for (final shadow in box.boxShadow ?? const <BoxShadow>[])
+    if (shadow.color.a > 0) shadow,
+];
+
+double _edgeAlpha(WidgetTester tester) {
+  final render = tester.renderObject<RenderCustomPaint>(
+    _in(_button, find.byType(CustomPaint)).first,
+  );
+  final canvas = TestRecordingCanvas();
+  render.painter!.paint(canvas, render.size);
+  for (final call in canvas.invocations) {
+    if (call.invocation.memberName == #drawPath) {
+      return (call.invocation.positionalArguments[1] as Paint).color.a;
+    }
+  }
+  return 0;
+}
+
+List<double> _channels(Color? color) =>
+    color == null ? const [] : [color.r, color.g, color.b, color.a];
+
+List<double> _frameOf(WidgetTester tester, String label) {
+  final box = _box(tester, _button);
+  final transform = _transform(tester, _button);
+  return [
+    ..._channels(box.color),
+    ..._channels(_ink(tester, label)),
+    ..._channels(_border(tester, _button)?.top.color),
+    _edgeAlpha(tester),
+    for (final shadow in box.boxShadow ?? const <BoxShadow>[]) ...[
+      ..._channels(shadow.color),
+      shadow.offset.dx,
+      shadow.offset.dy,
+      shadow.blurRadius,
+      shadow.spreadRadius,
+    ],
+    transform.getTranslation().y,
+    transform.storage[0],
+    transform.storage[5],
+  ];
+}
+
+void _expectOneWay(
+  List<List<double>> frames,
+  List<double> from,
+  List<double> to, {
+  required String reason,
+}) {
+  for (final frame in frames) {
+    expect(frame, hasLength(from.length), reason: '$reason structure');
+  }
+  expect(to, hasLength(from.length), reason: '$reason structure');
+  for (var i = 0; i < from.length; i++) {
+    final low = from[i] < to[i] ? from[i] : to[i];
+    final high = from[i] < to[i] ? to[i] : from[i];
+    var last = (from[i] - to[i]).abs();
+    for (var f = 0; f < frames.length; f++) {
+      final value = frames[f][i];
+      final why = '$reason property $i frame $f';
+      expect(value, greaterThanOrEqualTo(low - 1e-9), reason: why);
+      expect(value, lessThanOrEqualTo(high + 1e-9), reason: why);
+      final gap = (value - to[i]).abs();
+      expect(gap, lessThanOrEqualTo(last + 1e-9), reason: why);
+      last = gap;
+    }
+  }
+  for (var i = 0; i < from.length; i++) {
+    expect(frames.last[i], closeTo(to[i], 1e-9), reason: '$reason end $i');
+  }
+}
+
+Future<List<List<double>>> _sampleFrames(
+  WidgetTester tester,
+  String label, {
+  Duration span = const Duration(milliseconds: 480),
+}) async {
+  final frames = <List<double>>[];
+  for (var ms = 0; ms < span.inMilliseconds; ms += 16) {
+    await tester.pump(const Duration(milliseconds: 16));
+    frames.add(_frameOf(tester, label));
+  }
+  return frames;
+}
 
 PaintPattern _edge(Color color) => paints
   ..something(
@@ -522,7 +607,7 @@ void main() {
       });
     }
 
-    testWidgets('a hover changes color and shadow over 200 ms', (tester) async {
+    testWidgets('a hover changes color and shadow over 300 ms', (tester) async {
       final colors = NbColors.light;
       await _mount(
         tester,
@@ -534,15 +619,76 @@ void main() {
       );
 
       await _hover(tester, _button);
-      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 150));
       final middle = _box(tester, _button);
       expect(middle.color, isNot(colors.primaryButton));
       expect(middle.color, isNot(colors.primaryButtonHover));
 
-      await tester.pump(const Duration(milliseconds: 101));
+      await tester.pump(const Duration(milliseconds: 151));
       expect(_box(tester, _button).color, colors.primaryButtonHover);
       expect(_box(tester, _button).boxShadow, colors.primaryButtonHoverShadow);
     });
+
+    for (final MapEntry(key: name, value: brightness) in _themes.entries) {
+      for (final kind in ModalButtonKind.values) {
+        testWidgets('[$name] ${kind.name}: every frame of the hover exit goes '
+            'one way from the hover look to the rest look', (tester) async {
+          await _mount(
+            tester,
+            ModalButton(label: 'Label', kind: kind, onPressed: () {}),
+            brightness: brightness,
+          );
+          final rest = _frameOf(tester, 'Label');
+          final mouse = await _hover(tester, _button);
+          final entering = await _sampleFrames(tester, 'Label');
+          final hover = entering.last;
+          _expectOneWay(entering, rest, hover, reason: 'enter');
+
+          await mouse.moveTo(Offset.zero);
+          await tester.pump();
+          final leaving = [
+            _frameOf(tester, 'Label'),
+            ...await _sampleFrames(tester, 'Label'),
+          ];
+          _expectOneWay(leaving, hover, rest, reason: 'exit');
+          _expectLook(
+            tester,
+            _colorsFor(brightness),
+            _restOf(_colorsFor(brightness), kind),
+            'Label',
+            reason: 'after exit',
+          );
+        });
+
+        testWidgets('[$name] ${kind.name}: press and release go one way '
+            'each, without touching the hover look', (tester) async {
+          await _mount(
+            tester,
+            ModalButton(label: 'Label', kind: kind, onPressed: () {}),
+            brightness: brightness,
+          );
+          final mouse = await _hover(tester, _button);
+          await tester.pump(_settle);
+          final hover = _frameOf(tester, 'Label');
+
+          await mouse.down(tester.getCenter(_button));
+          await tester.pump();
+          final pressing = await _sampleFrames(tester, 'Label');
+          _expectOneWay(pressing, hover, pressing.last, reason: 'press');
+          final pressed = pressing.last;
+          expect(pressed.sublist(0, pressed.length - 3), [
+            ...hover.sublist(0, hover.length - 3),
+          ]);
+          expect(pressed[pressed.length - 3], closeTo(0, 1e-9));
+          expect(pressed.last, closeTo(0.97, 1e-9));
+
+          await mouse.up();
+          await tester.pump();
+          final releasing = await _sampleFrames(tester, 'Label');
+          _expectOneWay(releasing, pressed, hover, reason: 'release');
+        });
+      }
+    }
 
     for (final kind in ModalButtonKind.values) {
       testWidgets('${kind.name}: pressing scales to 0.97 and wins over the '

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -14,6 +15,7 @@ const double _tileRadius = 16;
 const double _borderWidth = 1.5;
 const Duration _boxDuration = Duration(milliseconds: 200);
 const Duration _liftDuration = Duration(milliseconds: 160);
+const Duration _hoverDuration = Duration(milliseconds: 300);
 const Duration _dimDuration = Duration(milliseconds: 300);
 
 void paintInnerEdge(
@@ -112,7 +114,50 @@ class _Look {
   final List<BoxShadow> shadows;
   final Color edge;
   final Color? border;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _Look &&
+      other.fill == fill &&
+      other.ink == ink &&
+      listEquals(other.shadows, shadows) &&
+      other.edge == edge &&
+      other.border == border;
+
+  @override
+  int get hashCode =>
+      Object.hash(fill, ink, Object.hashAll(shadows), edge, border);
+
+  static _Look lerp(_Look a, _Look b, double t) {
+    final from = a.border;
+    final to = b.border;
+    return _Look(
+      fill: Color.lerp(a.fill, b.fill, t)!,
+      ink: Color.lerp(a.ink, b.ink, t)!,
+      shadows: BoxShadow.lerpList(a.shadows, b.shadows, t)!,
+      edge: Color.lerp(a.edge, b.edge, t)!,
+      border: from == null && to == null
+          ? null
+          : Color.lerp(
+              from ?? to!.withValues(alpha: 0),
+              to ?? from!.withValues(alpha: 0),
+              t,
+            ),
+    );
+  }
 }
+
+class _LookTween extends Tween<_Look> {
+  _LookTween({required _Look super.end});
+
+  @override
+  _Look lerp(double t) => _Look.lerp(begin ?? end!, end!, t);
+}
+
+List<BoxShadow> _cleared(List<BoxShadow> shadows) => [
+  for (final shadow in shadows)
+    shadow.copyWith(color: shadow.color.withValues(alpha: 0)),
+];
 
 _Look _lookOf(
   NbColors colors,
@@ -128,7 +173,7 @@ _Look _lookOf(
         fill: active ? colors.primaryButtonHover : colors.primaryButton,
         ink: colors.onPrimary,
         shadows: !enabled
-            ? const []
+            ? _cleared(colors.primaryButtonShadow)
             : (active
                   ? colors.primaryButtonHoverShadow
                   : colors.primaryButtonShadow),
@@ -142,7 +187,9 @@ _Look _lookOf(
             ? colors.primaryButtonHover
             : colors.primaryButtonHover.withValues(alpha: 0),
         ink: active ? colors.onPrimary : colors.text,
-        shadows: active ? colors.primaryButtonHoverShadow : const [],
+        shadows: active
+            ? colors.primaryButtonHoverShadow
+            : _cleared(colors.primaryButtonHoverShadow),
         edge: active ? colors.buttonHighlightHover : hidden,
       );
     case ModalButtonKind.secondary:
@@ -159,7 +206,9 @@ _Look _lookOf(
       return _Look(
         fill: active ? colors.dangerFill : colors.dangerWeak,
         ink: active ? colors.onPrimary : colors.danger,
-        shadows: active ? colors.dangerButtonHoverShadow : const [],
+        shadows: active
+            ? colors.dangerButtonHoverShadow
+            : _cleared(colors.dangerButtonHoverShadow),
         edge: active ? colors.buttonHighlight : hidden,
       );
     case ModalButtonKind.negativeQuiet:
@@ -168,7 +217,9 @@ _Look _lookOf(
             ? colors.dangerFill
             : colors.dangerFill.withValues(alpha: 0),
         ink: active ? colors.onPrimary : colors.danger,
-        shadows: active ? colors.dangerButtonHoverShadow : const [],
+        shadows: active
+            ? colors.dangerButtonHoverShadow
+            : _cleared(colors.dangerButtonHoverShadow),
         edge: active ? colors.buttonHighlight : hidden,
       );
   }
@@ -229,6 +280,8 @@ class _ButtonBox extends StatelessWidget {
     required this.opacityDuration,
     required this.animate,
     required this.child,
+    this.boxDuration = _boxDuration,
+    this.liftDuration = _liftDuration,
   });
 
   final double radius;
@@ -243,6 +296,8 @@ class _ButtonBox extends StatelessWidget {
   final Duration opacityDuration;
   final bool animate;
   final Widget child;
+  final Duration boxDuration;
+  final Duration liftDuration;
 
   @override
   Widget build(BuildContext context) {
@@ -253,14 +308,14 @@ class _ButtonBox extends StatelessWidget {
       duration: animate ? opacityDuration : Duration.zero,
       curve: Curves.ease,
       child: AnimatedContainer(
-        duration: animate ? _liftDuration : Duration.zero,
+        duration: animate ? liftDuration : Duration.zero,
         curve: _labEaseOut,
         transformAlignment: Alignment.center,
         transform:
             Matrix4.translationValues(0, lift, 0) *
             Matrix4.diagonal3Values(scale, scale, 1),
         child: AnimatedContainer(
-          duration: animate ? _boxDuration : Duration.zero,
+          duration: animate ? boxDuration : Duration.zero,
           curve: _labEaseOut,
           decoration: BoxDecoration(
             color: fill,
@@ -320,63 +375,72 @@ class _ModalButtonState extends State<ModalButton> with _PressStates {
       fontVariations: [FontVariation.weight(colors.headingWeight)],
     );
     final glyph = widget.glyph;
-    return _ButtonBox(
-      radius: _buttonRadius,
-      fill: look.fill,
-      shadows: look.shadows,
-      edge: look.edge,
-      border: look.border,
-      ring: keyboardFocused && enabled ? colors.primary : null,
-      lift: lifted ? -1 : 0,
-      scale: squeezed ? 0.97 : 1,
-      opacity: enabled ? 1 : 0.5,
-      opacityDuration: _boxDuration,
-      animate: animate,
-      child: TextButton(
-        statesController: statesController,
-        onPressed: leaving ? null : widget.onPressed,
-        style: ButtonStyle(
-          backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
-          foregroundColor: WidgetStatePropertyAll(look.ink),
-          overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-          shadowColor: const WidgetStatePropertyAll(Colors.transparent),
-          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
-          elevation: const WidgetStatePropertyAll(0),
-          side: const WidgetStatePropertyAll(BorderSide.none),
-          shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(_buttonRadius),
-            ),
+    final label = Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (glyph != null) ...[
+          GlyphIcon(glyph, size: 16),
+          const SizedBox(width: 8),
+        ],
+        Flexible(
+          child: Text(
+            widget.label,
+            textAlign: TextAlign.center,
+            maxLines: inPair ? 2 : 1,
+            softWrap: inPair,
+            overflow: inPair ? TextOverflow.clip : TextOverflow.ellipsis,
           ),
-          minimumSize: const WidgetStatePropertyAll(Size.fromHeight(46)),
-          padding: WidgetStatePropertyAll(
-            inPair
-                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
-                : const EdgeInsets.symmetric(horizontal: 18),
-          ),
-          textStyle: WidgetStatePropertyAll(style),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          splashFactory: NoSplash.splashFactory,
-          animationDuration: animate ? _boxDuration : Duration.zero,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (glyph != null) ...[
-              GlyphIcon(glyph, size: 16),
-              const SizedBox(width: 8),
-            ],
-            Flexible(
-              child: Text(
-                widget.label,
-                textAlign: TextAlign.center,
-                maxLines: inPair ? 2 : 1,
-                softWrap: inPair,
-                overflow: inPair ? TextOverflow.clip : TextOverflow.ellipsis,
+      ],
+    );
+    return TweenAnimationBuilder<_Look>(
+      tween: _LookTween(end: look),
+      duration: animate ? _hoverDuration : Duration.zero,
+      curve: _labEaseOut,
+      child: label,
+      builder: (context, shown, label) => _ButtonBox(
+        radius: _buttonRadius,
+        fill: shown.fill,
+        shadows: shown.shadows,
+        edge: shown.edge,
+        border: shown.border,
+        ring: keyboardFocused && enabled ? colors.primary : null,
+        lift: lifted ? -1 : 0,
+        scale: squeezed ? 0.97 : 1,
+        opacity: enabled ? 1 : 0.5,
+        opacityDuration: _boxDuration,
+        animate: animate,
+        boxDuration: Duration.zero,
+        liftDuration: _hoverDuration,
+        child: TextButton(
+          statesController: statesController,
+          onPressed: leaving ? null : widget.onPressed,
+          style: ButtonStyle(
+            backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
+            foregroundColor: WidgetStatePropertyAll(shown.ink),
+            overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+            shadowColor: const WidgetStatePropertyAll(Colors.transparent),
+            surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+            elevation: const WidgetStatePropertyAll(0),
+            side: const WidgetStatePropertyAll(BorderSide.none),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(_buttonRadius),
               ),
             ),
-          ],
+            minimumSize: const WidgetStatePropertyAll(Size.fromHeight(46)),
+            padding: WidgetStatePropertyAll(
+              inPair
+                  ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+                  : const EdgeInsets.symmetric(horizontal: 18),
+            ),
+            textStyle: WidgetStatePropertyAll(style),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            splashFactory: NoSplash.splashFactory,
+            animationDuration: Duration.zero,
+          ),
+          child: label!,
         ),
       ),
     );

@@ -1515,13 +1515,11 @@ void main() {
           }
         });
 
-        test('picking ${own.name}: the disc fills with the tone and the rim '
-            'follows, 0.5 s after 0.35 s with ease', () {
+        test('picking ${own.name}: the disc fills with the tone 0.5 s after '
+            '0.35 s with ease', () {
           final tone = toneOf(own);
           for (final t in [2.0, 2.2, 2.35]) {
-            final c = pickAt(t, own);
-            expect(overlay(c), isEmpty, reason: '$t');
-            expect(_same(ring(c).paint.color, colors.success), isTrue);
+            expect(overlay(pickAt(t, own)), isEmpty, reason: '$t');
           }
           for (final local in [0.2, 0.5, 0.8]) {
             final t = 2.35 + 0.5 * local;
@@ -1531,18 +1529,78 @@ void main() {
             expect(_sameRgb(fill.paint.color, tone), isTrue);
             expect(fill.visibleAlpha, closeTo(tone.a * e, 1e-6));
             expect(fill.center, _at(Offset(150 + knobX(c), 85)));
+          }
+          for (final t in [2.85, 4.0]) {
+            final fill = _single(overlay(pickAt(t, own)));
+            expect(fill.visibleAlpha, closeTo(tone.a, 1e-6));
+          }
+        });
+
+        test('picking ${own.name}: the rim leaves success at the pick and '
+            'reaches the tone in 0.45 s with ease', () {
+          final tone = toneOf(own);
+          expect(
+            _same(ring(pickAt(2, own)).paint.color, colors.success),
+            isTrue,
+          );
+          for (final local in [0.1, 0.25, 0.5, 0.75]) {
+            final t = 2 + 0.45 * local;
+            final e = _ph(t, 2, 0.45, _cssEase);
             expect(
-              _same(ring(c).paint.color, Color.lerp(colors.success, tone, e)!),
+              _same(
+                ring(pickAt(t, own)).paint.color,
+                Color.lerp(colors.success, tone, e)!,
+              ),
               isTrue,
               reason: '$local',
             );
           }
-          for (final t in [2.85, 4.0]) {
-            final c = pickAt(t, own);
-            final fill = _single(overlay(c));
-            expect(fill.visibleAlpha, closeTo(tone.a, 1e-6));
-            expect(_same(ring(c).paint.color, tone), isTrue);
+          for (final t in [2.45, 2.85, 3.75, 9.0]) {
+            expect(
+              _same(ring(pickAt(t, own)).paint.color, tone),
+              isTrue,
+              reason: '$t',
+            );
           }
+        });
+
+        test('picking ${own.name}: every frame of the farewell moves the rim '
+            'only toward the tone and never back to success', () {
+          final tone = toneOf(own);
+          double toTone(Color c) =>
+              (c.r - tone.r).abs() +
+              (c.g - tone.g).abs() +
+              (c.b - tone.b).abs();
+          double toSuccess(Color c) =>
+              (c.r - colors.success.r).abs() +
+              (c.g - colors.success.g).abs() +
+              (c.b - colors.success.b).abs();
+          var last = toTone(colors.success);
+          for (var ms = 16; ms <= 1750; ms += 16) {
+            final t = 2 + ms / 1000;
+            final color = ring(pickAt(t, own)).paint.color;
+            final now = toTone(color);
+            expect(now, lessThanOrEqualTo(last + 1e-9), reason: '$ms ms');
+            expect(toSuccess(color), greaterThan(0), reason: '$ms ms');
+            if (ms >= 200) {
+              expect(now, lessThan(toSuccess(color)), reason: '$ms ms');
+            }
+            if (ms >= 450) expect(_same(color, tone), isTrue, reason: '$ms ms');
+            last = now;
+          }
+        });
+
+        test('picking ${own.name} with reduced motion: the rim is the tone '
+            'at once', () {
+          final c = at(0, still: true, hovered: own, picked: own);
+          expect(_same(ring(c).paint.color, toneOf(own)), isTrue);
+          expect(
+            _same(
+              ring(at(0, still: true, hovered: own)).paint.color,
+              colors.success,
+            ),
+            isTrue,
+          );
         });
 
         test('picking ${own.name}: the device fades with a 3 px blur in '
@@ -1779,7 +1837,7 @@ void main() {
         for (final c in [
           at(0.3),
           at(1.6, hovered: Own.mine, changes: const StageChanges(hoveredAt: 1)),
-          pickAt(2.1, Own.mine),
+          pickAt(2.5, Own.mine),
           pickAt(5, Own.mine),
           pickAt(5, Own.other),
           at(0, still: true),
@@ -3220,6 +3278,89 @@ void main() {
         await _advance(tester, 1);
         expect(_knobAt(tester), closeTo(82, 1e-9));
       });
+
+      for (final own in Own.values) {
+        testWidgets('mine: after picking ${own.name}, every frame of the '
+            'farewell takes the knob rim only toward the tone', (tester) async {
+          final tone = own == Own.mine ? colors.primary : colors.textWeak;
+          Color rim() =>
+              _single(_circles(_paintNow(tester), 36, stroked: true))
+                  .paint
+                  .color;
+          double gap(Color a, Color b) =>
+              (a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs();
+
+          await tester.pumpWidget(
+            _stage(
+              StageScene.mine,
+              input: StageInput(hovered: own),
+              brightness: brightness,
+            ),
+          );
+          await tester.pump();
+          await _advance(tester, 2);
+          expect(_same(rim(), colors.success), isTrue);
+          await tester.pumpWidget(
+            _stage(
+              StageScene.mine,
+              input: StageInput(hovered: own, picked: own),
+              brightness: brightness,
+            ),
+          );
+          var last = gap(rim(), tone);
+          for (var ms = 16; ms <= 1760; ms += 16) {
+            await tester.pump(const Duration(milliseconds: 16));
+            final color = rim();
+            final now = gap(color, tone);
+            expect(now, lessThanOrEqualTo(last + 1e-9), reason: '$ms ms');
+            expect(
+              gap(color, colors.success),
+              greaterThan(0),
+              reason: '$ms ms',
+            );
+            if (ms >= 200) {
+              expect(
+                now,
+                lessThan(gap(color, colors.success)),
+                reason: '$ms ms',
+              );
+            }
+            if (ms >= 464) expect(_same(color, tone), isTrue, reason: '$ms ms');
+            last = now;
+          }
+        });
+
+        testWidgets('mine with reduced motion: picking ${own.name} paints the '
+            'knob rim in the tone at once and keeps it', (tester) async {
+          final tone = own == Own.mine ? colors.primary : colors.textWeak;
+          Color rim() =>
+              _single(_circles(_paintNow(tester), 36, stroked: true))
+                  .paint
+                  .color;
+
+          await tester.pumpWidget(
+            _stage(
+              StageScene.mine,
+              input: StageInput(hovered: own),
+              brightness: brightness,
+              reduceMotion: true,
+            ),
+          );
+          expect(_same(rim(), colors.success), isTrue);
+          await tester.pumpWidget(
+            _stage(
+              StageScene.mine,
+              input: StageInput(hovered: own, picked: own),
+              brightness: brightness,
+              reduceMotion: true,
+            ),
+          );
+          for (var ms = 0; ms <= 1750; ms += 250) {
+            expect(_same(rim(), tone), isTrue, reason: '$ms ms');
+            await tester.pump(const Duration(milliseconds: 250));
+          }
+        });
+      }
 
       testWidgets('reduced motion: no Ticker, a still painter and the changes '
           'straight to their end', (tester) async {

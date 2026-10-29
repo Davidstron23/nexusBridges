@@ -30,6 +30,7 @@ const double _knobShadowRadius = 38;
 const double _knobShadowDrop = 3;
 const double _knobShadowOpacity = 0.5;
 const double _knobRingWidth = 2;
+const double _ringDuration = 0.45;
 const double _fillDelay = 0.35;
 const double _fillDuration = 0.5;
 const double _deviceDelay = 0.3;
@@ -425,7 +426,16 @@ void paintMineSwitch(Canvas canvas, StageFrame frame) {
     Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = _knobRingWidth
-      ..color = Color.lerp(colors.success, tone, fill)!,
+      ..color = Color.lerp(
+        colors.success,
+        tone,
+        _sincePick(
+          frame,
+          delay: 0,
+          duration: _ringDuration,
+          curve: Curves.ease,
+        ),
+      )!,
   );
 
   _paintDeviceInKnob(canvas, frame);
