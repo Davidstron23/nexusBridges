@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 import '../icons/glyphs.dart';
 import '../theme/app_theme.dart';
 import '../theme/tokens.dart';
+import 'modal_frame.dart' show ModalViewActivity;
 
 enum ModalButtonKind { primary, neutral, secondary, negative, negativeQuiet }
 
@@ -308,6 +309,7 @@ class _ModalButtonState extends State<ModalButton> with _PressStates {
     final colors = NbColors.of(context);
     final animate = !MediaQuery.disableAnimationsOf(context);
     final enabled = widget.onPressed != null;
+    final leaving = ModalViewActivity.isLeaving(context);
     final look = _lookOf(colors, widget.kind, hover: hovered, enabled: enabled);
     final inPair = widget.inPair;
     final lifted = enabled && hovered && !pressed && animate;
@@ -332,7 +334,7 @@ class _ModalButtonState extends State<ModalButton> with _PressStates {
       animate: animate,
       child: TextButton(
         statesController: statesController,
-        onPressed: widget.onPressed,
+        onPressed: leaving ? null : widget.onPressed,
         style: ButtonStyle(
           backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
           foregroundColor: WidgetStatePropertyAll(look.ink),
@@ -426,6 +428,7 @@ class _ChoiceTileState extends State<ChoiceTile> with _PressStates {
     final colors = NbColors.of(context);
     final animate = !MediaQuery.disableAnimationsOf(context);
     final enabled = _enabled;
+    final leaving = ModalViewActivity.isLeaving(context);
     final hover = _effectiveHover;
     final border = widget.selected
         ? (widget.neutral ? colors.textWeak : colors.primary)
@@ -466,7 +469,7 @@ class _ChoiceTileState extends State<ChoiceTile> with _PressStates {
       animate: animate,
       child: TextButton(
         statesController: statesController,
-        onPressed: widget.onPressed,
+        onPressed: leaving ? null : widget.onPressed,
         style: ButtonStyle(
           backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
           foregroundColor: WidgetStatePropertyAll(colors.text),

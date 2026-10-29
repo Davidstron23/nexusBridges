@@ -580,6 +580,27 @@ class ModalNote extends StatelessWidget {
   }
 }
 
+final class ModalViewActivity extends InheritedWidget {
+  const ModalViewActivity({
+    required this.leaving,
+    required super.child,
+    super.key,
+  });
+
+  final bool leaving;
+
+  static bool isLeaving(BuildContext context) {
+    return context
+            .dependOnInheritedWidgetOfExactType<ModalViewActivity>()
+            ?.leaving ??
+        false;
+  }
+
+  @override
+  bool updateShouldNotify(ModalViewActivity oldWidget) =>
+      leaving != oldWidget.leaving;
+}
+
 class ModalViewSwitcher extends StatefulWidget {
   const ModalViewSwitcher({
     required this.viewKey,
@@ -761,11 +782,14 @@ class _ModalViewSwitcherState extends State<ModalViewSwitcher>
         key: ValueKey<Object>(entry.key),
         child: AnimatedBuilder(
           animation: entry.listenable,
-          child: ExcludeSemantics(
-            excluding: leaving,
-            child: ExcludeFocus(
+          child: ModalViewActivity(
+            leaving: leaving,
+            child: ExcludeSemantics(
               excluding: leaving,
-              child: IgnorePointer(ignoring: leaving, child: entry.child),
+              child: ExcludeFocus(
+                excluding: leaving,
+                child: IgnorePointer(ignoring: leaving, child: entry.child),
+              ),
             ),
           ),
           builder: (context, child) {
