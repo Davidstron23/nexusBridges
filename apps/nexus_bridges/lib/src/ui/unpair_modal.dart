@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../l10n/app_strings.dart';
+import 'armed.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
 import 'modal/modal_button.dart';
@@ -62,9 +63,13 @@ class _UnpairView extends StatefulWidget {
   State<_UnpairView> createState() => _UnpairViewState();
 }
 
-class _UnpairViewState extends State<_UnpairView> {
+class _UnpairViewState extends State<_UnpairView>
+    with ArmingState<_UnpairView> {
   Timer? _closeTimer;
   bool _breaking = false;
+
+  @override
+  bool get coverOnly => true;
 
   @override
   void dispose() {
@@ -74,7 +79,7 @@ class _UnpairViewState extends State<_UnpairView> {
 
   void _cancel() {
     if (_breaking) return;
-    Navigator.of(context).pop(false);
+    closeOwnRoute(context, false);
   }
 
   void _confirm() {
@@ -83,12 +88,12 @@ class _UnpairViewState extends State<_UnpairView> {
     unawaited(widget.onConfirm());
     if (MediaQuery.disableAnimationsOf(context)) {
       _breaking = true;
-      Navigator.of(context).pop(true);
+      closeOwnRoute(context, true);
       return;
     }
     setState(() => _breaking = true);
     _closeTimer = Timer(_breakDuration, () {
-      if (mounted) Navigator.of(context).pop(true);
+      if (mounted) closeOwnRoute(context, true);
     });
   }
 
@@ -111,14 +116,14 @@ class _UnpairViewState extends State<_UnpairView> {
             label: strings.cancelButton,
             kind: ModalButtonKind.neutral,
             inPair: true,
-            onPressed: breaking ? null : _cancel,
+            onPressed: breaking || !armed ? null : _cancel,
           ),
           ModalButton(
             label: strings.unpairButton,
             kind: ModalButtonKind.negative,
             glyph: Glyphs.unlink,
             inPair: true,
-            onPressed: breaking ? null : _confirm,
+            onPressed: breaking || !armed ? null : _confirm,
           ),
         ],
       ),

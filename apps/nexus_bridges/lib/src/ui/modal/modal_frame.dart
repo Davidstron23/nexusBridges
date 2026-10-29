@@ -78,6 +78,18 @@ class NbModal extends StatelessWidget {
   }
 }
 
+void closeOwnRoute<T extends Object?>(BuildContext context, [T? result]) {
+  final route = ModalRoute.of(context);
+  if (route == null || !route.isActive) return;
+  final navigator = route.navigator;
+  if (navigator == null) return;
+  if (route.isCurrent) {
+    navigator.pop(result);
+  } else {
+    navigator.removeRoute(route, result);
+  }
+}
+
 class NbModalRoute<T> extends RawDialogRoute<T> {
   NbModalRoute({
     required BuildContext context,

@@ -5,6 +5,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
+import 'armed.dart';
 import 'modal/modal_button.dart';
 import 'modal/modal_frame.dart';
 import 'modal/stage.dart';
@@ -146,12 +147,16 @@ class _NetworkPromptView extends StatefulWidget {
   State<_NetworkPromptView> createState() => _NetworkPromptViewState();
 }
 
-class _NetworkPromptViewState extends State<_NetworkPromptView> {
+class _NetworkPromptViewState extends State<_NetworkPromptView>
+    with ArmingState<_NetworkPromptView> {
   static const Duration _greenDuration = Duration(milliseconds: 900);
 
   Timer? _closeTimer;
   bool _decided = false;
   bool _trusted = false;
+
+  @override
+  bool get coverOnly => true;
 
   @override
   void dispose() {
@@ -163,7 +168,7 @@ class _NetworkPromptViewState extends State<_NetworkPromptView> {
     if (_decided) return;
     _decided = true;
     widget.onDecide(NetworkDecision.untrusted);
-    Navigator.of(context).pop();
+    closeOwnRoute<void>(context);
   }
 
   void _useHere() {
@@ -171,12 +176,12 @@ class _NetworkPromptViewState extends State<_NetworkPromptView> {
     _decided = true;
     widget.onDecide(NetworkDecision.trusted);
     if (MediaQuery.disableAnimationsOf(context)) {
-      Navigator.of(context).pop();
+      closeOwnRoute<void>(context);
       return;
     }
     setState(() => _trusted = true);
     _closeTimer = Timer(_greenDuration, () {
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) closeOwnRoute<void>(context);
     });
   }
 
@@ -200,13 +205,13 @@ class _NetworkPromptViewState extends State<_NetworkPromptView> {
           label: strings.no,
           kind: ModalButtonKind.negative,
           inPair: true,
-          onPressed: _decided ? null : _useNot,
+          onPressed: _decided || !armed ? null : _useNot,
         ),
         ModalButton(
           label: strings.yes,
           kind: ModalButtonKind.primary,
           inPair: true,
-          onPressed: _decided ? null : _useHere,
+          onPressed: _decided || !armed ? null : _useHere,
         ),
       ],
     );

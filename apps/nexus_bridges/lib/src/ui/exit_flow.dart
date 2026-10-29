@@ -8,6 +8,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
+import 'armed.dart';
 import 'diagram/flow_scene.dart';
 import 'format.dart';
 import 'icons/device_disc.dart';
@@ -110,8 +111,11 @@ class _ExitView extends StatefulWidget {
   State<_ExitView> createState() => _ExitViewState();
 }
 
-class _ExitViewState extends State<_ExitView> {
+class _ExitViewState extends State<_ExitView> with ArmingState<_ExitView> {
   _ExitData? _data;
+
+  @override
+  bool get coverOnly => true;
 
   @override
   void initState() {
@@ -167,12 +171,12 @@ class _ExitViewState extends State<_ExitView> {
         ModalButton(
           label: strings.keepOpenButton,
           kind: ModalButtonKind.primary,
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: armed ? () => closeOwnRoute(context, false) : null,
         ),
         ModalButton(
           label: strings.closeAndCancelButton,
           kind: ModalButtonKind.negativeQuiet,
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: armed ? () => closeOwnRoute(context, true) : null,
         ),
       ],
     );

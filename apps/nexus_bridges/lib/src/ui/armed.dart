@@ -7,17 +7,34 @@ const Duration dialogActivationDelay = Duration(milliseconds: 500);
 mixin ArmingState<T extends StatefulWidget> on State<T> {
   bool _armed = false;
   bool _foreground = true;
+  bool _onTop = true;
   Timer? _armTimer;
   late final AppLifecycleListener _lifecycle;
 
   bool get armed => _armed;
 
+  bool get coverOnly => false;
+
   @override
   void initState() {
     super.initState();
     final current = WidgetsBinding.instance.lifecycleState;
-    _foreground = current == null || current == AppLifecycleState.resumed;
+    _foreground =
+        coverOnly || current == null || current == AppLifecycleState.resumed;
     _lifecycle = AppLifecycleListener(onStateChange: _onLifecycleChanged);
+    if (coverOnly) {
+      _armed = true;
+    } else {
+      rearm();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final onTop = ModalRoute.isCurrentOf(context) ?? true;
+    if (onTop == _onTop) return;
+    _onTop = onTop;
     rearm();
   }
 
@@ -25,14 +42,14 @@ mixin ArmingState<T extends StatefulWidget> on State<T> {
     _armTimer?.cancel();
     _armTimer = null;
     _armed = false;
-    if (!_foreground) return;
+    if (!_foreground || !_onTop) return;
     _armTimer = Timer(dialogActivationDelay, () {
       if (mounted) setState(() => _armed = true);
     });
   }
 
   void _onLifecycleChanged(AppLifecycleState state) {
-    if (!mounted) return;
+    if (!mounted || coverOnly) return;
     final foreground = state == AppLifecycleState.resumed;
     if (foreground == _foreground) return;
     setState(() {
