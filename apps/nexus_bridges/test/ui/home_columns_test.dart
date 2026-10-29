@@ -89,9 +89,12 @@ Finder get _stripOutlined =>
 
 Finder get _column => find.byType(SingleChildScrollView);
 
-Finder _tab(String label) => find.ancestor(
-  of: find.text(label),
-  matching: find.byType(AnimatedContainer),
+Finder _tab(String label) =>
+    find.ancestor(of: find.text(label), matching: find.byType(InkWell));
+
+Finder get _thumb => find.ancestor(
+  of: find.byType(FractionallySizedBox),
+  matching: find.byType(AnimatedAlign),
 );
 
 bool _selected(WidgetTester tester, String label) => tester
@@ -923,26 +926,72 @@ void main() {
         Color? textColor(WidgetTester tester, String label) =>
             tester.widget<Text>(find.text(label)).style?.color;
 
-        Color? zoneColor(WidgetTester tester, String label) =>
-            (tester.widget<AnimatedContainer>(_tab(label)).decoration
-                    as BoxDecoration?)
-                ?.color;
+        Color? thumbColor(WidgetTester tester) =>
+            (tester
+                        .widget<DecoratedBox>(
+                          find.descendant(
+                            of: _thumb,
+                            matching: find.byType(DecoratedBox),
+                          ),
+                        )
+                        .decoration
+                    as BoxDecoration)
+                .color;
 
-        testWidgets('the active tab is card with text, the other is clear '
-            'with textWeak', (tester) async {
+        Rect thumbRect(WidgetTester tester) => tester.getRect(
+          find.descendant(of: _thumb, matching: find.byType(DecoratedBox)),
+        );
+
+        testWidgets('the card thumb sits under the active tab, whose text is '
+            'text, and the other text is textWeak', (tester) async {
           await mount(tester);
 
+          expect(thumbColor(tester), colors.card);
+          expect(thumbRect(tester), tester.getRect(_tab(strings.devicesTab)));
           expect(textColor(tester, strings.devicesTab), colors.text);
-          expect(zoneColor(tester, strings.devicesTab), colors.card);
           expect(textColor(tester, strings.activityTab), colors.textWeak);
-          expect(zoneColor(tester, strings.activityTab), Colors.transparent);
 
           await tester.tap(find.text(strings.activityTab));
           await tester.pumpAndSettle();
+          expect(thumbColor(tester), colors.card);
+          expect(thumbRect(tester), tester.getRect(_tab(strings.activityTab)));
           expect(textColor(tester, strings.activityTab), colors.text);
-          expect(zoneColor(tester, strings.activityTab), colors.card);
           expect(textColor(tester, strings.devicesTab), colors.textWeak);
-          expect(zoneColor(tester, strings.devicesTab), Colors.transparent);
+        });
+
+        testWidgets('the thumb slides from one tab to the other in 220 ms', (
+          tester,
+        ) async {
+          await mount(tester);
+          final from = thumbRect(tester);
+          final to = tester.getRect(_tab(strings.activityTab));
+
+          await tester.tap(find.text(strings.activityTab));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 60));
+          final middle = thumbRect(tester);
+          expect(middle.left, lessThan(from.left));
+          expect(middle.left, greaterThan(to.left));
+          expect(middle.width, from.width);
+
+          await tester.pump(const Duration(milliseconds: 160));
+          expect(thumbRect(tester), to);
+        });
+
+        testWidgets('with reduced motion the thumb jumps without sliding', (
+          tester,
+        ) async {
+          tester.platformDispatcher.accessibilityFeaturesTestValue =
+              const FakeAccessibilityFeatures(disableAnimations: true);
+          addTearDown(
+            tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+          );
+          await mount(tester);
+
+          await tester.tap(find.text(strings.activityTab));
+          await tester.pump();
+          await tester.pump();
+          expect(thumbRect(tester), tester.getRect(_tab(strings.activityTab)));
         });
 
         testWidgets('the tabs sit on segment and the badge uses '
@@ -973,10 +1022,10 @@ void main() {
           expect(find.text(strings.activityEmpty), findsNothing);
         });
 
-        testWidgets('hovering the inactive tab keeps its colors', (
-          tester,
-        ) async {
+        testWidgets('hovering the inactive tab keeps its colors and paints no '
+            'highlight', (tester) async {
           await mount(tester);
+          final before = thumbRect(tester);
 
           final mouse = await tester.createGesture(
             kind: PointerDeviceKind.mouse,
@@ -987,7 +1036,25 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(textColor(tester, strings.activityTab), colors.textWeak);
-          expect(zoneColor(tester, strings.activityTab), Colors.transparent);
+          expect(thumbRect(tester), before);
+          final zone = tester.widget<InkWell>(_tab(strings.activityTab));
+          expect(zone.hoverColor, Colors.transparent);
+          expect(zone.highlightColor, Colors.transparent);
+          expect(zone.splashFactory, NoSplash.splashFactory);
+        });
+
+        testWidgets('the inactive tab shows the click cursor and the active '
+            'one the basic cursor', (tester) async {
+          await mount(tester);
+
+          expect(
+            tester.widget<InkWell>(_tab(strings.activityTab)).mouseCursor,
+            SystemMouseCursors.click,
+          );
+          expect(
+            tester.widget<InkWell>(_tab(strings.devicesTab)).mouseCursor,
+            SystemMouseCursors.basic,
+          );
         });
       });
     }

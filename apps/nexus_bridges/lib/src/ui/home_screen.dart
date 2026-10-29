@@ -8,6 +8,7 @@ import 'diagram/flow_diagram.dart';
 import 'home_layout.dart';
 import 'device_list.dart';
 import 'incoming_cards.dart';
+import 'modal/timeline.dart';
 import 'network_strip.dart';
 import 'send_action.dart';
 import 'theme/app_theme.dart';
@@ -384,24 +385,72 @@ class _ColumnTabs extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.all(3),
-        child: Row(
-          children: [
-            Expanded(
-              child: _TabZone(
-                label: strings.activityTab,
-                active: current == ColumnTab.activity,
-                onTap: () => onSelect(ColumnTab.activity),
+        child: SizedBox(
+          height: _tabHeight,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _TabThumb(activity: current == ColumnTab.activity),
+              Row(
+                children: [
+                  Expanded(
+                    child: _TabZone(
+                      label: strings.activityTab,
+                      active: current == ColumnTab.activity,
+                      onTap: () => onSelect(ColumnTab.activity),
+                    ),
+                  ),
+                  Expanded(
+                    child: _TabZone(
+                      label: strings.devicesTab,
+                      active: current == ColumnTab.devices,
+                      badge: pairedCount > 0 ? pairedCount : null,
+                      onTap: () => onSelect(ColumnTab.devices),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            Expanded(
-              child: _TabZone(
-                label: strings.devicesTab,
-                active: current == ColumnTab.devices,
-                badge: pairedCount > 0 ? pairedCount : null,
-                onTap: () => onSelect(ColumnTab.devices),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+const double _tabHeight = 32;
+
+const Duration _thumbSlide = Duration(milliseconds: 220);
+
+class _TabThumb extends StatelessWidget {
+  const _TabThumb({required this.activity});
+
+  final bool activity;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    return AnimatedAlign(
+      alignment: activity ? Alignment.centerLeft : Alignment.centerRight,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : _thumbSlide,
+      curve: labEaseOut,
+      child: FractionallySizedBox(
+        widthFactor: 0.5,
+        heightFactor: 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.card,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: colors.nodeShadow,
+                offset: const Offset(0, 1),
+                blurRadius: 2,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -428,26 +477,18 @@ class _TabZone extends StatelessWidget {
     return Semantics(
       button: true,
       selected: active,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        height: 32,
-        decoration: BoxDecoration(
-          color: active ? colors.card : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: active
-              ? [
-                  BoxShadow(
-                    color: colors.nodeShadow,
-                    offset: const Offset(0, 1),
-                    blurRadius: 2,
-                  ),
-                ]
-              : null,
-        ),
+      child: SizedBox(
+        height: _tabHeight,
         child: Material(
           type: MaterialType.transparency,
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
+            mouseCursor: active
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
+            hoverColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+            splashFactory: NoSplash.splashFactory,
             onTap: onTap,
             child: Center(
               child: Row(
