@@ -771,7 +771,7 @@ void paintBridgeScene(Canvas canvas, StageFrame frame, BridgeMode mode) {
     hangerTone,
   );
 
-  _paintLanes(canvas, pose, colors, tone);
+  _paintLanes(canvas, pose, colors, base);
 
   final flash = pose.flash;
   if (flash != null) {
