@@ -656,7 +656,10 @@ void paintExit(Canvas canvas, StageFrame frame) {
     if (!(visible > 0)) continue;
     final color = comet.hub ? colors.hubTop : colors.primary;
     for (var i = 0; i < _cometRadii.length; i++) {
-      final lagged = loopPhase(frame.t - i * _exitLag, period: _exitCycle);
+      final lagged = loopPhase(
+        frame.t + _exitCycle - i * _exitLag,
+        period: _exitCycle,
+      );
       var progress = comet.progress(lagged);
       if (transfer.towardsHub) progress = 1 - progress;
       canvas.drawCircle(
