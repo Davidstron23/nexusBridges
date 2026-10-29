@@ -698,11 +698,10 @@ final class PairingReceiver {
     session.finishedAt = _now();
     session.isNew = isNew;
     if (identical(_active, session)) _active = null;
-    if (session.reachedComparing) {
-      final silent =
-          status == _ReceiverStatus.cancelledLocal ||
-          (status == _ReceiverStatus.paired && isNew);
-      _finishedView = silent ? null : _finishedViewOf(session);
+    if (session.reachedComparing && !_closed) {
+      _finishedView = status == _ReceiverStatus.cancelledLocal
+          ? null
+          : _finishedViewOf(session);
     }
     _trimFinished();
     _signal(session);
@@ -785,6 +784,7 @@ final class PairingReceiver {
     peerName: session.name,
     alreadyPaired: session.alreadyPaired,
     outcome: _outcomeOf(session.status),
+    isNew: session.isNew,
   );
 
   PairingOutcome _outcomeOf(_ReceiverStatus status) => switch (status) {

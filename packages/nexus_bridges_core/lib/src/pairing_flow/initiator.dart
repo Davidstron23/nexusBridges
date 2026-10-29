@@ -41,6 +41,8 @@ final class _InitiatorRun {
 
   PairingOutcome? outcome;
 
+  bool isNew = false;
+
   bool localConfirmed = false;
 
   bool saving = false;
@@ -122,6 +124,7 @@ final class PairingInitiator {
           ? run.code
           : null,
       outcome: run.outcome,
+      isNew: run.isNew,
     );
   }
 
@@ -529,7 +532,8 @@ final class PairingInitiator {
           result = PairingOutcome.failed;
       }
     }
-    _finish(run, isNew ? null : result);
+    run.isNew = isNew;
+    _finish(run, result);
     if (_closed) return;
     switch (result) {
       case PairingOutcome.paired:

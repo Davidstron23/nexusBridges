@@ -367,6 +367,20 @@ Future<void> pairUp(PairingNode initiator, PairingNode receiver) async {
     () => initiator.hasPaired(receiver) && receiver.hasPaired(initiator),
     reason: 'both paired',
   );
+  await dismissPaired(initiator, receiver);
+}
+
+bool showsPaired(NodeState state) =>
+    state.pairing?.phase == PairingPhase.finished &&
+    state.pairing?.outcome == PairingOutcome.paired;
+
+Future<void> dismissPaired(PairingNode initiator, PairingNode receiver) async {
+  await eventually(
+    () => showsPaired(initiator.state) && showsPaired(receiver.state),
+    reason: 'paired views',
+  );
+  initiator.node.dismissPairing();
+  receiver.node.dismissPairing();
   await eventually(
     () => initiator.state.pairing == null && receiver.state.pairing == null,
     reason: 'views closed',

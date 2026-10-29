@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -147,6 +148,10 @@ Future<_FlowController> _mount(
   await tester.pump();
   return controller;
 }
+
+final int _sceneMs =
+    (stageSpecOf(StageScene.paired, const StageInput()).introEnd * 1000)
+        .round();
 
 Future<void> _ms(WidgetTester tester, int milliseconds) =>
     tester.pump(Duration(milliseconds: milliseconds));
@@ -785,9 +790,9 @@ void main() {
 
     group('[$code] E287 one window for the whole pairing (RF-98, R86)', () {
       testWidgets('connecting, comparing, waiting, paired, replace? and is it '
-          'yours? share one NbModal and one route; none at the end', (
-        tester,
-      ) async {
+          'yours? share one NbModal and one route; the new paired result has '
+          'no button and moves on by itself when its scene ends (point 247); '
+          'none at the end', (tester) async {
         final controller = await _mount(
           tester,
           code,
@@ -820,24 +825,31 @@ void main() {
           );
           await step(600);
         }
+        controller.afterDismiss = pairingState(questions: [_replace, _mine]);
         controller.emit(
           pairingState(
             pairing: view(
               role: PairingRole.initiator,
               phase: PairingPhase.finished,
               outcome: PairingOutcome.paired,
+              isNew: true,
             ),
             questions: [_replace, _mine],
           ),
         );
         await step(600);
         expect(_view().title, strings.outcomePaired(peerName));
+        expect(_stage().scene, StageScene.paired);
+        expect(_liveButtons(), isEmpty);
         for (final name in [_oldName, _oldTitleName]) {
           expect(find.text(strings.replaceTitle(name)), findsNothing);
         }
 
-        controller.afterDismiss = pairingState(questions: [_replace, _mine]);
-        await _tapLive(tester, strings.closeButton);
+        await step(3200);
+        expect(_view().title, strings.outcomePaired(peerName));
+        expect(controller.calls, isEmpty);
+        await step(200);
+        expect(controller.calls, ['dismissPairing']);
         await step(600);
         expect(_view().title, strings.replaceTitle(_oldTitleName));
         expect(_live(_inModal(find.byType(PairingQuestionView))), hasLength(1));
@@ -864,10 +876,9 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
-      testWidgets('the same journey with reduced motion changes view in the '
-          'same frame and closes in the same frame as the answer', (
-        tester,
-      ) async {
+      testWidgets('the same journey with reduced motion holds the paired '
+          'result still for 1.5 s, changes view in the same frame and closes '
+          'in the same frame as the answer', (tester) async {
         final controller = await _mount(
           tester,
           code,
@@ -876,6 +887,7 @@ void main() {
               role: PairingRole.receiver,
               phase: PairingPhase.finished,
               outcome: PairingOutcome.paired,
+              isNew: true,
             ),
             questions: [_replace, _mine],
           ),
@@ -883,9 +895,13 @@ void main() {
         );
         await _openArmed(tester);
         final route = _routeOf(tester);
+        expect(_liveButtons(), isEmpty);
 
         controller.afterDismiss = pairingState(questions: [_replace, _mine]);
-        await _tapLive(tester, strings.closeButton);
+        await _ms(tester, 999);
+        expect(_view().title, strings.outcomePaired(peerName));
+        expect(controller.calls, isEmpty);
+        await _ms(tester, 1);
         expect(_view().title, strings.replaceTitle(_oldTitleName));
         expect(_inModal(find.byType(ModalView)), findsOneWidget);
         expect(identical(_routeOf(tester), route), isTrue);
@@ -906,6 +922,261 @@ void main() {
           'answerReplace $peerFingerprint true',
           'answerMine $peerFingerprint false',
         ]);
+      });
+    });
+
+    group('[$code] E287 the paired result moves on by itself (point 247)', () {
+      PairingView pairedView({
+        bool isNew = true,
+        PairingRole role = PairingRole.receiver,
+      }) => view(
+        role: role,
+        phase: PairingPhase.finished,
+        outcome: PairingOutcome.paired,
+        isNew: isNew,
+      );
+
+      for (final role in PairingRole.values) {
+        testWidgets('a new pairing as ${role.name} plays the whole scene with '
+            'no button; Esc and a tap outside do nothing; dismissPairing '
+            'once when the scene ends, and is it yours? arrives unarmed in '
+            'the same route and is never answered by itself', (tester) async {
+          final controller = await _mount(
+            tester,
+            code,
+            pairingState(
+              pairing: pairedView(role: role),
+              questions: [_mine],
+            ),
+          );
+          final route = _routeOf(tester);
+          expect(_view().title, strings.outcomePaired(peerName));
+          expect(_stage().scene, StageScene.paired);
+          expect(_view().actions, isEmpty);
+          expect(_liveButtons(), isEmpty);
+
+          await _ms(tester, 600);
+          await _escape(tester);
+          await _tapOutside(tester);
+          await _ms(tester, _sceneMs - 600 - 1);
+          expect(controller.calls, isEmpty);
+          expect(_view().title, strings.outcomePaired(peerName));
+          expect(_liveButtons(), isEmpty);
+
+          controller.afterDismiss = pairingState(questions: [_mine]);
+          await _ms(tester, 1);
+          expect(controller.calls, ['dismissPairing']);
+          await tester.pump();
+          expect(identical(_routeOf(tester), route), isTrue);
+          expect(
+            _live(_inModal(find.byType(PairingQuestionView))),
+            hasLength(1),
+          );
+          expect(_liveEnabled(), everyElement(isFalse));
+
+          await _ms(tester, 600);
+          expect(_view().title, strings.mineTitle(peerName));
+          expect(_liveEnabled(), everyElement(isTrue));
+          await _ms(tester, 10000);
+          expect(_view().title, strings.mineTitle(peerName));
+          expect(controller.calls, ['dismissPairing']);
+          expect(tester.takeException(), isNull);
+        });
+      }
+
+      testWidgets('a new pairing whose question is not there yet has no '
+          'button either and moves on to the question that arrived meanwhile', (
+        tester,
+      ) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView()),
+        );
+        expect(_liveButtons(), isEmpty);
+        await _ms(tester, 1000);
+        controller.emit(
+          pairingState(pairing: pairedView(), questions: [_mine]),
+        );
+        await tester.pump();
+        expect(_liveButtons(), isEmpty);
+        expect(_view().title, strings.outcomePaired(peerName));
+
+        controller.afterDismiss = pairingState(questions: [_mine]);
+        await _ms(tester, _sceneMs - 1000);
+        expect(controller.calls, ['dismissPairing']);
+        await _ms(tester, 600);
+        expect(_view().title, strings.mineTitle(peerName));
+      });
+
+      testWidgets('a paired device confirmed again with no questions keeps '
+          'Close and nothing happens by itself', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(isNew: false)),
+        );
+        await _openArmed(tester);
+        expect(_specs(_view().actions), [
+          (strings.closeButton, ModalButtonKind.primary, null, false),
+        ]);
+        await _ms(tester, _sceneMs * 3);
+        expect(controller.calls, isEmpty);
+        expect(_view().title, strings.outcomePaired(peerName));
+
+        await _tapLive(tester, strings.closeButton);
+        expect(controller.calls, ['dismissPairing']);
+      });
+
+      testWidgets('a paired device confirmed again while a question waits '
+          'moves on by itself too', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(isNew: false), questions: [_mine]),
+        );
+        expect(_liveButtons(), isEmpty);
+        controller.afterDismiss = pairingState(questions: [_mine]);
+        await _ms(tester, _sceneMs);
+        expect(controller.calls, ['dismissPairing']);
+      });
+
+      testWidgets('with reduced motion the result stays still for 1.5 s and '
+          'then the question comes in the same frame', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(), questions: [_mine]),
+          reduceMotion: true,
+        );
+        final route = _routeOf(tester);
+        expect(_liveButtons(), isEmpty);
+        expect(_stage().scene, StageScene.paired);
+
+        controller.afterDismiss = pairingState(questions: [_mine]);
+        await _ms(tester, pairedStillHold.inMilliseconds - 1);
+        expect(controller.calls, isEmpty);
+        expect(_view().title, strings.outcomePaired(peerName));
+        await _ms(tester, 1);
+        expect(controller.calls, ['dismissPairing']);
+        expect(_view().title, strings.mineTitle(peerName));
+        expect(identical(_routeOf(tester), route), isTrue);
+        expect(_liveEnabled(), everyElement(isFalse));
+      });
+
+      testWidgets('a new request that replaces the result before the end '
+          'stops the timer: no dismissPairing later', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(), questions: [_mine]),
+        );
+        await _ms(tester, 2000);
+        final other = view(
+          role: PairingRole.receiver,
+          phase: PairingPhase.comparing,
+          fingerprint: _otherFingerprint,
+          name: _otherName,
+        );
+        controller.emit(pairingState(pairing: other, questions: [_mine]));
+        await tester.pump();
+        await _ms(tester, _sceneMs * 2);
+        expect(controller.calls, isEmpty);
+        expect(_view().title, strings.pairingRequestTitle(_otherName));
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('another result that replaces it before the end keeps its '
+          'own Close and is not dismissed by the old timer', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(), questions: [_mine]),
+        );
+        await _ms(tester, 2000);
+        controller.emit(
+          pairingState(
+            pairing: view(
+              role: PairingRole.initiator,
+              phase: PairingPhase.finished,
+              outcome: PairingOutcome.cancelledByPeer,
+              fingerprint: _otherFingerprint,
+              name: _otherName,
+            ),
+            questions: [_mine],
+          ),
+        );
+        await tester.pump();
+        await _ms(tester, _sceneMs * 2);
+        expect(controller.calls, isEmpty);
+        expect(_view().title, strings.outcomeCancelledByPeer(_otherName));
+        expect(_specs(_view().actions), [
+          (strings.closeButton, ModalButtonKind.primary, null, false),
+        ]);
+      });
+
+      testWidgets('a result withdrawn by the core before the end goes to the '
+          'question and the old timer calls nothing', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(), questions: [_mine]),
+        );
+        await _ms(tester, 1000);
+        controller.emit(pairingState(questions: [_mine]));
+        await tester.pump();
+        await _ms(tester, _sceneMs * 2);
+        expect(controller.calls, isEmpty);
+        expect(_view().title, strings.mineTitle(peerName));
+      });
+
+      testWidgets('unmounting the host before the end calls nothing and '
+          'leaves no timer behind', (tester) async {
+        final showHost = ValueNotifier<bool>(true);
+        addTearDown(showHost.dispose);
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView(), questions: [_mine]),
+          showHost: showHost,
+        );
+        await _ms(tester, 1000);
+        showHost.value = false;
+        await tester.pump();
+        await tester.pump();
+        await _ms(tester, _sceneMs * 2);
+        expect(_modal, findsNothing);
+        expect(controller.calls, isEmpty);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('with another route on top, a result with nothing after it '
+          'removes its own route and leaves the top one in place', (
+        tester,
+      ) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: pairedView()),
+        );
+        final pairingRoute = _routeOf(tester);
+        final navigator = pairingRoute.navigator!;
+        final cover = MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('cover')),
+        );
+        unawaited(navigator.push(cover));
+        await _ms(tester, 400);
+        expect(cover.isCurrent, isTrue);
+
+        controller.afterDismiss = pairingState();
+        await _ms(tester, _sceneMs);
+        expect(controller.calls, ['dismissPairing']);
+        await _ms(tester, 400);
+        expect(pairingRoute.isActive, isFalse);
+        expect(cover.isActive, isTrue);
+        expect(cover.isCurrent, isTrue);
+        expect(find.text('cover'), findsOneWidget);
+        expect(tester.takeException(), isNull);
       });
     });
 
@@ -1465,7 +1736,7 @@ void main() {
             pairing: view(
               role: PairingRole.receiver,
               phase: PairingPhase.finished,
-              outcome: PairingOutcome.paired,
+              outcome: PairingOutcome.expired,
             ),
             questions: [_replace],
           ),

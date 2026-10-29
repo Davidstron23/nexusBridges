@@ -61,6 +61,7 @@ PairingView view({
   String? pairingCode = rawCode,
   bool alreadyPaired = false,
   PairingOutcome? outcome,
+  bool isNew = false,
 }) {
   return PairingView(
     role: role,
@@ -70,6 +71,7 @@ PairingView view({
     code: phase == PairingPhase.connecting ? null : pairingCode,
     alreadyPaired: alreadyPaired,
     outcome: outcome,
+    isNew: isNew,
   );
 }
 

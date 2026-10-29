@@ -128,6 +128,13 @@ bool fileLacks(File file, String text) {
 Future<void> settle([Duration span = const Duration(milliseconds: 80)]) =>
     Future<void>.delayed(span);
 
+bool showsNewPairing(PairingView? view, {required String peer}) =>
+    view != null &&
+    view.phase == PairingPhase.finished &&
+    view.outcome == PairingOutcome.paired &&
+    view.isNew &&
+    view.peerFingerprint == peer;
+
 final class ReceiverFixture {
   ReceiverFixture._(
     this.identity,

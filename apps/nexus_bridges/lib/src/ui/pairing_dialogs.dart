@@ -21,6 +21,8 @@ export 'armed.dart' show dialogActivationDelay;
 
 const int _shortFingerprintLength = 8;
 
+const Duration pairedStillHold = Duration(milliseconds: 1500);
+
 String formatCode(String code) {
   return '${code.substring(0, 3)} ${code.substring(3)}';
 }
@@ -55,11 +57,17 @@ sealed class _FlowItem {
 }
 
 final class _PairingItem extends _FlowItem {
-  const _PairingItem(this.view, this.namesake, this.peer);
+  const _PairingItem(
+    this.view,
+    this.namesake,
+    this.peer,
+    this.questionsPending,
+  );
 
   final PairingView view;
   final String? namesake;
   final DeviceGlyph peer;
+  final bool questionsPending;
 
   @override
   Object get viewKey =>
@@ -70,10 +78,11 @@ final class _PairingItem extends _FlowItem {
       other is _PairingItem &&
       other.view == view &&
       other.namesake == namesake &&
-      other.peer == peer;
+      other.peer == peer &&
+      other.questionsPending == questionsPending;
 
   @override
-  int get hashCode => Object.hash(view, namesake, peer);
+  int get hashCode => Object.hash(view, namesake, peer, questionsPending);
 }
 
 final class _QuestionItem extends _FlowItem {
@@ -149,19 +158,20 @@ class _PairingHostState extends State<PairingHost> {
   _FlowItem? _currentItem() {
     final state = widget.controller.state;
     final view = state?.pairing;
+    final next = (state?.questions ?? const <PairingQuestion>[])
+        .where((question) => !_answered.contains(question))
+        .firstOrNull;
     if (view != null) {
       _leaving = null;
       return _PairingItem(
         view,
         state?.pairingNamesake,
         _peerGlyph(state, view.peerFingerprint),
+        next != null,
       );
     }
     final leaving = _leaving;
     if (leaving != null) return _QuestionItem(leaving);
-    final next = (state?.questions ?? const <PairingQuestion>[])
-        .where((question) => !_answered.contains(question))
-        .firstOrNull;
     return next == null ? null : _QuestionItem(next);
   }
 
@@ -216,6 +226,7 @@ class _PairingHostState extends State<PairingHost> {
         view: item.view,
         namesake: item.namesake,
         peer: item.peer,
+        questionsPending: item.questionsPending,
       ),
       _QuestionItem() => PairingQuestionView(
         controller: widget.controller,
@@ -282,12 +293,14 @@ class _PairingView extends StatefulWidget {
     required this.view,
     required this.namesake,
     required this.peer,
+    required this.questionsPending,
   });
 
   final AppController controller;
   final PairingView view;
   final String? namesake;
   final DeviceGlyph peer;
+  final bool questionsPending;
 
   @override
   State<_PairingView> createState() => _PairingViewState();
@@ -296,8 +309,46 @@ class _PairingView extends StatefulWidget {
 class _PairingViewState extends State<_PairingView>
     with ArmingState<_PairingView> {
   Object? _contentKey;
+  Timer? _sceneTimer;
+  bool _sceneStarted = false;
+  bool _sceneDone = false;
+  bool _advanced = false;
 
   AppController get controller => widget.controller;
+
+  bool get _showsPaired =>
+      widget.view.phase == PairingPhase.finished &&
+      widget.view.outcome == PairingOutcome.paired;
+
+  bool get _advancesAlone =>
+      _showsPaired && (widget.view.isNew || widget.questionsPending);
+
+  Duration _sceneLength() {
+    if (MediaQuery.disableAnimationsOf(context)) return pairedStillHold;
+    final spec = stageSpecOf(
+      stageForOutcome(PairingOutcome.paired),
+      StageInput(peer: widget.peer),
+    );
+    return Duration(
+      microseconds: (spec.introEnd * Duration.microsecondsPerSecond).round(),
+    );
+  }
+
+  void _onSceneDone() {
+    _sceneTimer = null;
+    if (!mounted) return;
+    _sceneDone = true;
+    _advance();
+  }
+
+  void _advance() {
+    if (!mounted || !_sceneDone || _advanced || !_advancesAlone) return;
+    final activity = context.getInheritedWidgetOfExactType<ModalViewActivity>();
+    if (activity?.leaving ?? false) return;
+    if (controller.state?.pairing != widget.view) return;
+    _advanced = true;
+    controller.dismissPairing();
+  }
 
   Object _currentKey() {
     final view = widget.view;
@@ -321,6 +372,14 @@ class _PairingViewState extends State<_PairingView>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_sceneStarted || !_showsPaired) return;
+    _sceneStarted = true;
+    _sceneTimer = Timer(_sceneLength(), _onSceneDone);
+  }
+
+  @override
   void didUpdateWidget(_PairingView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
@@ -332,10 +391,14 @@ class _PairingViewState extends State<_PairingView>
       _contentKey = next;
       rearm();
     }
+    if (_sceneDone && !_advanced) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _advance());
+    }
   }
 
   @override
   void dispose() {
+    _sceneTimer?.cancel();
     controller.removeListener(_onControllerChanged);
     super.dispose();
   }
@@ -525,11 +588,12 @@ class _PairingViewState extends State<_PairingView>
       ),
       title: _outcomeText(strings, outcome, name),
       actions: [
-        ModalButton(
-          label: strings.closeButton,
-          kind: ModalButtonKind.primary,
-          onPressed: _whenArmed(controller.dismissPairing),
-        ),
+        if (!_advancesAlone)
+          ModalButton(
+            label: strings.closeButton,
+            kind: ModalButtonKind.primary,
+            onPressed: _whenArmed(controller.dismissPairing),
+          ),
       ],
     );
   }

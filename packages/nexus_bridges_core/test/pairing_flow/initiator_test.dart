@@ -12,7 +12,7 @@ import 'package:test/test.dart';
 
 import '../server/api_server_harness.dart';
 import 'initiator_harness.dart';
-import 'receiver_harness.dart' show lockFile;
+import 'receiver_harness.dart' show lockFile, showsNewPairing;
 
 void main() {
   late DeviceIdentity ia;
@@ -158,8 +158,8 @@ void main() {
           () =>
               a.paired.isPaired(b.fingerprint) &&
               b.paired.isPaired(a.fingerprint) &&
-              a.view == null &&
-              b.view == null,
+              showsNewPairing(a.view, peer: b.fingerprint) &&
+              showsNewPairing(b.view, peer: a.fingerprint),
           reason: 'both paired',
         );
         expect(a.coordinator.busy, isFalse);
@@ -187,8 +187,8 @@ void main() {
           () =>
               a.paired.isPaired(b.fingerprint) &&
               b.paired.isPaired(a.fingerprint) &&
-              a.view == null &&
-              b.view == null,
+              showsNewPairing(a.view, peer: b.fingerprint) &&
+              showsNewPairing(b.view, peer: a.fingerprint),
           reason: 'both paired',
         );
       },
@@ -220,7 +220,27 @@ void main() {
         final stored = await a.reloadPaired();
         expect(stored.map((d) => d.fingerprint), [b.fingerprint]);
         expect(stored.single.relation, PeerRelation.foreign);
-        expect(a.views.last, isNull);
+        await waitUntil(
+          () => showsNewPairing(b.view, peer: a.fingerprint),
+          reason: 'B shows the new pairing',
+        );
+        expect(
+          a.views.last,
+          PairingView(
+            role: PairingRole.initiator,
+            phase: PairingPhase.finished,
+            peerFingerprint: b.fingerprint,
+            peerName: 'Stack B',
+            outcome: PairingOutcome.paired,
+            isNew: true,
+          ),
+        );
+        expect(b.view!.role, PairingRole.receiver);
+        expect(b.view!.peerName, 'Stack A');
+        a.coordinator.dismissOutcome();
+        b.coordinator.dismissOutcome();
+        expect(a.view, isNull);
+        expect(b.view, isNull);
       },
     );
 
@@ -522,7 +542,7 @@ void main() {
       expect(a.view?.phase, PairingPhase.waitingPeer);
       lock.release();
       await waitUntil(() => a.completions.isNotEmpty, reason: 'completed');
-      expect(a.view, isNull);
+      expect(showsNewPairing(a.view, peer: fake.fingerprint), isTrue);
       expect(a.paired.isPaired(fake.fingerprint), isTrue);
       expect(await a.reloadPaired(), hasLength(1));
       expect(a.completions.single.fingerprint, fake.fingerprint);
@@ -983,8 +1003,9 @@ void main() {
           greaterThanOrEqualTo(const Duration(milliseconds: 900)),
         );
       }
+      await waitUntil(() => a.completions.isNotEmpty, reason: 'completed');
       expect(a.completions.single.isNew, isTrue);
-      expect(a.view, isNull);
+      expect(showsNewPairing(a.view, peer: fake.fingerprint), isTrue);
       expect(fake.count(ApiPaths.pairCancel), 0);
     });
 

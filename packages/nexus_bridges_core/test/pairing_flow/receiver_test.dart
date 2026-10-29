@@ -1025,7 +1025,17 @@ void main() {
       expect(saved.certificatePem, a.certificate.pem);
       expect(saved.pairedAt, fixture.now);
       expect(fixture.pairedFile.readAsStringSync(), contains(a.fingerprint));
-      expect(fixture.view, isNull);
+      expect(
+        fixture.view,
+        PairingView(
+          role: PairingRole.receiver,
+          phase: PairingPhase.finished,
+          peerFingerprint: a.fingerprint,
+          peerName: saved.name,
+          outcome: PairingOutcome.paired,
+          isNew: true,
+        ),
+      );
       expect(fixture.coordinator.busy, isFalse);
       await eventually(() => fixture.events.isNotEmpty);
       final event = fixture.events.single as PairingCompleted;
@@ -1050,10 +1060,12 @@ void main() {
       await eventually(() => fixture.paired.isPaired(a.fingerprint));
 
       expectState(await initiator.wait(), 'paired');
-      expect(fixture.view, isNull);
+      expect(showsNewPairing(fixture.view, peer: a.fingerprint), isTrue);
       expect(fixture.coordinator.busy, isFalse);
       await eventually(() => fixture.events.isNotEmpty);
       expect((fixture.events.single as PairingCompleted).isNew, isTrue);
+      fixture.coordinator.dismissOutcome();
+      expect(fixture.view, isNull);
     });
 
     test('pair/confirm is idempotent and the record answers repeated '
@@ -1899,7 +1911,7 @@ void main() {
       expectState(await initiator.wait(), 'paired');
       await eventually(() => fixture.events.isNotEmpty);
       expect((fixture.events.single as PairingCompleted).isNew, isTrue);
-      expect(fixture.view, isNull);
+      expect(showsNewPairing(fixture.view, peer: a.fingerprint), isTrue);
     });
   });
 
