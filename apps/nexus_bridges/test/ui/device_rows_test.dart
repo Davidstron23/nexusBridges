@@ -5,6 +5,10 @@ import 'package:flutter/rendering.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/device_list.dart';
 import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
+import 'package:nexus_bridges/src/ui/modal/stage.dart';
+import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
 import 'package:nexus_bridges/src/ui/network_strip.dart';
 import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
@@ -95,6 +99,7 @@ Future<FakeAppController> _pumpRows(
   List<DeviceEntry>? entries,
   List<Notice> notices = const [],
   bool unsavedChanges = false,
+  bool reduceMotion = false,
 }) async {
   _useTallWindow(tester);
   final controller = FakeAppController(
@@ -104,9 +109,25 @@ Future<FakeAppController> _pumpRows(
       unsavedChanges: unsavedChanges,
     ),
   );
-  await pumpHome(tester, controller, code);
+  await pumpHome(tester, controller, code, reduceMotion: reduceMotion);
   return controller;
 }
+
+Finder get _modal => find.byType(NbModal);
+
+List<String> _modalButtons(WidgetTester tester) => [
+  for (final button in tester.widgetList<ModalButton>(
+    find.descendant(of: _modal, matching: find.byType(ModalButton)),
+  ))
+    button.label,
+];
+
+Future<void> _tapInModal(WidgetTester tester, String label) => tester.tap(
+  find.descendant(
+    of: _modal,
+    matching: find.widgetWithText(ModalButton, label),
+  ),
+);
 
 Future<void> _openMenu(WidgetTester tester, AppStrings strings, String name) {
   return tester
@@ -394,57 +415,62 @@ void main() {
       testWidgets('Unpair in the menu asks first with the name', (
         tester,
       ) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
 
-        expect(dialog, findsOneWidget);
+        expect(_modal, findsOneWidget);
         expect(find.text(strings.unpairTitle(_mineName)), findsOneWidget);
         expect(find.text(strings.unpairBody(_mineName)), findsOneWidget);
-        expect(dialogButtons(tester), [
+        expect(_modalButtons(tester), [
           strings.cancelButton,
           strings.unpairButton,
         ]);
+        expect(
+          tester.widget<ModalStage>(find.byType(ModalStage)).scene,
+          StageScene.unpairLoop,
+        );
         expect(controller.calls, isEmpty);
       });
 
       testWidgets('Cancel closes it without unpairing', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
-        await tapInDialog(tester, strings.cancelButton);
+        await _tapInModal(tester, strings.cancelButton);
         await tester.pumpAndSettle();
 
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
         expect(controller.calls, isEmpty);
       });
 
       testWidgets('confirming unpairs that device only', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _foreignName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
-        await tapInDialog(tester, strings.unpairButton);
+        await _tapInModal(tester, strings.unpairButton);
+        expect(controller.calls, ['unpair $_foreignFp']);
         await tester.pumpAndSettle();
 
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
         expect(controller.calls, ['unpair $_foreignFp']);
       });
 
       testWidgets('Esc and a tap outside do not unpair', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
@@ -452,19 +478,19 @@ void main() {
         await tester.tapAt(const Offset(5, 5));
         await tester.pumpAndSettle();
 
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
         expect(controller.calls, isEmpty);
       });
 
       testWidgets('Remove on a mismatch asks first too', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await tester.tap(
           _inCard(_mismatchName, find.text(strings.removeButton)),
         );
         await tester.pumpAndSettle();
         expect(find.text(strings.unpairTitle(_mismatchName)), findsOneWidget);
-        await tapInDialog(tester, strings.cancelButton);
+        await _tapInModal(tester, strings.cancelButton);
         await tester.pumpAndSettle();
         expect(controller.calls, isEmpty);
 
@@ -472,9 +498,11 @@ void main() {
           _inCard(_mismatchName, find.text(strings.removeButton)),
         );
         await tester.pumpAndSettle();
-        await tapInDialog(tester, strings.unpairButton);
+        await _tapInModal(tester, strings.unpairButton);
+        expect(controller.calls, ['unpair $_mismatchFp']);
         await tester.pumpAndSettle();
 
+        expect(_modal, findsNothing);
         expect(controller.calls, ['unpair $_mismatchFp']);
       });
     });
@@ -1237,7 +1265,7 @@ void main() {
       },
       'the confirmation to unpair': (tester, code) async {
         final strings = stringsFor(code);
-        await _pumpRows(tester, code);
+        await _pumpRows(tester, code, reduceMotion: true);
         await tester.tap(
           _inCard(_mismatchName, find.text(strings.removeButton)),
         );

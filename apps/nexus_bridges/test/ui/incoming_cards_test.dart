@@ -6,12 +6,14 @@ import 'package:nexus_bridges/src/ui/device_list.dart';
 import 'package:nexus_bridges/src/ui/format.dart';
 import 'package:nexus_bridges/src/ui/icons/glyphs.dart';
 import 'package:nexus_bridges/src/ui/incoming_cards.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
-import 'pairing_fixtures.dart' show entry, namesakeName, tapInDialog;
+import 'pairing_fixtures.dart' show entry, namesakeName;
 import 'transfer_fixtures.dart';
 
 final NbColors _colors = NbColors.light;
@@ -1701,9 +1703,23 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.text(strings.unpairTitle(senderName)), findsOneWidget);
-        await tapInDialog(tester, strings.unpairButton);
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NbModal),
+            matching: find.widgetWithText(ModalButton, strings.unpairButton),
+          ),
+        );
+        expect(controller.calls, ['unpair $senderFingerprint']);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
+        expect(controller.calls, ['unpair $senderFingerprint']);
+        expect(_cards, findsOneWidget);
+
+        await tester.pump(const Duration(milliseconds: 1000));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump();
+        expect(find.byType(NbModal), findsNothing);
         expect(controller.calls, ['unpair $senderFingerprint']);
         expect(_cards, findsOneWidget);
       });

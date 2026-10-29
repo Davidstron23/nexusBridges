@@ -9,6 +9,8 @@ import 'package:nexus_bridges/src/ui/diagram/flow_diagram.dart';
 import 'package:nexus_bridges/src/ui/diagram/flow_painter.dart';
 import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
 import 'package:nexus_bridges/src/ui/icons/glyphs.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
@@ -106,13 +108,20 @@ Future<FakeAppController> _pumpList(
   Size size = const Size(800, 3000),
   OutgoingTransferView? outgoing,
   IncomingTransferView? incoming,
+  bool reduceMotion = false,
 }) async {
   _window(tester, size);
   final controller = FakeAppController(
     state: NodeState(entries: entries, outgoing: outgoing, incoming: incoming),
   );
   final busy = outgoing != null || incoming != null;
-  await pumpHome(tester, controller, code, settle: !busy);
+  await pumpHome(
+    tester,
+    controller,
+    code,
+    settle: !busy,
+    reduceMotion: reduceMotion,
+  );
   if (busy) {
     await tester.tap(find.text(stringsFor(code).devicesTab));
     await tester.pump();
@@ -565,7 +574,9 @@ void main() {
 
       testWidgets('the menu of a paired row offers Unpair, which asks first '
           'and then unpairs', (tester) async {
-        final controller = await _pumpList(tester, code, [_foreign]);
+        final controller = await _pumpList(tester, code, [
+          _foreign,
+        ], reduceMotion: true);
 
         await tester.tap(
           _inRow(_foreignFp, find.byTooltip(strings.moreOptions)),
@@ -577,9 +588,17 @@ void main() {
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
         expect(find.text(strings.unpairTitle(_foreignName)), findsOneWidget);
+        expect(find.byType(NbModal), findsOneWidget);
         expect(controller.calls, isEmpty);
-        await tapInDialog(tester, strings.unpairButton);
+        await tester.tap(
+          find.descendant(
+            of: find.byType(NbModal),
+            matching: find.widgetWithText(ModalButton, strings.unpairButton),
+          ),
+        );
+        expect(controller.calls, ['unpair $_foreignFp']);
         await tester.pumpAndSettle();
+        expect(find.byType(NbModal), findsNothing);
         expect(controller.calls, ['unpair $_foreignFp']);
       });
 
