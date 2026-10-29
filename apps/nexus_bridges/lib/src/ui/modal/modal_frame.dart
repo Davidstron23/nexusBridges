@@ -359,6 +359,9 @@ class _ScrollZoneState extends State<_ScrollZone> {
         thickness: 4,
         radius: const Radius.circular(2),
         thumbColor: colors.hint,
+        fadeDuration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 300),
         child: LayoutBuilder(
           builder: (context, constraints) {
             return SingleChildScrollView(
