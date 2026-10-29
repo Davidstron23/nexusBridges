@@ -293,7 +293,7 @@ void main() {
         final disc = inside(_cards, _glyph(Glyphs.warn));
         expect(disc, findsOneWidget);
         expect(tester.widget<GlyphIcon>(disc).color, _colors.warning);
-        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(NbModal), findsNothing);
       });
     });
 
@@ -1594,7 +1594,7 @@ void main() {
 
           expect(tester.takeException(), isNull);
           expect(_cards, findsOneWidget);
-          expect(find.byType(AlertDialog), findsNothing);
+          expect(find.byType(NbModal), findsNothing);
           expect(find.byType(ActivityPanel), findsOneWidget);
           final card = tester.widget<NbCard>(_card);
           expect(card.ring, ring ? _colors.warningRing : isNull);

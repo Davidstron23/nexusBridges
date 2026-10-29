@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/device_list.dart';
+import 'package:nexus_bridges/src/ui/modal/code_boxes.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
@@ -71,7 +73,7 @@ PairingView view({
   );
 }
 
-Finder get dialog => find.byType(AlertDialog);
+Finder get dialog => find.byType(NbModal);
 
 List<String> buttonLabelsIn(WidgetTester tester, Finder scope) {
   final buttons = find.descendant(
@@ -101,13 +103,56 @@ Finder cardOf(String name) =>
 List<String> rowButtons(WidgetTester tester, String name) =>
     buttonLabelsIn(tester, cardOf(name));
 
+String? _codeLabelOf(Element boxes) {
+  String? label;
+  void visit(Element element) {
+    if (label != null) return;
+    final widget = element.widget;
+    if (widget is Semantics && widget.properties.label != null) {
+      label = widget.properties.label;
+      return;
+    }
+    element.visitChildElements(visit);
+  }
+
+  boxes.visitChildElements(visit);
+  return label;
+}
+
+Element? _codeBoxesAbove(Element element) {
+  Element? found;
+  element.visitAncestorElements((ancestor) {
+    if (ancestor.widget is CodeBoxes) {
+      found = ancestor;
+      return false;
+    }
+    return true;
+  });
+  return found;
+}
+
+String? codeIn(WidgetTester tester, Finder scope) {
+  final boxes = find.descendant(of: scope, matching: find.byType(CodeBoxes));
+  final elements = boxes.evaluate().toList();
+  if (elements.isEmpty) return null;
+  expect(elements, hasLength(1), reason: 'more than one code on screen');
+  return _codeLabelOf(elements.single);
+}
+
 List<String> textsIn(WidgetTester tester, Finder scope) {
-  return [
-    for (final text in tester.widgetList<Text>(
-      find.descendant(of: scope, matching: find.byType(Text)),
-    ))
-      text.data ?? text.textSpan?.toPlainText() ?? '',
-  ];
+  final texts = <String>[];
+  final seen = <Element>{};
+  for (final element
+      in find.descendant(of: scope, matching: find.byType(Text)).evaluate()) {
+    final boxes = _codeBoxesAbove(element);
+    if (boxes != null) {
+      if (seen.add(boxes)) texts.add(_codeLabelOf(boxes) ?? '');
+      continue;
+    }
+    final text = element.widget as Text;
+    texts.add(text.data ?? text.textSpan?.toPlainText() ?? '');
+  }
+  return texts;
 }
 
 Future<void> tapInDialog(WidgetTester tester, String label) async {
@@ -180,6 +225,12 @@ Set<String> allowedTexts(
     s.mineNoButton,
     s.noticeChangeNotSaved,
     s.noticePairingPaused,
+    s.mineQuestion,
+    s.mineYesDetail,
+    s.mineNoDetail,
+    for (final outcome in [...PairingOutcome.values, null])
+      s.pairingEyebrow(outcome).toUpperCase(),
+    ...rawCode.split(''),
     for (final c in counts) s.noticeAttemptsCancelled(c),
     for (final n in names) ...[
       s.trustNetworkButton(n),
@@ -201,6 +252,7 @@ Set<String> allowedTexts(
       s.outcomeFailed(n),
       s.replaceTitle(n),
       for (final m in names) s.replaceBody(n, m),
+      s.replaceShortBody(n),
       s.mineTitle(n),
       s.unpairTitle(n),
       s.unpairBody(n),

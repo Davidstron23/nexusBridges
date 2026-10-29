@@ -4,6 +4,7 @@ import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/brand/brand_mark.dart';
 import 'package:nexus_bridges/src/ui/device_list.dart';
 import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
@@ -372,7 +373,7 @@ void main() {
           controller.calls.where((call) => call.startsWith('decideNetwork')),
           isEmpty,
         );
-        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(NbModal), findsNothing);
       });
 
       testWidgets('not paused shows no banner', (tester) async {

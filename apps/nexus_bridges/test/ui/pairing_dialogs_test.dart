@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/main.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
+import 'package:nexus_bridges/src/ui/modal/stage.dart';
+import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
 import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
@@ -11,6 +14,7 @@ import 'lifecycle_fixtures.dart';
 import 'pairing_fixtures.dart';
 
 final String _oldFingerprint = fingerprintOf('9999AAAA');
+const String _oldShort = '9999AAAA';
 const String _oldName = 'Port\u00E1til de Ana \u00B7 9999AAAA';
 
 final MineQuestion _mine = MineQuestion(
@@ -52,6 +56,7 @@ Future<FakeAppController> _pumpWith(
     controller,
     code,
     settle: pairing?.phase != PairingPhase.connecting,
+    reduceMotion: true,
   );
   await tester.pump(dialogActivationDelay);
   return controller;
@@ -97,7 +102,7 @@ Future<FakeAppController> _openLater(
   NodeState state,
 ) async {
   final controller = FakeAppController(state: const NodeState());
-  await pumpHome(tester, controller, code);
+  await pumpHome(tester, controller, code, reduceMotion: true);
   expect(dialog, findsNothing);
   controller.emit(state);
   await tester.pump();
@@ -123,9 +128,71 @@ bool _enabled(WidgetTester tester, String label) {
   return button.onPressed != null;
 }
 
-Map<String, bool> _buttonStates(WidgetTester tester) => {
-  for (final label in dialogButtons(tester)) label: _enabled(tester, label),
-};
+String _labelOf(WidgetTester tester, Element button) => [
+  for (final text in tester.widgetList<Text>(
+    find.descendant(
+      of: find.byElementPredicate((element) => element == button),
+      matching: find.byType(Text),
+    ),
+  ))
+    text.data ?? '',
+].join(' ');
+
+Map<String, bool> _buttonStates(WidgetTester tester) {
+  final buttons = find.descendant(
+    of: dialog,
+    matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
+  );
+  final states = <String, bool>{};
+  for (final button in buttons.evaluate()) {
+    final label = _labelOf(tester, button);
+    if (label.isEmpty) continue;
+    states[label] = (button.widget as ButtonStyleButton).onPressed != null;
+  }
+  expect(states.keys, dialogButtons(tester));
+  return states;
+}
+
+String _titleOf(WidgetTester tester) => tester
+    .widget<ModalView>(
+      find.descendant(of: dialog, matching: find.byType(ModalView)),
+    )
+    .title;
+
+void _expectResult(
+  WidgetTester tester,
+  AppStrings s,
+  PairingOutcome? outcome, {
+  String name = peerName,
+}) {
+  expect(find.text(s.pairingResultTitle), findsNothing);
+  expect(
+    find.descendant(
+      of: dialog,
+      matching: find.text(s.pairingEyebrow(outcome).toUpperCase()),
+    ),
+    findsOneWidget,
+  );
+  expect(_titleOf(tester), _outcomeText(s, outcome, name));
+  expect(find.text(_outcomeText(s, outcome, name)), findsOneWidget);
+}
+
+String _tileLabel(String title, String detail) => '$title $detail';
+
+List<Color?> _colorsOutsideButtons(WidgetTester tester) => [
+  for (final element
+      in find.descendant(of: dialog, matching: find.byType(Text)).evaluate())
+    if (find
+        .ancestor(
+          of: find.byElementPredicate((candidate) => candidate == element),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is ButtonStyleButton,
+          ),
+        )
+        .evaluate()
+        .isEmpty)
+      (element.widget as Text).style?.color,
+];
 
 Color? _colorOf(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
@@ -161,14 +228,16 @@ void main() {
         expect(find.text(strings.pairingWithTitle(peerName)), findsOneWidget);
         expect(find.text(strings.connectingTo(peerName)), findsOneWidget);
         expect(
-          find.descendant(
-            of: dialog,
-            matching: find.byType(CircularProgressIndicator),
-          ),
-          findsOneWidget,
+          tester
+              .widget<ModalStage>(
+                find.descendant(of: dialog, matching: find.byType(ModalStage)),
+              )
+              .scene,
+          StageScene.connecting,
         );
         expect(dialogButtons(tester), [strings.cancelButton]);
         expect(find.textContaining(RegExp(r'\d{3} \d{3}')), findsNothing);
+        expect(codeIn(tester, dialog), isNull);
 
         await tapInDialog(tester, strings.cancelButton);
         await pumpFrames(tester);
@@ -190,12 +259,12 @@ void main() {
 
         expect(find.text(strings.pairingWithTitle(peerName)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(rawCode), findsNothing);
         expect(dialogButtons(tester), [
-          strings.cancelButton,
           strings.doesNotMatchButton,
           strings.matchesButton,
+          strings.cancelButton,
         ]);
         expect(find.text(strings.ignoreDeviceButton), findsNothing);
         expect(find.text(strings.fingerprintLine(peerShort)), findsNothing);
@@ -240,7 +309,7 @@ void main() {
         );
 
         expect(find.text(strings.pairingWithTitle(peerName)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(strings.waitingForPeer(peerName)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsNothing);
         expect(dialogButtons(tester), [strings.cancelButton]);
@@ -287,7 +356,7 @@ void main() {
         await _tapOutside(tester);
 
         expect(dialog, findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(controller.calls, isEmpty);
       });
 
@@ -338,7 +407,7 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(dialog, findsOneWidget);
-          expect(find.text(formattedCode), findsOneWidget);
+          expect(codeIn(tester, dialog), formattedCode);
         }
         expect(find.text(strings.waitingForPeer(peerName)), findsOneWidget);
 
@@ -353,7 +422,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(dialog, findsOneWidget);
-        expect(find.text(strings.pairingResultTitle), findsOneWidget);
+        _expectResult(tester, strings, PairingOutcome.paired);
 
         controller.emit(_with());
         await tester.pumpAndSettle();
@@ -395,12 +464,12 @@ void main() {
         );
         expect(find.text(strings.fingerprintLine(peerShort)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(strings.alreadyPairedNote), findsNothing);
         expect(dialogButtons(tester), [
-          strings.ignoreDeviceButton,
           strings.doesNotMatchButton,
           strings.matchesButton,
+          strings.ignoreDeviceButton,
         ]);
         expect(find.text(strings.cancelButton), findsNothing);
         expect(find.textContaining(peerFingerprint), findsNothing);
@@ -446,7 +515,7 @@ void main() {
 
         expect(find.text(strings.alreadyPairedNote), findsOneWidget);
         expect(find.text(strings.fingerprintLine(peerShort)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(dialogButtons(tester), [
           strings.doesNotMatchButton,
           strings.matchesButton,
@@ -473,7 +542,7 @@ void main() {
           find.text(strings.pairingRequestTitle(peerName)),
           findsOneWidget,
         );
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(strings.receiverWaiting(peerName)), findsOneWidget);
         expect(dialogButtons(tester), [strings.cancelButton]);
       });
@@ -556,13 +625,9 @@ void main() {
             ),
           );
 
-          expect(find.text(strings.pairingResultTitle), findsOneWidget);
-          expect(
-            find.text(_outcomeText(strings, outcome, peerName)),
-            findsOneWidget,
-          );
+          _expectResult(tester, strings, outcome);
           expect(dialogButtons(tester), [strings.closeButton]);
-          expect(find.text(formattedCode), findsNothing);
+          expect(codeIn(tester, dialog), isNull);
 
           await tapInDialog(tester, strings.closeButton);
           await tester.pumpAndSettle();
@@ -659,10 +724,13 @@ void main() {
         final controller = await _pumpWith(tester, code, questions: [_mine]);
 
         expect(find.text(strings.mineTitle(peerName)), findsOneWidget);
-        expect(find.text(strings.mineBody), findsOneWidget);
+        expect(find.text(strings.mineQuestion), findsOneWidget);
+        expect(find.text(strings.mineYesDetail), findsOneWidget);
+        expect(find.text(strings.mineNoDetail), findsOneWidget);
+        expect(find.text(strings.mineBody), findsNothing);
         expect(dialogButtons(tester), [
-          strings.mineNoButton,
-          strings.mineYesButton,
+          _tileLabel(strings.mineYesButton, strings.mineYesDetail),
+          _tileLabel(strings.mineNoButton, strings.mineNoDetail),
         ]);
         expect(controller.calls, isEmpty);
       });
@@ -735,7 +803,7 @@ void main() {
           questions: [_mine],
         );
 
-        expect(find.text(strings.pairingResultTitle), findsOneWidget);
+        _expectResult(tester, strings, PairingOutcome.paired);
         expect(find.text(strings.mineTitle(peerName)), findsNothing);
 
         controller.emit(_with(questions: [_mine]));
@@ -785,10 +853,15 @@ void main() {
         await _pumpWith(tester, code, questions: [_replace]);
 
         expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceShortBody(peerName)), findsOneWidget);
         expect(
           find.text(strings.replaceBody(peerName, _oldName)),
-          findsOneWidget,
+          findsNothing,
         );
+        expect(find.text(_oldName), findsOneWidget);
+        expect(find.text(peerName), findsOneWidget);
+        expect(find.text(_oldShort), findsOneWidget);
+        expect(find.text(peerShort), findsOneWidget);
         expect(dialogButtons(tester), [
           strings.keepBothButton,
           strings.replaceButton,
@@ -901,7 +974,8 @@ void main() {
           ),
         );
         await tester.pumpWidget(NexusBridgesApp(controller));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(modalTransitionDuration);
 
         expect(
           find.text(strings.pairingRequestTitle(peerName)),
@@ -909,7 +983,7 @@ void main() {
         );
         await tester.pump(dialogActivationDelay);
         await tapInDialog(tester, strings.matchesButton);
-        await tester.pumpAndSettle();
+        await tester.pump();
 
         expect(controller.calls, ['answerRequest matches']);
       });
@@ -941,9 +1015,9 @@ void main() {
         ]);
         expect(_colorOf(tester, warning), _errorColor(tester, warning));
         expect(dialogButtons(tester), [
-          strings.ignoreDeviceButton,
           strings.doesNotMatchButton,
           strings.matchesButton,
+          strings.ignoreDeviceButton,
         ]);
       });
 
@@ -986,7 +1060,7 @@ void main() {
           expect(texts[1], warning);
           expect(texts.where((text) => text == warning), hasLength(1));
           expect(_colorOf(tester, warning), _errorColor(tester, warning));
-          expect(find.text(formattedCode), findsOneWidget);
+          expect(codeIn(tester, dialog), formattedCode);
         });
       }
 
@@ -1024,7 +1098,7 @@ void main() {
               namesake: namesakeName,
             );
 
-            expect(find.text(strings.pairingResultTitle), findsOneWidget);
+            _expectResult(tester, strings, outcome);
             expect(find.text(warning), findsNothing);
           });
         }
@@ -1044,13 +1118,18 @@ void main() {
             );
 
             expect(find.text(warning), findsNothing);
-            final colors = [
-              for (final text in tester.widgetList<Text>(
-                find.descendant(of: dialog, matching: find.byType(Text)),
-              ))
-                text.style?.color,
-            ];
-            expect(colors, isNot(contains(_errorColor(tester, formattedCode))));
+            expect(
+              find.descendant(of: dialog, matching: find.byType(ModalAlert)),
+              findsNothing,
+            );
+            final colors = _colorsOutsideButtons(tester);
+            expect(colors, isNotEmpty);
+            expect(
+              colors,
+              isNot(
+                contains(Theme.of(tester.element(dialog)).colorScheme.error),
+              ),
+            );
           });
         }
       }
@@ -1526,8 +1605,8 @@ void main() {
         expect(dialog, findsOneWidget);
         expect(find.text(strings.mineTitle(peerName)), findsOneWidget);
         expect(_buttonStates(tester), {
-          strings.mineNoButton: false,
-          strings.mineYesButton: false,
+          _tileLabel(strings.mineYesButton, strings.mineYesDetail): false,
+          _tileLabel(strings.mineNoButton, strings.mineNoDetail): false,
         });
 
         await _tapNow(tester, strings.mineYesButton);
@@ -1611,7 +1690,7 @@ void main() {
               find.text(strings.namesakeWarning(namesakeName)),
               namesake == null ? findsNothing : findsOneWidget,
             );
-            expect(find.text(formattedCode), findsOneWidget);
+            expect(codeIn(tester, dialog), formattedCode);
             expect(_enabled(tester, strings.cancelButton), isTrue);
 
             await _tapNow(tester, strings.cancelButton);
@@ -1877,7 +1956,7 @@ void main() {
 
           controller.emit(NodeState(questions: [question], pickerOpen: true));
           await tester.pump();
-          expect(find.byType(AlertDialog), findsOneWidget);
+          expect(dialog, findsOneWidget);
           expect(_buttonStates(tester).values, everyElement(isTrue));
         });
       }
@@ -1886,7 +1965,7 @@ void main() {
 
   group('C91 rendered texts of the dialogs', () {
     const names = [peerName, peerShort, _oldName, namesakeName];
-    const userTexts = {peerName, formattedCode, _oldName};
+    const userTexts = {peerName, formattedCode, _oldName, peerShort, _oldShort};
     final scenarios = <String, (PairingView?, List<PairingQuestion>, String?)>{
       'initiator connecting': (
         view(role: PairingRole.initiator, phase: PairingPhase.connecting),
