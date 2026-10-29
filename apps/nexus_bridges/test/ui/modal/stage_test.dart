@@ -2752,6 +2752,152 @@ void main() {
     });
   }
 
+  group('E290 the stage that fills the code view (point 247)', () {
+    test('the range goes from the small stage to the big one', () {
+      final range = StageFit.range;
+      expect(range.min, StageSize.small.height + StageSize.small.margin);
+      expect(range.max, StageSize.big.height + StageSize.big.margin);
+    });
+
+    test('at both ends the fit is the small and the big stage', () {
+      final low = StageFit.of(StageFit.range.min);
+      expect(low.width, StageSize.small.width);
+      expect(low.height, StageSize.small.height);
+      expect(low.margin, StageSize.small.margin);
+      expect(low.viewTop, closeTo(StageSize.small.viewTop, 1e-9));
+      final high = StageFit.of(StageFit.range.max);
+      expect(high.width, StageSize.big.width);
+      expect(high.height, StageSize.big.height);
+      expect(high.margin, StageSize.big.margin);
+      expect(high.viewTop, closeTo(StageSize.big.viewTop, 0.05));
+      expect(StageFit.of(10).extent, StageFit.range.min);
+      expect(StageFit.of(900).extent, StageFit.range.max);
+    });
+
+    test('in between it grows without jumps and keeps the centre of the '
+        'viewBox in the centre of the box', () {
+      var previous = StageFit.of(StageFit.range.min);
+      for (
+        var extent = StageFit.range.min + 1;
+        extent <= StageFit.range.max;
+        extent += 1
+      ) {
+        final fit = StageFit.of(extent);
+        expect(fit.extent, closeTo(extent, 1e-9));
+        expect(fit.width, greaterThan(previous.width));
+        expect(fit.height, greaterThan(previous.height));
+        expect(fit.width, lessThanOrEqualTo(StageSize.big.width));
+        expect(
+          (_center.dy - fit.viewTop) * fit.width / 300,
+          closeTo(fit.height / 2, 1e-9),
+        );
+        expect(fit.height * 300 / fit.width, lessThanOrEqualTo(170 + 0.1));
+        previous = fit;
+      }
+    });
+
+    for (final (theme, colors, brightness) in _themes) {
+      for (final scene in [StageScene.comparing, StageScene.waiting]) {
+        testWidgets('${scene.name} ($theme): the box takes the given height '
+            'and the drawing is scaled to it, centred and whole', (
+          tester,
+        ) async {
+          for (final extent in [68.0, 110.0, 157.0, 186.0, 211.0, 400.0]) {
+            await tester.pumpWidget(
+              Directionality(
+                textDirection: TextDirection.ltr,
+                child: MediaQuery(
+                  data: const MediaQueryData(disableAnimations: true),
+                  child: Theme(
+                    data: buildTheme(brightness),
+                    child: Center(
+                      child: SizedBox(
+                        height: extent,
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: ModalStage.fill(scene: scene),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+            final fit = StageFit.of(extent);
+            final box = tester.getSize(find.byType(ModalStage));
+            expect(box.width, closeTo(fit.width, 1e-6), reason: '$extent');
+            expect(box.height, closeTo(fit.extent, 1e-6), reason: '$extent');
+            final paint = tester.getSize(_customPaint());
+            expect(paint.width, closeTo(fit.width, 1e-6));
+            expect(paint.height, closeTo(fit.height, 1e-6));
+            final painter = _painter(tester);
+            expect(painter.viewTop, fit.viewTop);
+            expect(painter.size, isNull);
+
+            for (final t in [0.0, 1.7, 4.2]) {
+              final canvas = _StageCanvas();
+              StagePainter(
+                scene: scene,
+                input: const StageInput(),
+                colors: colors,
+                still: false,
+                changes: const StageChanges(),
+                viewTop: fit.viewTop,
+                elapsed: ValueNotifier<double>(t),
+              ).paint(canvas, Size(fit.width, fit.height));
+              final halo = canvas.draws.first;
+              expect(halo.name, #drawCircle);
+              expect(halo.matrix.entry(0, 0), closeTo(fit.width / 300, 1e-9));
+              expect(halo.matrix.entry(0, 3), closeTo(fit.width / 2, 1e-9));
+              expect(halo.matrix.entry(1, 3), closeTo(fit.height / 2, 1e-9));
+              final rings = [
+                for (final draw in canvas.draws)
+                  if (draw.stroked &&
+                      (draw.localBounds.width - 112).abs() < 1 &&
+                      (draw.localBounds.center - _center).distance < 0.5)
+                    draw,
+              ];
+              expect(rings, isNotEmpty, reason: '$extent $t');
+              final box = Rect.fromLTWH(0, 0, fit.width, fit.height);
+              for (final ring in rings) {
+                final bounds = ring.name == #drawPath
+                    ? ring.path
+                          .transform(ring.matrix.storage)
+                          .getBounds()
+                          .inflate(ring.paint.strokeWidth / 2 * ring.scale)
+                    : ring.stageBounds;
+                expect(bounds.center.dx, closeTo(box.center.dx, 0.3));
+                expect(bounds.center.dy, closeTo(box.center.dy, 0.3));
+                expect(bounds.left, greaterThanOrEqualTo(box.left));
+                expect(bounds.right, lessThanOrEqualTo(box.right));
+                expect(bounds.top, greaterThanOrEqualTo(box.top));
+                expect(bounds.bottom, lessThanOrEqualTo(box.bottom));
+              }
+              _expectSound(canvas, reason: '${scene.name} $extent $t');
+            }
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
+
+      test('shouldRepaint also compares the viewTop ($theme)', () {
+        final elapsed = ValueNotifier<double>(0);
+        StagePainter make(double? viewTop) => StagePainter(
+          scene: StageScene.waiting,
+          input: const StageInput(),
+          colors: colors,
+          still: false,
+          changes: const StageChanges(),
+          viewTop: viewTop,
+          elapsed: elapsed,
+        );
+        expect(make(10).shouldRepaint(make(10)), isFalse);
+        expect(make(10).shouldRepaint(make(12)), isTrue);
+        expect(make(10).shouldRepaint(make(null)), isTrue);
+      });
+    }
+  });
+
   group('E290 sound painting at any t', () {
     for (final (theme, colors, _) in _themes) {
       test('StagePainter of every scene never throws and stays sound '

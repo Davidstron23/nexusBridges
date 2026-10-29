@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
@@ -17,6 +18,8 @@ const Duration modalTransitionDuration = Duration(milliseconds: 320);
 const Duration modalViewInDuration = Duration(milliseconds: 360);
 const Duration modalViewInDelay = Duration(milliseconds: 50);
 const Duration modalViewOutDuration = Duration(milliseconds: 180);
+const Duration stageFillDuration = Duration(milliseconds: 420);
+const double _fitTolerance = 1e-6;
 
 const Cubic _labEaseOut = Cubic(0.23, 1, 0.32, 1);
 const String _slot = '\u{E000}';
@@ -210,11 +213,26 @@ class _Entrance extends StatelessWidget {
 
 enum ModalViewLayout { standard, centered, result, titleFirst }
 
+final class StageFill {
+  const StageFill({required this.min, required this.max});
+
+  final double min;
+  final double max;
+
+  @override
+  bool operator ==(Object other) =>
+      other is StageFill && other.min == min && other.max == max;
+
+  @override
+  int get hashCode => Object.hash(min, max);
+}
+
 class ModalView extends StatelessWidget {
   const ModalView({
     required this.title,
     this.layout = ModalViewLayout.standard,
     this.stage,
+    this.stageFill,
     this.eyebrow,
     this.body = const [],
     this.pair = const [],
@@ -224,6 +242,7 @@ class ModalView extends StatelessWidget {
 
   final ModalViewLayout layout;
   final Widget? stage;
+  final StageFill? stageFill;
   final ModalEyebrow? eyebrow;
   final String title;
   final List<Widget> body;
@@ -275,6 +294,7 @@ class ModalView extends StatelessWidget {
     final zone = _ScrollZone(
       centered: centered,
       titleFirst: titleFirst,
+      fill: titleFirst || stage == null ? null : stageFill,
       children: topChildren,
     );
     final buttons = <Widget>[
@@ -330,11 +350,13 @@ class _ScrollZone extends StatefulWidget {
   const _ScrollZone({
     required this.centered,
     required this.titleFirst,
+    required this.fill,
     required this.children,
   });
 
   final bool centered;
   final bool titleFirst;
+  final StageFill? fill;
   final List<Widget> children;
 
   @override
@@ -366,6 +388,18 @@ class _ScrollZoneState extends State<_ScrollZone> {
             : const Duration(milliseconds: 300),
         child: LayoutBuilder(
           builder: (context, constraints) {
+            final fill = widget.fill;
+            if (fill != null) {
+              return SingleChildScrollView(
+                controller: _controller,
+                primary: false,
+                child: _StageFillZone(
+                  fill: fill,
+                  viewport: constraints.maxHeight,
+                  children: widget.children,
+                ),
+              );
+            }
             return SingleChildScrollView(
               controller: _controller,
               primary: false,
@@ -391,6 +425,263 @@ class _ScrollZoneState extends State<_ScrollZone> {
       ),
     );
   }
+}
+
+final class _Headroom {
+  const _Headroom(this.owner, this.value);
+
+  final Object owner;
+  final double value;
+}
+
+final Expando<_Headroom> _headrooms = Expando<_Headroom>();
+
+class _StageFillZone extends StatefulWidget {
+  const _StageFillZone({
+    required this.fill,
+    required this.viewport,
+    required this.children,
+  });
+
+  final StageFill fill;
+  final double viewport;
+  final List<Widget> children;
+
+  @override
+  State<_StageFillZone> createState() => _StageFillZoneState();
+}
+
+class _StageFillZoneState extends State<_StageFillZone>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: stageFillDuration,
+  )..addListener(_onTick);
+  ModalRoute<Object?>? _route;
+  bool _started = false;
+  double? _from;
+  double? _to;
+
+  double? get _headroom {
+    final from = _from;
+    if (from == null) return null;
+    final to = _to ?? from;
+    return from + (to - from) * _labEaseOut.transform(_controller.value);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
+    if (_started) return;
+    _started = true;
+    final route = _route;
+    if (route != null) _from = _headrooms[route]?.value;
+  }
+
+  @override
+  void dispose() {
+    final route = _route;
+    if (route != null && identical(_headrooms[route]?.owner, this)) {
+      _headrooms[route] = null;
+    }
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _remember() {
+    final route = _route;
+    final value = _headroom ?? _to;
+    if (route == null || value == null) return;
+    if (ModalViewActivity.isLeaving(context)) return;
+    _headrooms[route] = _Headroom(this, value);
+  }
+
+  void _onTick() {
+    if (!mounted) return;
+    if (_controller.isCompleted) _from = null;
+    setState(_remember);
+  }
+
+  void _onTarget(double target) {
+    if (!mounted) return;
+    final current = _headroom;
+    final animate =
+        !MediaQuery.disableAnimationsOf(context) &&
+        current != null &&
+        (_to == null || _controller.isAnimating) &&
+        (current - target).abs() > 0.5;
+    _to = target;
+    if (animate) {
+      _from = current;
+      _controller.forward(from: 0);
+    } else {
+      _from = null;
+      _controller.stop();
+    }
+    setState(_remember);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _FillColumn(
+      fill: widget.fill,
+      viewport: widget.viewport,
+      headroom: _headroom,
+      onTarget: _onTarget,
+      children: widget.children,
+    );
+  }
+}
+
+final class _FillParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _FillColumn extends MultiChildRenderObjectWidget {
+  const _FillColumn({
+    required this.fill,
+    required this.viewport,
+    required this.headroom,
+    required this.onTarget,
+    required super.children,
+  });
+
+  final StageFill fill;
+  final double viewport;
+  final double? headroom;
+  final ValueChanged<double> onTarget;
+
+  @override
+  _RenderFillColumn createRenderObject(BuildContext context) =>
+      _RenderFillColumn(
+        fill: fill,
+        viewport: viewport,
+        headroom: headroom,
+        onTarget: onTarget,
+      );
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderFillColumn renderObject,
+  ) {
+    renderObject
+      ..fill = fill
+      ..viewport = viewport
+      ..headroom = headroom
+      ..onTarget = onTarget;
+  }
+}
+
+class _RenderFillColumn extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _FillParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _FillParentData> {
+  _RenderFillColumn({
+    required this._fill,
+    required this._viewport,
+    required this._headroom,
+    required this.onTarget,
+  });
+
+  ValueChanged<double> onTarget;
+  double? _reported;
+
+  StageFill get fill => _fill;
+  StageFill _fill;
+  set fill(StageFill value) {
+    if (value == _fill) return;
+    _fill = value;
+    markNeedsLayout();
+  }
+
+  double get viewport => _viewport;
+  double _viewport;
+  set viewport(double value) {
+    if (value == _viewport) return;
+    _viewport = value;
+    markNeedsLayout();
+  }
+
+  double? get headroom => _headroom;
+  double? _headroom;
+  set headroom(double? value) {
+    if (value == _headroom) return;
+    _headroom = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _FillParentData) {
+      child.parentData = _FillParentData();
+    }
+  }
+
+  double _targetOf(double rest) {
+    if (!_viewport.isFinite) return _fill.max;
+    final free = _viewport - rest;
+    if (free <= _fill.max) return math.max(free, _fill.min);
+    return _fill.max + (free - _fill.max) / 2;
+  }
+
+  void _report(double target) {
+    if (_reported == target) return;
+    _reported = target;
+    final callback = onTarget;
+    SchedulerBinding.instance.addPostFrameCallback((_) => callback(target));
+  }
+
+  @override
+  void performLayout() {
+    final width = constraints.maxWidth;
+    final stage = firstChild;
+    if (stage == null) {
+      size = constraints.constrain(Size(width, 0));
+      return;
+    }
+    final loose = BoxConstraints(maxWidth: width);
+    var rest = 0.0;
+    for (var child = childAfter(stage); child != null;) {
+      child.layout(loose, parentUsesSize: true);
+      rest += child.size.height;
+      child = childAfter(child);
+    }
+    final target = _targetOf(rest);
+    _report(target);
+    final headroom = math.max(_headroom ?? target, _fill.min);
+    final extent = math.min(headroom, _fill.max);
+    stage.layout(
+      BoxConstraints(maxWidth: width, minHeight: extent, maxHeight: extent),
+      parentUsesSize: true,
+    );
+    (stage.parentData! as _FillParentData).offset = Offset(
+      (width - stage.size.width) / 2,
+      headroom - extent,
+    );
+    var y = headroom;
+    for (var child = childAfter(stage); child != null;) {
+      (child.parentData! as _FillParentData).offset = Offset(
+        (width - child.size.width) / 2,
+        y,
+      );
+      y += child.size.height;
+      child = childAfter(child);
+    }
+    final fits = _viewport.isFinite && y <= _viewport + _fitTolerance;
+    size = constraints.constrain(Size(width, fits ? _viewport : y));
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  double? computeDistanceToActualBaseline(TextBaseline baseline) =>
+      defaultComputeDistanceToFirstActualBaseline(baseline);
 }
 
 enum EyebrowTone { ok, bad, warn, ice, neutral }

@@ -408,11 +408,11 @@ class _PairingViewState extends State<_PairingView>
     final code = view.code;
     return ModalView(
       layout: ModalViewLayout.centered,
-      stage: ModalStage(
+      stage: ModalStage.fill(
         scene: StageScene.comparing,
         input: StageInput(peer: widget.peer),
-        size: StageSize.small,
       ),
+      stageFill: StageFit.range,
       title: _titleOf(strings, name, isInitiator),
       body: [
         if (code != null) CodeBoxes(code: code),
@@ -479,11 +479,11 @@ class _PairingViewState extends State<_PairingView>
     final namesake = widget.namesake;
     final code = view.code;
     return ModalView(
-      stage: ModalStage(
+      stage: ModalStage.fill(
         scene: StageScene.waiting,
         input: StageInput(peer: widget.peer),
-        size: StageSize.small,
       ),
+      stageFill: StageFit.range,
       title: _titleOf(strings, name, isInitiator),
       body: [
         if (code != null) CodeBoxes(code: code, confirmed: true),

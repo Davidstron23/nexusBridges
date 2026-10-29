@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -313,10 +314,51 @@ const List<(Size, double)> _codeFirstWindows = [
   (Size(760, 520), 1.3),
 ];
 
+const List<(Size, double)> _codeStageWindows = [
+  (Size(800, 600), 1.0),
+  (Size(800, 600), 1.3),
+  (Size(760, 520), 1.0),
+  (Size(760, 520), 1.3),
+];
+
 Finder _liveZone() {
   final zones = _live(_inModal(find.byType(SingleChildScrollView)));
   expect(zones, hasLength(1), reason: 'live zone');
   return _element(zones.single);
+}
+
+double _contentBottom(WidgetTester tester, Finder zone) {
+  var bottom = double.negativeInfinity;
+  for (final text in _live(
+    find.descendant(of: zone, matching: find.byType(Text)),
+  )) {
+    bottom = math.max(bottom, tester.getRect(_element(text)).bottom);
+  }
+  return bottom;
+}
+
+void _expectStageFills(
+  WidgetTester tester,
+  Rect stage,
+  Rect zone, {
+  required bool overflow,
+}) {
+  final range = StageFit.range;
+  if (overflow) {
+    expect(stage.height, closeTo(range.min, 0.01), reason: 'stage at least');
+    return;
+  }
+  final bottom = _contentBottom(tester, _liveZone());
+  if (stage.height < range.max - 0.01) {
+    expect(stage.top, closeTo(zone.top, 0.5), reason: 'stage on top');
+    expect(bottom, closeTo(zone.bottom, 0.5), reason: 'no space left');
+  } else {
+    expect(
+      stage.top - zone.top,
+      closeTo(zone.bottom - bottom, 0.5),
+      reason: 'the rest is shared above and below',
+    );
+  }
 }
 
 Finder _rowAround(Element element) => find
@@ -1736,6 +1778,238 @@ void main() {
       }
     });
 
+    group('[$code] E287 the stage of the code fills the modal (point 247)', () {
+      for (final window in [const Size(1180, 720), const Size(1400, 860)]) {
+        for (final role in PairingRole.values) {
+          for (final phase in [
+            PairingPhase.comparing,
+            PairingPhase.waitingPeer,
+          ]) {
+            for (final name in [_codeFirstNames.first, _codeFirstNames.last]) {
+              testWidgets('${role.name} ${phase.name}, ${name.length} '
+                  'characters, ${window.width.toInt()}x'
+                  '${window.height.toInt()} at 100 %: the stage takes the '
+                  'free height up to the big one, drawn to its size, and the '
+                  'code is whole', (tester) async {
+                await _mount(
+                  tester,
+                  code,
+                  pairingState(
+                    pairing: view(role: role, phase: phase, name: name),
+                  ),
+                  reduceMotion: true,
+                  window: window,
+                );
+                await _openArmed(tester);
+                await tester.pump(barFadeIn);
+                expect(tester.takeException(), isNull);
+
+                final frame = _frameRect(tester);
+                expect(frame.size, modalSize);
+                final zoneFinder = _liveZone();
+                final zone = tester.getRect(zoneFinder);
+                final position = zonePosition(tester, zoneFinder);
+                expect(position.maxScrollExtent, 0);
+
+                final stageElement = _live(_inModal(find.byType(ModalStage)))
+                    .single;
+                final stage = tester.getRect(_element(stageElement));
+                final range = StageFit.range;
+                expect(stage.height, greaterThan(range.min + 30));
+                expect(stage.height, lessThanOrEqualTo(range.max + 0.01));
+                _expectStageFills(tester, stage, zone, overflow: false);
+                if (phase == PairingPhase.waitingPeer &&
+                    name == _codeFirstNames.first) {
+                  expect(stage.height, closeTo(range.max, 0.01));
+                  expect(stage.width, closeTo(StageSize.big.width, 0.01));
+                }
+
+                final fit = StageFit.of(stage.height);
+                final paint = find.descendant(
+                  of: _element(stageElement),
+                  matching: find.byType(CustomPaint),
+                );
+                expect(tester.getSize(paint), Size(fit.width, fit.height));
+                expect(
+                  tester.getCenter(paint).dx,
+                  closeTo(frame.center.dx, 0.5),
+                );
+                final painter =
+                    tester.widget<CustomPaint>(paint).painter! as StagePainter;
+                expect(painter.viewTop, closeTo(fit.viewTop, 1e-9));
+                expect(
+                  (85 - fit.viewTop) * fit.width / 300,
+                  closeTo(fit.height / 2, 1e-9),
+                );
+
+                final boxes = _live(_inModal(find.byType(CodeBoxes))).single;
+                expect(codeIn(tester, _modal), formattedCode);
+                expectWholeInside(
+                  tester.getRect(_element(boxes)),
+                  zone,
+                  'code',
+                );
+                for (final digit in _live(
+                  find.descendant(
+                    of: _element(boxes),
+                    matching: find.byType(Text),
+                  ),
+                )) {
+                  expectWholeInside(
+                    tester.getRect(_element(digit)),
+                    zone,
+                    'digit',
+                  );
+                }
+              });
+            }
+          }
+        }
+      }
+
+      double liveStageHeight(WidgetTester tester) => tester
+          .getSize(_element(_live(_inModal(find.byType(ModalStage))).single))
+          .height;
+
+      double liveCodeOffset(WidgetTester tester) =>
+          tester
+              .getRect(_element(_live(_inModal(find.byType(CodeBoxes))).single))
+              .top -
+          tester.getRect(_liveZone()).top;
+
+      for (final role in PairingRole.values) {
+        testWidgets('${role.name}: from comparing to waitingPeer the stage '
+            'starts where it was and grows smoothly, so the code does not '
+            'jump', (tester) async {
+          final controller = await _mount(
+            tester,
+            code,
+            pairingState(
+              pairing: view(role: role, phase: PairingPhase.comparing),
+            ),
+            window: const Size(1180, 720),
+          );
+          await _openArmed(tester);
+          await _ms(tester, 600);
+          final before = liveStageHeight(tester);
+          final codeBefore = liveCodeOffset(tester);
+
+          controller.emit(
+            pairingState(
+              pairing: view(role: role, phase: PairingPhase.waitingPeer),
+            ),
+          );
+          await tester.pump();
+          expect(_stage().scene, StageScene.waiting);
+          expect(liveStageHeight(tester), closeTo(before, 0.01));
+          expect(liveCodeOffset(tester), closeTo(codeBefore, 0.5));
+
+          final heights = <double>[];
+          for (var i = 0; i < 12; i++) {
+            await _ms(tester, 50);
+            heights.add(liveStageHeight(tester));
+          }
+          final after = heights.last;
+          expect(after, greaterThan(before + 20));
+          expect(
+            stageFillDuration,
+            greaterThanOrEqualTo(const Duration(milliseconds: 300)),
+          );
+          expect(heights[2], greaterThan(before + 0.5));
+          expect(heights[2], lessThan(after - 0.5));
+          for (var i = 1; i < heights.length; i++) {
+            expect(heights[i], greaterThanOrEqualTo(heights[i - 1] - 1e-9));
+          }
+          await _ms(tester, 400);
+          expect(liveStageHeight(tester), closeTo(after, 0.01));
+          _expectStageFills(
+            tester,
+            tester.getRect(
+              _element(_live(_inModal(find.byType(ModalStage))).single),
+            ),
+            tester.getRect(_liveZone()),
+            overflow: false,
+          );
+          expect(tester.takeException(), isNull);
+        });
+      }
+
+      testWidgets('with reduced motion the stage takes its size at once', (
+        tester,
+      ) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(pairing: receiverComparing),
+          reduceMotion: true,
+          window: const Size(1180, 720),
+        );
+        await _openArmed(tester);
+        final before = liveStageHeight(tester);
+
+        controller.emit(
+          pairingState(
+            pairing: view(
+              role: PairingRole.receiver,
+              phase: PairingPhase.waitingPeer,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        final after = liveStageHeight(tester);
+        expect(after, greaterThan(before + 20));
+        await _ms(tester, 100);
+        expect(liveStageHeight(tester), after);
+      });
+
+      testWidgets('a later pairing in the same window does not start from the '
+          'stage of the one before', (tester) async {
+        final controller = await _mount(
+          tester,
+          code,
+          pairingState(
+            pairing: view(
+              role: PairingRole.initiator,
+              phase: PairingPhase.waitingPeer,
+            ),
+          ),
+          window: const Size(1180, 720),
+        );
+        await _openArmed(tester);
+        await _ms(tester, 600);
+        final waiting = liveStageHeight(tester);
+
+        controller.emit(
+          pairingState(
+            pairing: view(
+              role: PairingRole.initiator,
+              phase: PairingPhase.finished,
+              outcome: PairingOutcome.busy,
+            ),
+          ),
+        );
+        await tester.pump();
+        await _ms(tester, 600);
+        controller.emit(
+          pairingState(
+            pairing: view(
+              role: PairingRole.receiver,
+              phase: PairingPhase.comparing,
+              fingerprint: _otherFingerprint,
+              name: _otherName,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump();
+        final comparing = liveStageHeight(tester);
+        expect(comparing, lessThan(waiting - 20));
+        await _ms(tester, 100);
+        expect(liveStageHeight(tester), comparing);
+      });
+    });
+
     group('[$code] E287 the code first (point 244, Q-2 and Q-3; RF-83, '
         'RF-86, RF-125)', () {
       test('the names go from 10 to 35 characters', () {
@@ -1751,7 +2025,7 @@ void main() {
           PairingPhase.waitingPeer,
         ]) {
           for (final namesake in [false, true]) {
-            for (final (window, scale) in _codeFirstWindows) {
+            for (final (window, scale) in _codeStageWindows) {
               for (final name in _codeFirstNames) {
                 final where =
                     '${window.width.toInt()}x${window.height.toInt()} at '
@@ -1759,8 +2033,11 @@ void main() {
                 testWidgets('${role.name} ${phase.name}'
                     '${namesake ? ' with a namesake' : ''}, ${name.length} '
                     'characters, $where: the code is whole in the zone when '
-                    'it opens, the bar shows only with more content and the '
-                    'end is reached by scrolling', (tester) async {
+                    'it opens, the stage fills what is left between the '
+                    'small and the big one, the bar shows only with more '
+                    'content and the end is reached by scrolling', (
+                  tester,
+                ) async {
                   await _mount(
                     tester,
                     code,
@@ -1785,12 +2062,16 @@ void main() {
 
                   final stage = _live(_inModal(find.byType(ModalStage)));
                   expect(stage, hasLength(1));
+                  expect((stage.single.widget as ModalStage).fills, isTrue);
+                  final range = StageFit.range;
+                  final stageRect = tester.getRect(_element(stage.single));
                   expect(
-                    tester.getSize(_element(stage.single)),
-                    Size(
-                      StageSize.small.width,
-                      StageSize.small.height + StageSize.small.margin,
-                    ),
+                    stageRect.height,
+                    inInclusiveRange(range.min - 0.01, range.max + 0.01),
+                  );
+                  expect(
+                    stageRect.width,
+                    closeTo(StageFit.of(stageRect.height).width, 0.01),
                   );
                   final title = _live(_inModal(find.text(_view().title)));
                   expect(title, hasLength(1));
@@ -1824,6 +2105,12 @@ void main() {
                   }
 
                   final overflow = position.maxScrollExtent > 0;
+                  _expectStageFills(
+                    tester,
+                    stageRect,
+                    zone,
+                    overflow: overflow,
+                  );
                   final hint = NbColors.of(tester.element(zoneFinder)).hint;
                   expect(
                     thumbsOf(tester, zoneFinder, hint),

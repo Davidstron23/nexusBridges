@@ -1,15 +1,55 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../theme/tokens.dart';
 import 'bridge.dart';
+import 'modal_frame.dart' show StageFill;
 import 'stage_choices.dart';
 import 'stage_kit.dart';
 import 'stage_outcomes.dart';
 import 'stage_waiting.dart';
 
 const double _viewWidth = 300;
+const StageSize _fillMin = StageSize.small;
+const StageSize _fillMax = StageSize.big;
+
+double _extentOf(StageSize size) => size.height + size.margin;
+
+final class StageFit {
+  const StageFit._({
+    required this.width,
+    required this.height,
+    required this.margin,
+    required this.viewTop,
+  });
+
+  factory StageFit.of(double extent) {
+    final low = _extentOf(_fillMin);
+    final high = _extentOf(_fillMax);
+    final t = ((extent - low) / (high - low)).clamp(0.0, 1.0);
+    final width = lerpDouble(_fillMin.width, _fillMax.width, t)!;
+    final height = lerpDouble(_fillMin.height, _fillMax.height, t)!;
+    return StageFit._(
+      width: width,
+      height: height,
+      margin: lerpDouble(_fillMin.margin, _fillMax.margin, t)!,
+      viewTop: stageCenter.dy - height * _viewWidth / width / 2,
+    );
+  }
+
+  static StageFill get range =>
+      StageFill(min: _extentOf(_fillMin), max: _extentOf(_fillMax));
+
+  final double width;
+  final double height;
+  final double margin;
+  final double viewTop;
+
+  double get extent => height + margin;
+}
 
 StageSceneFn _painterOf(StageScene scene) => switch (scene) {
   StageScene.connecting => paintConnecting,
@@ -60,6 +100,7 @@ class StagePainter extends CustomPainter {
     required this.still,
     required this.changes,
     this.size,
+    this.viewTop,
     required ValueListenable<double> elapsed,
   }) : _elapsed = elapsed,
        super(repaint: elapsed);
@@ -70,6 +111,7 @@ class StagePainter extends CustomPainter {
   final bool still;
   final StageChanges changes;
   final StageSize? size;
+  final double? viewTop;
   final ValueListenable<double> _elapsed;
 
   @override
@@ -85,7 +127,7 @@ class StagePainter extends CustomPainter {
     );
     canvas.save();
     canvas.scale(canvasSize.width / _viewWidth);
-    final viewTop = (size ?? spec.size).viewTop;
+    final viewTop = this.viewTop ?? (size ?? spec.size).viewTop;
     if (viewTop != 0) canvas.translate(0, -viewTop);
     paintHalo(canvas, frame, _toneOf(scene, input, colors));
     _painterOf(scene)(canvas, frame);
@@ -99,7 +141,8 @@ class StagePainter extends CustomPainter {
       !identical(oldDelegate.colors, colors) ||
       oldDelegate.still != still ||
       oldDelegate.changes != changes ||
-      oldDelegate.size != size;
+      oldDelegate.size != size ||
+      oldDelegate.viewTop != viewTop;
 }
 
 class ModalStage extends StatefulWidget {
@@ -108,11 +151,19 @@ class ModalStage extends StatefulWidget {
     this.input = const StageInput(),
     this.size,
     super.key,
-  });
+  }) : fills = false;
+
+  const ModalStage.fill({
+    required this.scene,
+    this.input = const StageInput(),
+    super.key,
+  }) : size = null,
+       fills = true;
 
   final StageScene scene;
   final StageInput input;
   final StageSize? size;
+  final bool fills;
 
   @override
   State<ModalStage> createState() => _ModalStageState();
@@ -239,32 +290,64 @@ class _ModalStageState extends State<ModalStage>
     if (_isDone(t)) _ticker.stop();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final input = _input;
-    final size = widget.size ?? stageSpecOf(widget.scene, input).size;
+  StagePainter _painter(StageInput input, StageSize? size, double? viewTop) =>
+      StagePainter(
+        scene: widget.scene,
+        input: input,
+        colors: NbColors.of(context),
+        still: _reduceMotion,
+        changes: _changes,
+        size: size,
+        viewTop: viewTop,
+        elapsed: _elapsed,
+      );
+
+  Widget _box(
+    double width,
+    double height,
+    double extent,
+    StagePainter painter,
+  ) {
     return ExcludeSemantics(
       child: RepaintBoundary(
         child: SizedBox(
-          width: size.width,
-          height: size.height + size.margin,
+          width: width,
+          height: extent,
           child: Align(
             alignment: Alignment.topCenter,
-            child: CustomPaint(
-              size: Size(size.width, size.height),
-              painter: StagePainter(
-                scene: widget.scene,
-                input: input,
-                colors: NbColors.of(context),
-                still: _reduceMotion,
-                changes: _changes,
-                size: size,
-                elapsed: _elapsed,
-              ),
-            ),
+            child: CustomPaint(size: Size(width, height), painter: painter),
           ),
         ),
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final input = _input;
+    if (widget.fills) {
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final range = StageFit.range;
+          final extent = constraints.maxHeight.isFinite
+              ? constraints.maxHeight.clamp(range.min, range.max)
+              : range.max;
+          final fit = StageFit.of(extent);
+          return _box(
+            fit.width,
+            fit.height,
+            fit.extent,
+            _painter(input, null, fit.viewTop),
+          );
+        },
+      );
+    }
+    final size = widget.size ?? stageSpecOf(widget.scene, input).size;
+    return _box(
+      size.width,
+      size.height,
+      size.height + size.margin,
+      _painter(input, size, null),
     );
   }
 }
