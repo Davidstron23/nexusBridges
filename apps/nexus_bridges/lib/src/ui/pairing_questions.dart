@@ -8,6 +8,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../app_controller.dart';
 import '../l10n/app_strings.dart';
 import 'armed.dart';
+import 'format.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
 import 'modal/modal_button.dart';
@@ -135,7 +136,12 @@ class _PairingQuestionViewState extends State<PairingQuestionView>
     final newEntry = _entryOf(question.fingerprint);
     return ModalView(
       layout: ModalViewLayout.titleFirst,
-      title: strings.replaceTitle(question.oldName),
+      title: strings.replaceTitle(
+        glueFingerprint(
+          question.oldName,
+          _shortFingerprint(question.oldFingerprint),
+        ),
+      ),
       body: [
         ModalLead(
           text: strings.replaceShortBody(question.deviceName),
@@ -185,6 +191,7 @@ class _PairingQuestionViewState extends State<PairingQuestionView>
         valueListenable: _hovered,
         builder: (context, hovered, _) => ModalStage(
           scene: StageScene.mine,
+          size: StageSize.mid,
           input: StageInput(peer: peer, hovered: hovered, picked: picked),
         ),
       ),
@@ -549,25 +556,38 @@ class _DeviceRow extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          withoutFingerprint(
+                            data.name,
+                            _shortFingerprint(data.fingerprint),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: NbText.bodyStrong.copyWith(
+                            fontSize: 15,
+                            height: 20 / 15,
+                            color: colors.text,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
                         LayoutBuilder(
-                          builder: (context, nameBox) => Row(
+                          builder: (context, lineBox) => Row(
                             children: [
                               Flexible(
                                 child: Text(
-                                  data.name,
+                                  _shortFingerprint(data.fingerprint),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: NbText.bodyStrong.copyWith(
-                                    fontSize: 15,
-                                    height: 20 / 15,
-                                    color: colors.text,
+                                  style: NbText.caption.copyWith(
+                                    letterSpacing: 0.72,
+                                    color: colors.textWeak,
                                   ),
                                 ),
                               ),
                               if (data.mine)
                                 ConstrainedBox(
                                   constraints: BoxConstraints(
-                                    maxWidth: nameBox.maxWidth,
+                                    maxWidth: lineBox.maxWidth,
                                   ),
                                   child: Padding(
                                     padding: const EdgeInsets.only(left: 8),
@@ -579,16 +599,6 @@ class _DeviceRow extends StatelessWidget {
                                   ),
                                 ),
                             ],
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          _shortFingerprint(data.fingerprint),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: NbText.caption.copyWith(
-                            letterSpacing: 0.72,
-                            color: colors.textWeak,
                           ),
                         ),
                       ],

@@ -137,7 +137,7 @@ final class AppStringsEn implements AppStrings {
   String connectingTo(String name) => 'Connecting to $name…';
 
   @override
-  String compareCode(String name) => 'Check that $name shows this code:';
+  String compareCode(String name) => 'Check that $name shows the same code.';
 
   @override
   String get matchesButton => 'It matches';

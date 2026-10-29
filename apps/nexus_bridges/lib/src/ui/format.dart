@@ -6,6 +6,30 @@ const int _dot = 0x2E;
 
 const List<String> _units = ['KB', 'MB', 'GB', 'TB'];
 
+const String _zeroWidthSpace = '\u200B';
+
+const String _nonBreakingSpace = '\u00A0';
+
+const String _backslash = r'\';
+
+const String _separatorDot = '·';
+
+String breakablePath(String path) =>
+    path.replaceAll(_backslash, '$_backslash$_zeroWidthSpace');
+
+String glueFingerprint(String label, String short) {
+  final tail = ' $_separatorDot $short';
+  if (!label.endsWith(tail)) return label;
+  return '${label.substring(0, label.length - tail.length)}'
+      '$_nonBreakingSpace$_separatorDot$_nonBreakingSpace$short';
+}
+
+String withoutFingerprint(String label, String short) {
+  final tail = ' $_separatorDot $short';
+  if (!label.endsWith(tail)) return label;
+  return label.substring(0, label.length - tail.length);
+}
+
 String formatSize(int bytes, String languageCode) {
   if (bytes < 1024) return bytes == 1 ? '1 byte' : '$bytes bytes';
   var value = bytes / 1024;

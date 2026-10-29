@@ -299,7 +299,7 @@ class _WarningCard extends StatelessWidget {
 }
 
 String? _problemLine(AppStrings strings, FolderQuestionView folder) {
-  final path = folder.problemPath ?? folder.proposedPath;
+  final path = breakablePath(folder.problemPath ?? folder.proposedPath);
   if (path.isEmpty) return null;
   return switch (folder.problem) {
     FolderProblem.forbidden => strings.folderForbidden(path),
@@ -312,8 +312,9 @@ String? _problemLine(AppStrings strings, FolderQuestionView folder) {
 }
 
 List<String> _cautionLines(AppStrings strings, FolderQuestionView folder) {
-  final path = folder.cautionPath;
-  if (path == null) return const [];
+  final cautionPath = folder.cautionPath;
+  if (cautionPath == null) return const [];
+  final path = breakablePath(cautionPath);
   return [
     if (folder.cautionNoMark) strings.cautionNoMark(path),
     if (folder.cautionRemote) strings.cautionRemote(path),
@@ -403,7 +404,9 @@ class _FolderQuestionCard extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: _Note(
-                        text: strings.proposedFolderLine(folder.proposedPath),
+                        text: strings.proposedFolderLine(
+                          breakablePath(folder.proposedPath),
+                        ),
                         strong: true,
                       ),
                     ),

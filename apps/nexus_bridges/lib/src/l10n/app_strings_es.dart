@@ -138,7 +138,8 @@ final class AppStringsEs implements AppStrings {
   String connectingTo(String name) => 'Conectando con $name…';
 
   @override
-  String compareCode(String name) => 'Comprueba que $name muestra este código:';
+  String compareCode(String name) =>
+      'Comprueba que $name muestra el mismo código.';
 
   @override
   String get matchesButton => 'Coincide';

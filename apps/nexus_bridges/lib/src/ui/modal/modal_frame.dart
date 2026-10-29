@@ -251,8 +251,10 @@ class ModalView extends StatelessWidget {
         child: Text(
           title,
           textAlign: TextAlign.center,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+          maxLines: layout == ModalViewLayout.result ? null : 2,
+          overflow: layout == ModalViewLayout.result
+              ? TextOverflow.clip
+              : TextOverflow.ellipsis,
           style: NbText.title.copyWith(
             fontSize: fontSize,
             height: lineHeight / fontSize,

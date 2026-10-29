@@ -206,7 +206,7 @@ class _CardHeader extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 24),
       child: Row(
         children: [
-          Flexible(
+          Expanded(
             child: Text(
               title,
               style: NbText.bodyStrong.copyWith(color: colors.text),
