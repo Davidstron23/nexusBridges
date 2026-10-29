@@ -312,8 +312,9 @@ bool _showsPaired(NodeState state) =>
 Duration get _sceneLength {
   final spec = stageSpecOf(StageScene.paired, const StageInput());
   return Duration(
-    microseconds: (spec.introEnd * Duration.microsecondsPerSecond).round(),
-  );
+        microseconds: (spec.introEnd * Duration.microsecondsPerSecond).round(),
+      ) +
+      pairedSceneHold;
 }
 
 void main() {

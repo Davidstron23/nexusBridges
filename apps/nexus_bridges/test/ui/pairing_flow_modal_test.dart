@@ -151,7 +151,8 @@ Future<_FlowController> _mount(
 
 final int _sceneMs =
     (stageSpecOf(StageScene.paired, const StageInput()).introEnd * 1000)
-        .round();
+        .round() +
+    pairedSceneHold.inMilliseconds;
 
 Future<void> _ms(WidgetTester tester, int milliseconds) =>
     tester.pump(Duration(milliseconds: milliseconds));

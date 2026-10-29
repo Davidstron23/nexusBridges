@@ -23,6 +23,8 @@ const int _shortFingerprintLength = 8;
 
 const Duration pairedStillHold = Duration(milliseconds: 1500);
 
+const Duration pairedSceneHold = Duration(milliseconds: 1200);
+
 String formatCode(String code) {
   return '${code.substring(0, 3)} ${code.substring(3)}';
 }
@@ -330,8 +332,10 @@ class _PairingViewState extends State<_PairingView>
       StageInput(peer: widget.peer),
     );
     return Duration(
-      microseconds: (spec.introEnd * Duration.microsecondsPerSecond).round(),
-    );
+          microseconds: (spec.introEnd * Duration.microsecondsPerSecond)
+              .round(),
+        ) +
+        pairedSceneHold;
   }
 
   void _onSceneDone() {
