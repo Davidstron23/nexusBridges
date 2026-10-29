@@ -846,7 +846,7 @@ void main() {
           expect(find.text(strings.replaceTitle(name)), findsNothing);
         }
 
-        await step(3200);
+        await step(3200 + pairedSceneHold.inMilliseconds);
         expect(_view().title, strings.outcomePaired(peerName));
         expect(controller.calls, isEmpty);
         await step(200);
