@@ -11,6 +11,7 @@ import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
 import 'package:nexus_bridges/src/ui/icons/glyphs.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
+import 'package:nexus_bridges/src/ui/soft_button.dart';
 import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
@@ -505,7 +506,10 @@ void main() {
           expect(send, row.hasSend ? findsOneWidget : findsNothing);
           if (row.hasSend) {
             final button = tester.widget<ButtonStyleButton>(send);
-            expect(button, isA<FilledButton>());
+            expect(
+              find.ancestor(of: send, matching: find.byType(SoftButton)),
+              findsOneWidget,
+            );
             expect(button.onPressed != null, row.canSend);
             expect(row.entry.canSendFile, row.canSend);
             expect(
@@ -847,22 +851,23 @@ void main() {
         await mouse.moveTo(tester.getCenter(_row(_mineFp)));
         await tester.pump();
         expect(hovered.value, _mineFp);
+        await tester.pump(rowHoverFade);
         expect(_hoverFill(_mineFp, colors.surfaceWeak), findsOneWidget);
         expect(_hoverFill(_foreignFp, colors.surfaceWeak), findsNothing);
-        await tester.pump(const Duration(milliseconds: 250));
         expect(_painter(tester).scene.hovered, _mineFp);
 
         await mouse.moveTo(tester.getCenter(_row(_foreignFp)));
         await tester.pump();
         expect(hovered.value, _foreignFp);
+        await tester.pump(rowHoverFade);
         expect(_hoverFill(_mineFp, colors.surfaceWeak), findsNothing);
         expect(_hoverFill(_foreignFp, colors.surfaceWeak), findsOneWidget);
 
         await mouse.moveTo(const Offset(1, 599));
         await tester.pump();
         expect(hovered.value, isNull);
+        await tester.pump(rowHoverFade);
         expect(_hoverFill(_foreignFp, colors.surfaceWeak), findsNothing);
-        await tester.pump(const Duration(milliseconds: 250));
         await tester.pump();
         expect(_painter(tester).scene.hovered, isNull);
       });
@@ -885,6 +890,7 @@ void main() {
         await tester.pump();
 
         expect(_rowWidget(tester, _foreignFp).hovered.value, _foreignFp);
+        await tester.pump(rowHoverFade);
         expect(_hoverFill(_foreignFp, colors.surfaceWeak), findsOneWidget);
         expect(_hoverFill(_mineFp, colors.surfaceWeak), findsNothing);
         await mouse.moveTo(const Offset(1, 599));

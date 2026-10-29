@@ -5,6 +5,8 @@ import '../app_controller.dart';
 import '../l10n/app_strings.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
+import 'soft_button.dart';
+import 'row_menu.dart';
 import 'send_action.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
@@ -100,9 +102,9 @@ class DeviceList extends StatelessWidget {
   }
 }
 
-enum _RowAction { toggleMine, unpair }
+const Duration rowHoverFade = Duration(milliseconds: 250);
 
-class DeviceRow extends StatelessWidget {
+class DeviceRow extends StatefulWidget {
   const DeviceRow({
     required this.controller,
     required this.entry,
@@ -115,6 +117,17 @@ class DeviceRow extends StatelessWidget {
   final DeviceEntry entry;
   final DiscTone tone;
   final ValueNotifier<String?> hovered;
+
+  @override
+  State<DeviceRow> createState() => _DeviceRowState();
+}
+
+class _DeviceRowState extends State<DeviceRow> {
+  bool _menuOpen = false;
+
+  AppController get controller => widget.controller;
+  DeviceEntry get entry => widget.entry;
+  ValueNotifier<String?> get hovered => widget.hovered;
 
   Future<void> _pair(BuildContext context) async {
     final result = await controller.pair(entry.fingerprint);
@@ -140,15 +153,6 @@ class DeviceRow extends StatelessWidget {
     );
   }
 
-  void _onMenu(BuildContext context, _RowAction action) {
-    switch (action) {
-      case _RowAction.toggleMine:
-        controller.setMine(entry.fingerprint, mine: !entry.mine);
-      case _RowAction.unpair:
-        _unpair(context);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final strings = AppStringsDelegate.of(context);
@@ -172,10 +176,9 @@ class DeviceRow extends StatelessWidget {
           );
     final actions = <Widget>[
       if (entry.paired)
-        FilledButton.tonalIcon(
-          style: smallButton,
-          icon: const GlyphIcon(Glyphs.send, size: 14),
-          label: Text(strings.sendFileButton),
+        SoftButton(
+          glyph: Glyphs.send,
+          label: strings.sendFileButton,
           onPressed: entry.canSendFile
               ? () => startSend(context, controller, entry.fingerprint)
               : null,
@@ -212,10 +215,18 @@ class DeviceRow extends StatelessWidget {
       },
       child: ValueListenableBuilder<String?>(
         valueListenable: hovered,
-        builder: (context, current, child) => ColoredBox(
-          color: current == entry.fingerprint
-              ? colors.surfaceWeak
-              : Colors.transparent,
+        builder: (context, current, child) => TweenAnimationBuilder<Color?>(
+          tween: ColorTween(
+            end: current == entry.fingerprint || _menuOpen
+                ? colors.surfaceWeak
+                : colors.surfaceWeak.withValues(alpha: 0),
+          ),
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : rowHoverFade,
+          curve: Curves.ease,
+          builder: (context, fill, child) =>
+              ColoredBox(color: fill ?? Colors.transparent, child: child),
           child: child,
         ),
         child: Padding(
@@ -223,7 +234,7 @@ class DeviceRow extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              DeviceDisc(type: entry.deviceType, tone: tone),
+              DeviceDisc(type: entry.deviceType, tone: widget.tone),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -243,29 +254,30 @@ class DeviceRow extends StatelessWidget {
                           ),
                         ),
                         if (entry.paired)
-                          SizedBox(
-                            width: 28,
-                            height: 20,
-                            child: PopupMenuButton<_RowAction>(
-                              tooltip: strings.moreOptions,
-                              padding: EdgeInsets.zero,
-                              icon: const GlyphIcon(Glyphs.more),
-                              onSelected: (action) => _onMenu(context, action),
-                              itemBuilder: (_) => [
-                                PopupMenuItem(
-                                  value: _RowAction.toggleMine,
-                                  child: Text(
-                                    entry.mine
-                                        ? strings.markAsForeign
-                                        : strings.markAsMine,
-                                  ),
+                          RowMenu(
+                            tooltip: strings.moreOptions,
+                            onOpenChanged: (open) =>
+                                setState(() => _menuOpen = open),
+                            entries: [
+                              RowMenuEntry(
+                                label: entry.mine
+                                    ? strings.markAsForeign
+                                    : strings.markAsMine,
+                                glyph: entry.mine
+                                    ? Glyphs.someoneElse
+                                    : Glyphs.mine,
+                                onSelected: () => controller.setMine(
+                                  entry.fingerprint,
+                                  mine: !entry.mine,
                                 ),
-                                PopupMenuItem(
-                                  value: _RowAction.unpair,
-                                  child: Text(strings.unpairButton),
-                                ),
-                              ],
-                            ),
+                              ),
+                              RowMenuEntry(
+                                label: strings.unpairButton,
+                                glyph: Glyphs.unlink,
+                                danger: true,
+                                onSelected: () => _unpair(context),
+                              ),
+                            ],
                           ),
                       ],
                     ),

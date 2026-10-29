@@ -9,6 +9,7 @@ import '../../l10n/app_strings.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
 import '../icons/glyphs.dart';
+import '../soft_button.dart';
 import '../theme/app_theme.dart';
 import '../theme/components.dart';
 import '../theme/tokens.dart';
@@ -520,9 +521,10 @@ class _FlowPopover extends StatelessWidget {
                 const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
-                  child: FilledButton.tonalIcon(
-                    icon: const GlyphIcon(Glyphs.send, size: 14),
-                    label: Text(strings.sendFileButton),
+                  child: SoftButton(
+                    glyph: Glyphs.send,
+                    label: strings.sendFileButton,
+                    height: 32,
                     onPressed: entry.canSendFile ? onSend : null,
                   ),
                 ),

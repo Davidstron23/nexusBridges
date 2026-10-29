@@ -381,10 +381,10 @@ class _ColumnTabs extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.segment,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(_trackRadius),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(3),
+        padding: const EdgeInsets.all(_trackPadding),
         child: SizedBox(
           height: _tabHeight,
           child: Stack(
@@ -420,7 +420,13 @@ class _ColumnTabs extends StatelessWidget {
 
 const double _tabHeight = 32;
 
-const Duration _thumbSlide = Duration(milliseconds: 220);
+const double _trackPadding = 4;
+
+const double _thumbRadius = 8;
+
+const double _trackRadius = _thumbRadius + _trackPadding;
+
+const Duration _thumbSlide = Duration(milliseconds: 380);
 
 class _TabThumb extends StatelessWidget {
   const _TabThumb({required this.activity});
@@ -442,7 +448,7 @@ class _TabThumb extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: colors.card,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(_thumbRadius),
             boxShadow: [
               BoxShadow(
                 color: colors.nodeShadow,
@@ -482,7 +488,7 @@ class _TabZone extends StatelessWidget {
         child: Material(
           type: MaterialType.transparency,
           child: InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(_thumbRadius),
             mouseCursor: active
                 ? SystemMouseCursors.basic
                 : SystemMouseCursors.click,
@@ -495,15 +501,24 @@ class _TabZone extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: NbText.button.copyWith(
-                        color: active ? colors.text : colors.textWeak,
-                        fontVariations: [
-                          FontVariation.weight(colors.headingWeight),
-                        ],
+                    child: TweenAnimationBuilder<Color?>(
+                      tween: ColorTween(
+                        end: active ? colors.text : colors.textWeak,
+                      ),
+                      duration: MediaQuery.disableAnimationsOf(context)
+                          ? Duration.zero
+                          : _thumbSlide,
+                      curve: Curves.ease,
+                      builder: (context, ink, _) => Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: NbText.button.copyWith(
+                          color: ink,
+                          fontVariations: [
+                            FontVariation.weight(colors.headingWeight),
+                          ],
+                        ),
                       ),
                     ),
                   ),

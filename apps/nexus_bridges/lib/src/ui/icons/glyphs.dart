@@ -341,11 +341,18 @@ void paintGlyph(
 }
 
 class GlyphIcon extends StatelessWidget {
-  const GlyphIcon(this.glyph, {this.size = 16, this.color, super.key});
+  const GlyphIcon(
+    this.glyph, {
+    this.size = 16,
+    this.color,
+    this.strokeScale = 1,
+    super.key,
+  });
 
   final Glyph glyph;
   final double size;
   final Color? color;
+  final double strokeScale;
 
   @override
   Widget build(BuildContext context) {
@@ -354,24 +361,41 @@ class GlyphIcon extends StatelessWidget {
     return ExcludeSemantics(
       child: CustomPaint(
         size: Size.square(size),
-        painter: _GlyphPainter(glyph: glyph, color: ink),
+        painter: _GlyphPainter(
+          glyph: glyph,
+          color: ink,
+          strokeScale: strokeScale,
+        ),
       ),
     );
   }
 }
 
 class _GlyphPainter extends CustomPainter {
-  const _GlyphPainter({required this.glyph, required this.color});
+  const _GlyphPainter({
+    required this.glyph,
+    required this.color,
+    required this.strokeScale,
+  });
 
   final Glyph glyph;
   final Color color;
+  final double strokeScale;
 
   @override
   void paint(Canvas canvas, Size size) {
-    paintGlyph(canvas, glyph, Offset.zero & size, color);
+    paintGlyph(
+      canvas,
+      glyph,
+      Offset.zero & size,
+      color,
+      strokeScale: strokeScale,
+    );
   }
 
   @override
   bool shouldRepaint(_GlyphPainter oldDelegate) =>
-      oldDelegate.glyph != glyph || oldDelegate.color != color;
+      oldDelegate.glyph != glyph ||
+      oldDelegate.color != color ||
+      oldDelegate.strokeScale != strokeScale;
 }

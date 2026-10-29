@@ -959,7 +959,7 @@ void main() {
           expect(textColor(tester, strings.devicesTab), colors.textWeak);
         });
 
-        testWidgets('the thumb slides from one tab to the other in 220 ms', (
+        testWidgets('the thumb slides from one tab to the other in 380 ms', (
           tester,
         ) async {
           await mount(tester);
@@ -969,13 +969,61 @@ void main() {
           await tester.tap(find.text(strings.activityTab));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 60));
+          final early = thumbRect(tester);
+          expect(early.left, lessThan(from.left));
+          expect(early.left, greaterThan(to.left));
+          expect(early.width, from.width);
+
+          await tester.pump(const Duration(milliseconds: 160));
           final middle = thumbRect(tester);
-          expect(middle.left, lessThan(from.left));
+          expect(middle.left, lessThan(early.left));
           expect(middle.left, greaterThan(to.left));
-          expect(middle.width, from.width);
+          expect(
+            textColor(tester, strings.activityTab),
+            isNot(colors.textWeak),
+          );
 
           await tester.pump(const Duration(milliseconds: 160));
           expect(thumbRect(tester), to);
+          expect(textColor(tester, strings.activityTab), colors.text);
+          expect(textColor(tester, strings.devicesTab), colors.textWeak);
+        });
+
+        testWidgets('the track leaves 4 px of air around the thumb, with '
+            'concentric corners of 12 and 8', (tester) async {
+          await mount(tester);
+
+          final track = find.ancestor(
+            of: _tab(strings.devicesTab),
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is DecoratedBox &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration as BoxDecoration).color == colors.segment,
+            ),
+          );
+          final trackBox = tester.widget<DecoratedBox>(track);
+          expect(
+            (trackBox.decoration as BoxDecoration).borderRadius,
+            BorderRadius.circular(12),
+          );
+          final thumbBox = tester.widget<DecoratedBox>(
+            find.descendant(of: _thumb, matching: find.byType(DecoratedBox)),
+          );
+          expect(
+            (thumbBox.decoration as BoxDecoration).borderRadius,
+            BorderRadius.circular(8),
+          );
+          final outer = tester.getRect(track);
+          final thumb = thumbRect(tester);
+          expect(thumb.top - outer.top, 4);
+          expect(outer.bottom - thumb.bottom, 4);
+          expect(outer.right - thumb.right, 4);
+          expect(thumb.height, 32);
+
+          await tester.tap(find.text(strings.activityTab));
+          await tester.pumpAndSettle();
+          expect(thumbRect(tester).left - outer.left, 4);
         });
 
         testWidgets('with reduced motion the thumb jumps without sliding', (

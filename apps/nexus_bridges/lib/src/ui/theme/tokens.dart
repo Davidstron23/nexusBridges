@@ -65,6 +65,11 @@ final class NbColors extends ThemeExtension<NbColors> {
     required this.buttonHighlight,
     required this.buttonHighlightHover,
     required this.headingWeight,
+    required this.menuSurface,
+    required this.menuBorder,
+    required this.menuShadow,
+    required this.controlHover,
+    required this.softButtonHoverShadow,
   });
 
   final Color primary;
@@ -130,6 +135,11 @@ final class NbColors extends ThemeExtension<NbColors> {
   final Color buttonHighlight;
   final Color buttonHighlightHover;
   final double headingWeight;
+  final Color menuSurface;
+  final Color menuBorder;
+  final List<BoxShadow> menuShadow;
+  final Color controlHover;
+  final List<BoxShadow> softButtonHoverShadow;
 
   static const NbColors light = NbColors(
     primary: Color(0xFF6D4AFF),
@@ -274,6 +284,35 @@ final class NbColors extends ThemeExtension<NbColors> {
     buttonHighlight: Color.fromRGBO(255, 255, 255, 0.2),
     buttonHighlightHover: Color.fromRGBO(255, 255, 255, 0.24),
     headingWeight: 650,
+    menuSurface: Color(0xFFFFFFFF),
+    menuBorder: Color(0xFFDAD6EA),
+    menuShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.08),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.18),
+        offset: Offset(0, 10),
+        blurRadius: 28,
+        spreadRadius: -4,
+      ),
+    ],
+    controlHover: Color.fromRGBO(35, 28, 56, 0.07),
+    softButtonHoverShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(35, 28, 56, 0.16),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(109, 74, 255, 0.55),
+        offset: Offset(0, 6),
+        blurRadius: 14,
+        spreadRadius: -6,
+      ),
+    ],
   );
 
   static const NbColors dark = NbColors(
@@ -400,6 +439,35 @@ final class NbColors extends ThemeExtension<NbColors> {
     buttonHighlight: Color.fromRGBO(255, 255, 255, 0.22),
     buttonHighlightHover: Color.fromRGBO(255, 255, 255, 0.26),
     headingWeight: 600,
+    menuSurface: Color(0xFF322F3F),
+    menuBorder: Color(0xFF45415A),
+    menuShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(0, 0, 0, 0.4),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(0, 0, 0, 0.6),
+        offset: Offset(0, 12),
+        blurRadius: 32,
+        spreadRadius: -4,
+      ),
+    ],
+    controlHover: Color.fromRGBO(255, 255, 255, 0.08),
+    softButtonHoverShadow: [
+      BoxShadow(
+        color: Color.fromRGBO(40, 18, 140, 0.35),
+        offset: Offset(0, 1),
+        blurRadius: 2,
+      ),
+      BoxShadow(
+        color: Color.fromRGBO(109, 74, 255, 0.75),
+        offset: Offset(0, 8),
+        blurRadius: 18,
+        spreadRadius: -6,
+      ),
+    ],
   );
 
   static NbColors of(BuildContext context) {
@@ -473,6 +541,11 @@ final class NbColors extends ThemeExtension<NbColors> {
     Color? buttonHighlight,
     Color? buttonHighlightHover,
     double? headingWeight,
+    Color? menuSurface,
+    Color? menuBorder,
+    List<BoxShadow>? menuShadow,
+    Color? controlHover,
+    List<BoxShadow>? softButtonHoverShadow,
   }) {
     return NbColors(
       primary: primary ?? this.primary,
@@ -540,6 +613,12 @@ final class NbColors extends ThemeExtension<NbColors> {
       buttonHighlight: buttonHighlight ?? this.buttonHighlight,
       buttonHighlightHover: buttonHighlightHover ?? this.buttonHighlightHover,
       headingWeight: headingWeight ?? this.headingWeight,
+      menuSurface: menuSurface ?? this.menuSurface,
+      menuBorder: menuBorder ?? this.menuBorder,
+      menuShadow: menuShadow ?? this.menuShadow,
+      controlHover: controlHover ?? this.controlHover,
+      softButtonHoverShadow:
+          softButtonHoverShadow ?? this.softButtonHoverShadow,
     );
   }
 
