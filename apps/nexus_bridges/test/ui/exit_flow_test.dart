@@ -17,9 +17,12 @@ import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges/src/ui/modal/stage.dart';
 import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
 import 'package:nexus_bridges/src/ui/theme/tokens.dart';
+import 'package:nexus_bridges/src/ui/unpair_modal.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
+import 'cover_fixtures.dart';
 import 'fake_app_controller.dart';
+import 'lifecycle_fixtures.dart';
 import 'pairing_fixtures.dart' show entry;
 import 'segoe_font.dart';
 import 'transfer_fixtures.dart'
@@ -1319,5 +1322,281 @@ void main() {
         });
       }
     }
+  });
+
+  group('H1 the close with a send is never answered by another modal '
+      '(RF-185 of the 005, RF-186 of the 004)', () {
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+      final closeTitle = strings.closeDuringTransferTitle;
+      const unpairName = 'Portátil de Ana';
+
+      testWidgets('[$code] unpair confirmed and the window X 300 ms later: at '
+          '2 s the close question is still open, nothing is shut down and '
+          'the unpair has answered true once', (tester) async {
+        final key = await _pumpHost(
+          tester,
+          languageCode: code,
+          reduceMotion: false,
+        );
+        var confirms = 0;
+        final unpair = _Pending(
+          confirmUnpairDevice(
+            key.currentContext!,
+            name: unpairName,
+            type: DeviceType.mobile,
+            onConfirm: () async {
+              confirms++;
+            },
+          ),
+        );
+        await tester.pump();
+        await tester.pump(modalTransitionDuration);
+        await tester.tap(
+          modalButtonIn(
+            modalWith(strings.unpairTitle(unpairName)),
+            strings.unpairButton,
+          ),
+        );
+        expect(confirms, 1);
+        await tester.pump(const Duration(milliseconds: 300));
+
+        final controller = FakeAppController(state: _sending);
+        final request = _exit(controller, key);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1700));
+
+        expect(request.finished, isFalse);
+        expect(controller.calls, isEmpty);
+        expect(find.text(closeTitle), findsOneWidget);
+        expect(routeOf(tester, modalWith(closeTitle)).isCurrent, isTrue);
+        expect(unpair.result, isTrue);
+        expect(confirms, 1);
+        expect(find.text(strings.unpairTitle(unpairName)), findsNothing);
+
+        await tester.tap(
+          modalButtonIn(modalWith(closeTitle), strings.keepOpenButton),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await request.done;
+        expect(request.result, AppExitResponse.cancel);
+        expect(controller.calls, isEmpty);
+        await unpair.done;
+      });
+
+      for (final reduceMotion in const [true, false]) {
+        for (final (label, expected) in [
+          (strings.keepOpenButton, false),
+          (strings.closeAndCancelButton, true),
+        ]) {
+          testWidgets('[$code] "$label" landing in the same frame a route is '
+              'pushed on top answers $expected and leaves that route open '
+              '(reduceMotion: $reduceMotion)', (tester) async {
+            final key = await _pumpHost(
+              tester,
+              languageCode: code,
+              reduceMotion: reduceMotion,
+            );
+            final answer = _Pending(
+              confirmCloseDuringTransfer(
+                key.currentContext!,
+                FakeAppController(state: _sending),
+              ),
+            );
+            await tester.pump();
+            await tester.pump(modalTransitionDuration);
+            await tester.pump(const Duration(milliseconds: 100));
+            final closeRoute = routeOf(tester, modalWith(closeTitle));
+            final action = modalButtonAction(
+              tester,
+              modalWith(closeTitle),
+              label,
+            );
+
+            final cover = pushCover(key.currentContext!);
+            action();
+            await tester.pump();
+            expect(closeRoute.isActive, isFalse);
+            expect(answer.result, expected);
+            await tester.pump(modalTransitionDuration);
+            await tester.pump(const Duration(milliseconds: 400));
+
+            expect(cover.finished, isFalse);
+            expect(cover.taps, 0);
+            expect(cover.route.isCurrent, isTrue);
+            expect(find.text(closeTitle), findsNothing);
+            expect(find.byType(NbModal), findsOneWidget);
+            await answer.done;
+          });
+        }
+      }
+    }
+  });
+
+  group('H2 the close with a send is off while covered and for 500 ms after '
+      '(RF-185 of the 005, point 243)', () {
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+      final closeTitle = strings.closeDuringTransferTitle;
+      final labels = [strings.keepOpenButton, strings.closeAndCancelButton];
+
+      List<bool> states(WidgetTester tester) =>
+          modalButtonStates(tester, modalWith(closeTitle), labels);
+
+      for (final reduceMotion in const [false, true]) {
+        for (final gap in const [Duration.zero, Duration(milliseconds: 120)]) {
+          testWidgets('[$code] a double click on the cover over "Close and '
+              'cancel" does not answer; both buttons stay off until 500 ms '
+              'after the cover leaves (reduceMotion: $reduceMotion, gap: '
+              '${gap.inMilliseconds} ms)', (tester) async {
+            final key = await _pumpHost(
+              tester,
+              languageCode: code,
+              reduceMotion: reduceMotion,
+            );
+            final answer = _Pending(
+              confirmCloseDuringTransfer(
+                key.currentContext!,
+                FakeAppController(state: _sending),
+              ),
+            );
+            await tester.pump();
+            await tester.pump(modalTransitionDuration);
+            expect(states(tester), [true, true]);
+
+            final cover = pushCover(key.currentContext!);
+            await tester.pump();
+            expect(states(tester), [false, false]);
+            await tester.pump(modalTransitionDuration);
+            await tester.pump(const Duration(seconds: 2));
+            expect(states(tester), [false, false]);
+
+            final point = overlapCenter(
+              tester,
+              modalButtonIn(
+                modalWith(closeTitle),
+                strings.closeAndCancelButton,
+              ),
+              coverButton,
+            );
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(cover.result, coverResult);
+            if (gap > Duration.zero) await tester.pump(gap);
+            await tester.tapAt(point);
+            await tester.pump();
+
+            expect(cover.taps, 1);
+            expect(answer.finished, isFalse);
+            expect(states(tester), [false, false]);
+
+            await tester.pump(const Duration(milliseconds: 480) - gap);
+            expect(states(tester), [false, false]);
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(answer.finished, isFalse);
+
+            await tester.pump(const Duration(milliseconds: 40));
+            expect(states(tester), [true, true]);
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(answer.result, isTrue);
+            await tester.pump(const Duration(milliseconds: 400));
+            await tester.pump();
+            expect(find.byType(NbModal), findsNothing);
+            await answer.done;
+          });
+        }
+      }
+    }
+  });
+
+  group('coverOnly: the close with a send has no delay and ignores the '
+      'lifecycle (points 159 and 243)', () {
+    final strings = stringsFor('en');
+    final closeTitle = strings.closeDuringTransferTitle;
+    final labels = [strings.keepOpenButton, strings.closeAndCancelButton];
+
+    List<bool> states(WidgetTester tester) =>
+        modalButtonStates(tester, modalWith(closeTitle), labels);
+
+    for (final reduceMotion in const [false, true]) {
+      testWidgets('both buttons are on in the very first frame '
+          '(reduceMotion: $reduceMotion)', (tester) async {
+        final key = await _pumpHost(tester, reduceMotion: reduceMotion);
+        final answer = _Pending(
+          confirmCloseDuringTransfer(
+            key.currentContext!,
+            FakeAppController(state: _sending),
+          ),
+        );
+        await tester.pump();
+
+        expect(states(tester), [true, true]);
+        await tester.pump(modalTransitionDuration);
+        await tester.tap(
+          modalButtonIn(modalWith(closeTitle), strings.closeAndCancelButton),
+        );
+        await tester.pump();
+        expect(answer.result, isTrue);
+        await tester.pump(const Duration(milliseconds: 400));
+        await answer.done;
+      });
+    }
+
+    for (final target in const [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      testWidgets('going to ${target.name} and back keeps both buttons on', (
+        tester,
+      ) async {
+        resumeOnTearDown(tester);
+        await stepLifecycle(tester, AppLifecycleState.resumed);
+        final key = await _pumpHost(tester);
+        final answer = _Pending(
+          confirmCloseDuringTransfer(
+            key.currentContext!,
+            FakeAppController(state: _sending),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        for (final state in lifecyclePath(AppLifecycleState.resumed, target)) {
+          await stepLifecycle(tester, state);
+          expect(states(tester), [true, true], reason: state.name);
+        }
+        await tester.pump(const Duration(seconds: 1));
+        expect(states(tester), [true, true]);
+        for (final state in lifecyclePath(target, AppLifecycleState.resumed)) {
+          await stepLifecycle(tester, state);
+          expect(states(tester), [true, true], reason: state.name);
+        }
+        await _tapAndSettle(tester, strings.keepOpenButton);
+        expect(answer.result, isFalse);
+        await answer.done;
+      });
+    }
+
+    testWidgets('asked with the app inactive, both buttons are on in the '
+        'first frame', (tester) async {
+      resumeOnTearDown(tester);
+      final key = await _pumpHost(tester);
+      await goToLifecycle(tester, AppLifecycleState.inactive);
+      final answer = _Pending(
+        confirmCloseDuringTransfer(
+          key.currentContext!,
+          FakeAppController(state: _sending),
+        ),
+      );
+      await tester.pump();
+
+      expect(states(tester), [true, true]);
+      await _tapAndSettle(tester, strings.keepOpenButton);
+      expect(answer.result, isFalse);
+      await answer.done;
+    });
   });
 }

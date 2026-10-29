@@ -3,13 +3,17 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges/src/ui/modal/stage.dart';
 import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
+import 'cover_fixtures.dart';
 import 'fake_app_controller.dart';
+import 'lifecycle_fixtures.dart';
+import 'pairing_fixtures.dart' show peerName, view;
 import 'segoe_font.dart';
 
 const _home = NetworkPrompt('net-home', 'Casa');
@@ -17,6 +21,23 @@ const _office = NetworkPrompt('net-office', 'Oficina');
 
 NodeState _asking(List<NetworkPrompt> prompts) {
   return NodeState(paused: true, pausedNetworks: prompts, prompts: prompts);
+}
+
+class _ClosingController extends FakeAppController {
+  _ClosingController({super.state});
+
+  @override
+  void dismissPairing() {
+    super.dismissPairing();
+    final current = state!;
+    emit(
+      NodeState(
+        paused: current.paused,
+        pausedNetworks: current.pausedNetworks,
+        prompts: current.prompts,
+      ),
+    );
+  }
 }
 
 Future<void> _pumpStill(
@@ -972,5 +993,320 @@ void main() {
         });
       }
     }
+  });
+
+  group('H1 "Use here" closes its own route, never the one on top (RF-11 and '
+      'RF-13 of the 002)', () {
+    const greenTime = Duration(milliseconds: 900);
+    const routeGone = Duration(milliseconds: 400);
+
+    Future<void> pumpMoving(
+      WidgetTester tester,
+      FakeAppController controller,
+      String code, {
+      bool reduceMotion = false,
+    }) async {
+      await pumpHome(
+        tester,
+        controller,
+        code,
+        settle: false,
+        reduceMotion: reduceMotion,
+      );
+      await tester.pump();
+      await tester.pump(modalTransitionDuration);
+    }
+
+    BuildContext homeContext(WidgetTester tester) =>
+        tester.element(find.byType(HomeScreen));
+
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+      final question = modalWith(strings.networkPromptTitle);
+
+      testWidgets('[$code] a modal route pushed on top during the 0.9 s stays '
+          'open and untouched; the question leaves from under it, decided '
+          'once and never dismissed', (tester) async {
+        final controller = FakeAppController(state: _asking(const [_home]));
+        await pumpMoving(tester, controller, code);
+
+        await tester.tap(modalButtonIn(question, strings.yes));
+        await tester.pump(const Duration(milliseconds: 300));
+        final cover = pushCover(homeContext(tester));
+        await tester.pump();
+        await tester.pump(greenTime);
+        await tester.pump(routeGone);
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(cover.finished, isFalse);
+        expect(cover.taps, 0);
+        expect(cover.route.isCurrent, isTrue);
+        expect(cover.route.animation!.status, AnimationStatus.completed);
+        expect(find.text(strings.networkPromptTitle), findsNothing);
+        expect(_modal, findsOneWidget);
+        expect(controller.calls, ['decideNetwork net-home trusted']);
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(coverButton);
+        await tester.pump();
+        await tester.pump(routeGone);
+        await tester.pump();
+        expect(cover.result, coverResult);
+        expect(_modal, findsNothing);
+        expect(controller.calls, ['decideNetwork net-home trusted']);
+      });
+
+      testWidgets('[$code] a pairing that PairingHost opens on top during the '
+          '0.9 s keeps its route; the question leaves from under it, decided '
+          'once and never dismissed', (tester) async {
+        final controller = FakeAppController(state: _asking(const [_home]));
+        await pumpMoving(tester, controller, code);
+
+        await tester.tap(modalButtonIn(question, strings.yes));
+        await tester.pump(const Duration(milliseconds: 300));
+        controller.emit(
+          NodeState(
+            paused: true,
+            pausedNetworks: const [_home],
+            prompts: const [_home],
+            pairing: view(
+              role: PairingRole.receiver,
+              phase: PairingPhase.comparing,
+            ),
+          ),
+        );
+        await tester.pump();
+        final pairingRoute = routeOf(tester, _modal.last);
+        expect(pairingRoute.isCurrent, isTrue);
+        await tester.pump(const Duration(milliseconds: 1700));
+
+        expect(find.text(strings.networkPromptTitle), findsNothing);
+        expect(_modal, findsOneWidget);
+        expect(identical(routeOf(tester, _modal), pairingRoute), isTrue);
+        expect(pairingRoute.isActive, isTrue);
+        expect(pairingRoute.isCurrent, isTrue);
+        expect(pairingRoute.animation!.status, AnimationStatus.completed);
+        expect(controller.calls, ['decideNetwork net-home trusted']);
+        final pairingButtons = tester
+            .widgetList<ModalButton>(
+              find.descendant(of: _modal, matching: find.byType(ModalButton)),
+            )
+            .toList();
+        expect(pairingButtons, isNotEmpty);
+        expect(pairingButtons.every((b) => b.onPressed != null), isTrue);
+        expect(tester.takeException(), isNull);
+      });
+
+      for (final reduceMotion in const [false, true]) {
+        for (final (label, decision) in [
+          (strings.no, 'untrusted'),
+          (strings.yes, 'trusted'),
+        ]) {
+          testWidgets('[$code] "$label" landing in the same frame a route is '
+              'pushed on top decides $decision once, never dismisses, and '
+              'leaves that route open (reduceMotion: $reduceMotion)', (
+            tester,
+          ) async {
+            final controller = FakeAppController(state: _asking(const [_home]));
+            await pumpMoving(
+              tester,
+              controller,
+              code,
+              reduceMotion: reduceMotion,
+            );
+            final questionRoute = routeOf(tester, question);
+            final action = modalButtonAction(tester, question, label);
+
+            final cover = pushCover(homeContext(tester));
+            action();
+            expect(controller.calls, ['decideNetwork net-home $decision']);
+            await tester.pump();
+            await tester.pump(greenTime);
+            await tester.pump(routeGone);
+            await tester.pump(const Duration(milliseconds: 400));
+
+            expect(questionRoute.isActive, isFalse);
+            expect(cover.finished, isFalse);
+            expect(cover.taps, 0);
+            expect(cover.route.isCurrent, isTrue);
+            expect(find.text(strings.networkPromptTitle), findsNothing);
+            expect(_modal, findsOneWidget);
+            expect(controller.calls, ['decideNetwork net-home $decision']);
+          });
+        }
+      }
+    }
+  });
+
+  group('H2 the network question is off while covered by a pairing and for '
+      '500 ms after (RF-11 of the 002, point 243)', () {
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+      final question = modalWith(strings.networkPromptTitle);
+      final labels = [strings.no, strings.yes];
+
+      List<bool> states(WidgetTester tester) =>
+          modalButtonStates(tester, question, labels);
+
+      for (final reduceMotion in const [false, true]) {
+        for (final gap in const [Duration.zero, Duration(milliseconds: 120)]) {
+          testWidgets('[$code] a double click on the pairing "Close" over '
+              '"${strings.yes}" does not trust the network; both buttons stay '
+              'off until 500 ms after the pairing leaves (reduceMotion: '
+              '$reduceMotion, gap: ${gap.inMilliseconds} ms)', (tester) async {
+            final controller = _ClosingController(
+              state: _asking(const [_home]),
+            );
+            await pumpHome(
+              tester,
+              controller,
+              code,
+              settle: false,
+              reduceMotion: reduceMotion,
+            );
+            await tester.pump();
+            await tester.pump(modalTransitionDuration);
+            expect(states(tester), [true, true]);
+
+            controller.emit(
+              NodeState(
+                paused: true,
+                pausedNetworks: const [_home],
+                prompts: const [_home],
+                pairing: view(
+                  role: PairingRole.initiator,
+                  phase: PairingPhase.finished,
+                  outcome: PairingOutcome.paired,
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(states(tester), [false, false]);
+            await tester.pump(modalTransitionDuration);
+            await tester.pump(const Duration(seconds: 2));
+            expect(states(tester), [false, false]);
+
+            final close = modalButtonIn(
+              modalWith(strings.outcomePaired(peerName)),
+              strings.closeButton,
+            );
+            expect(tester.widget<ModalButton>(close).onPressed, isNotNull);
+            final point = overlapCenter(
+              tester,
+              modalButtonIn(question, strings.yes),
+              close,
+            );
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(controller.calls, ['dismissPairing']);
+            if (gap > Duration.zero) await tester.pump(gap);
+            await tester.tapAt(point);
+            await tester.pump();
+
+            expect(controller.calls, ['dismissPairing']);
+            expect(states(tester), [false, false]);
+
+            await tester.pump(const Duration(milliseconds: 480) - gap);
+            expect(states(tester), [false, false]);
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(controller.calls, ['dismissPairing']);
+
+            await tester.pump(const Duration(milliseconds: 40));
+            expect(states(tester), [true, true]);
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(controller.calls, [
+              'dismissPairing',
+              'decideNetwork net-home trusted',
+            ]);
+            await tester.pump(const Duration(milliseconds: 900));
+            await tester.pump(const Duration(milliseconds: 400));
+            await tester.pump();
+            expect(_modal, findsNothing);
+          });
+        }
+      }
+    }
+  });
+
+  group('coverOnly: the network question has no delay and ignores the '
+      'lifecycle (points 159 and 243)', () {
+    final strings = stringsFor('en');
+    final question = modalWith(strings.networkPromptTitle);
+    final labels = [strings.no, strings.yes];
+
+    List<bool> states(WidgetTester tester) =>
+        modalButtonStates(tester, question, labels);
+
+    for (final reduceMotion in const [false, true]) {
+      testWidgets('a network that arrives has both buttons on in the very '
+          'first frame of its question (reduceMotion: $reduceMotion)', (
+        tester,
+      ) async {
+        final controller = FakeAppController(state: const NodeState());
+        await pumpHome(
+          tester,
+          controller,
+          'en',
+          settle: false,
+          reduceMotion: reduceMotion,
+        );
+        expect(_modal, findsNothing);
+
+        controller.emit(_asking(const [_home]));
+        await tester.pump();
+        expect(states(tester), [true, true]);
+
+        await tester.tap(modalButtonIn(question, strings.no));
+        expect(controller.calls, ['decideNetwork net-home untrusted']);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+      });
+    }
+
+    for (final target in const [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      testWidgets('going to ${target.name} and back keeps both buttons on', (
+        tester,
+      ) async {
+        resumeOnTearDown(tester);
+        await stepLifecycle(tester, AppLifecycleState.resumed);
+        final controller = FakeAppController(state: _asking(const [_home]));
+        await _pumpStill(tester, controller, 'en');
+
+        for (final state in lifecyclePath(AppLifecycleState.resumed, target)) {
+          await stepLifecycle(tester, state);
+          expect(states(tester), [true, true], reason: state.name);
+        }
+        await tester.pump(const Duration(seconds: 1));
+        expect(states(tester), [true, true]);
+        for (final state in lifecyclePath(target, AppLifecycleState.resumed)) {
+          await stepLifecycle(tester, state);
+          expect(states(tester), [true, true], reason: state.name);
+        }
+        await tester.tap(modalButtonIn(question, strings.yes));
+        await tester.pumpAndSettle();
+        expect(controller.calls, ['decideNetwork net-home trusted']);
+      });
+    }
+
+    testWidgets('a network that arrives with the app inactive has both '
+        'buttons on in the first frame', (tester) async {
+      resumeOnTearDown(tester);
+      final controller = FakeAppController(state: const NodeState());
+      await _pumpStill(tester, controller, 'en');
+      await goToLifecycle(tester, AppLifecycleState.inactive);
+
+      controller.emit(_asking(const [_home]));
+      await tester.pump();
+      expect(states(tester), [true, true]);
+      await tester.tap(modalButtonIn(question, strings.no));
+      await tester.pumpAndSettle();
+      expect(controller.calls, ['decideNetwork net-home untrusted']);
+    });
   });
 }

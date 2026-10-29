@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/exit_flow.dart';
 import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
 import 'package:nexus_bridges/src/ui/icons/glyphs.dart';
 import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
@@ -17,11 +18,14 @@ import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
 import 'package:nexus_bridges/src/ui/unpair_modal.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
+import 'cover_fixtures.dart';
 import 'fake_app_controller.dart';
-import 'pairing_fixtures.dart' show entry;
+import 'lifecycle_fixtures.dart';
+import 'pairing_fixtures.dart' show entry, view;
 import 'segoe_font.dart';
 
 const String _name = 'Port\u00E1til de Ana';
+const NodeState _sending = NodeState(transferInProgress: true);
 const Duration _breakTime = Duration(milliseconds: 1500);
 const Duration _settled = Duration(milliseconds: 400);
 const Offset _outside = Offset(4, 4);
@@ -507,6 +511,381 @@ void main() {
       }
     }
   });
+
+  for (final code in languageCodes) {
+    final strings = stringsFor(code);
+    final title = strings.unpairTitle(_name);
+    final labels = [strings.cancelButton, strings.unpairButton];
+
+    List<bool> states(WidgetTester tester) =>
+        modalButtonStates(tester, modalWith(title), labels);
+
+    _Opened openWithoutPump() {
+      final opened = _Opened();
+      unawaited(
+        confirmUnpairDevice(
+          _homeKey.currentContext!,
+          name: _name,
+          type: DeviceType.mobile,
+          onConfirm: () async {
+            opened.confirms++;
+          },
+        ).then((value) {
+          opened.result = value;
+          opened.finished = true;
+        }),
+      );
+      return opened;
+    }
+
+    group('[$code] H1 unpair closes its own route, never the one on top '
+        '(RF-112 and RF-113 of the 003, RF-185 of the 005)', () {
+      testWidgets('with a send in progress, the close question opened 300 ms '
+          'after confirming is still open with no answer at 2 s, while the '
+          'unpair has answered true with a single onConfirm', (tester) async {
+        await _mount(tester, code: code);
+        final opened = await _open(tester);
+
+        await tester.tap(_buttonFinder(strings.unpairButton));
+        expect(opened.confirms, 1);
+        await tester.pump(const Duration(milliseconds: 300));
+
+        bool? closeAnswer;
+        var closeFinished = false;
+        unawaited(
+          confirmCloseDuringTransfer(
+            _homeKey.currentContext!,
+            FakeAppController(state: _sending),
+          ).then((value) {
+            closeAnswer = value;
+            closeFinished = true;
+          }),
+        );
+        await tester.pump();
+        final closeRoute = routeOf(
+          tester,
+          modalWith(strings.closeDuringTransferTitle),
+        );
+        await tester.pump(const Duration(milliseconds: 1700));
+
+        expect(closeFinished, isFalse);
+        expect(closeRoute.isActive, isTrue);
+        expect(closeRoute.isCurrent, isTrue);
+        expect(closeRoute.animation!.status, AnimationStatus.completed);
+        expect(find.text(strings.closeDuringTransferTitle), findsOneWidget);
+        expect(opened.result, isTrue);
+        expect(opened.confirms, 1);
+        expect(find.text(title), findsNothing);
+        expect(find.byType(NbModal), findsOneWidget);
+
+        final closeModal = modalWith(strings.closeDuringTransferTitle);
+        expect(
+          modalButtonStates(tester, closeModal, [
+            strings.keepOpenButton,
+            strings.closeAndCancelButton,
+          ]),
+          [true, true],
+        );
+        await tester.tap(modalButtonIn(closeModal, strings.keepOpenButton));
+        await tester.pump();
+        expect(closeAnswer, isFalse);
+        await _closeOut(tester);
+        expect(find.byType(NbModal), findsNothing);
+        expect(opened.confirms, 1);
+      });
+
+      testWidgets('any modal route pushed on top during the 1.5 s stays open '
+          'and untouched, and the unpair leaves from under it', (tester) async {
+        await _mount(tester, code: code);
+        final opened = await _open(tester);
+
+        await tester.tap(_buttonFinder(strings.unpairButton));
+        await tester.pump(const Duration(milliseconds: 300));
+        final cover = pushCover(_homeKey.currentContext!);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 1700));
+
+        expect(cover.finished, isFalse);
+        expect(cover.taps, 0);
+        expect(cover.route.isCurrent, isTrue);
+        expect(cover.route.animation!.status, AnimationStatus.completed);
+        expect(opened.result, isTrue);
+        expect(opened.confirms, 1);
+        expect(find.text(title), findsNothing);
+        expect(find.byType(NbModal), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(coverButton);
+        await tester.pump();
+        expect(cover.result, coverResult);
+        await _closeOut(tester);
+        expect(find.byType(NbModal), findsNothing);
+      });
+
+      testWidgets('a pairing that PairingHost opens on top during the 1.5 s '
+          'keeps its route, and the unpair leaves from under it', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(1200, 1600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final fingerprint = fingerprintOf('BBBB2222');
+        final row = entry(
+          fingerprint: fingerprint,
+          name: _name,
+          paired: true,
+          type: DeviceType.mobile,
+        );
+        final controller = FakeAppController(state: NodeState(entries: [row]));
+        await pumpHome(tester, controller, code, settle: false);
+        await tester.pump(const Duration(milliseconds: 600));
+
+        await tester.tap(find.byTooltip(strings.moreOptions));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        await tester.tap(find.text(strings.unpairButton).last);
+        await tester.pump();
+        await tester.pump(modalTransitionDuration);
+        await tester.tap(modalButtonIn(modalWith(title), strings.unpairButton));
+        expect(controller.calls, ['unpair $fingerprint']);
+        await tester.pump(const Duration(milliseconds: 300));
+
+        controller.emit(
+          NodeState(
+            entries: [row],
+            pairing: view(
+              role: PairingRole.receiver,
+              phase: PairingPhase.comparing,
+            ),
+          ),
+        );
+        await tester.pump();
+        final pairingRoute = routeOf(tester, find.byType(NbModal).last);
+        expect(pairingRoute.isCurrent, isTrue);
+        await tester.pump(const Duration(milliseconds: 1700));
+
+        expect(find.text(title), findsNothing);
+        expect(find.byType(NbModal), findsOneWidget);
+        expect(
+          identical(routeOf(tester, find.byType(NbModal)), pairingRoute),
+          isTrue,
+        );
+        expect(pairingRoute.isActive, isTrue);
+        expect(pairingRoute.isCurrent, isTrue);
+        expect(pairingRoute.animation!.status, AnimationStatus.completed);
+        expect(controller.calls, ['unpair $fingerprint']);
+        final pairingButtons = tester
+            .widgetList<ModalButton>(
+              find.descendant(
+                of: find.byType(NbModal),
+                matching: find.byType(ModalButton),
+              ),
+            )
+            .toList();
+        expect(pairingButtons, isNotEmpty);
+        expect(pairingButtons.every((b) => b.onPressed != null), isTrue);
+        expect(tester.takeException(), isNull);
+      });
+
+      for (final reduceMotion in const [false, true]) {
+        testWidgets('a Cancel that lands in the same frame a route is pushed '
+            'on top answers false and leaves that route open '
+            '(reduceMotion: $reduceMotion)', (tester) async {
+          await _mount(tester, code: code, reduceMotion: reduceMotion);
+          final opened = await _open(tester);
+          final cancel = modalButtonAction(
+            tester,
+            modalWith(title),
+            strings.cancelButton,
+          );
+
+          final unpairRoute = routeOf(tester, modalWith(title));
+          final cover = pushCover(_homeKey.currentContext!);
+          cancel();
+          await tester.pump();
+          expect(unpairRoute.isActive, isFalse);
+          await tester.pump(modalTransitionDuration);
+          await tester.pump(_routeGone);
+
+          expect(opened.result, isFalse);
+          expect(opened.confirms, 0);
+          expect(cover.finished, isFalse);
+          expect(cover.route.isCurrent, isTrue);
+          expect(find.text(title), findsNothing);
+          expect(find.byType(NbModal), findsOneWidget);
+        });
+      }
+
+      testWidgets('with reduced motion, an Unpair that lands in the same '
+          'frame a route is pushed on top answers true at once and leaves '
+          'that route open', (tester) async {
+        await _mount(tester, code: code, reduceMotion: true);
+        final opened = await _open(tester);
+        final unpair = modalButtonAction(
+          tester,
+          modalWith(title),
+          strings.unpairButton,
+        );
+
+        final unpairRoute = routeOf(tester, modalWith(title));
+        final cover = pushCover(_homeKey.currentContext!);
+        unpair();
+        await tester.pump();
+        expect(unpairRoute.isActive, isFalse);
+
+        expect(opened.result, isTrue);
+        expect(opened.confirms, 1);
+        expect(cover.finished, isFalse);
+        expect(cover.route.isCurrent, isTrue);
+        expect(find.text(title), findsNothing);
+        expect(find.byType(NbModal), findsOneWidget);
+      });
+    });
+
+    group('[$code] H2 unpair is off while covered and for 500 ms after '
+        '(RF-112 of the 003, point 243)', () {
+      for (final reduceMotion in const [false, true]) {
+        for (final gap in const [Duration.zero, Duration(milliseconds: 120)]) {
+          testWidgets('a double click on the cover over Unpair does not '
+              'unpair; both buttons stay off until 500 ms after the cover '
+              'leaves (reduceMotion: $reduceMotion, gap: '
+              '${gap.inMilliseconds} ms)', (tester) async {
+            await _mount(tester, code: code, reduceMotion: reduceMotion);
+            final opened = await _open(tester);
+            expect(states(tester), [true, true]);
+
+            final cover = pushCover(_homeKey.currentContext!);
+            await tester.pump();
+            expect(states(tester), [false, false]);
+            await tester.pump(modalTransitionDuration);
+            await tester.pump(const Duration(seconds: 2));
+            expect(states(tester), [false, false]);
+
+            final point = overlapCenter(
+              tester,
+              modalButtonIn(modalWith(title), strings.unpairButton),
+              coverButton,
+            );
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(cover.result, coverResult);
+            if (gap > Duration.zero) await tester.pump(gap);
+            await tester.tapAt(point);
+            await tester.pump();
+
+            expect(cover.taps, 1);
+            expect(opened.confirms, 0);
+            expect(opened.finished, isFalse);
+            expect(states(tester), [false, false]);
+
+            await tester.pump(const Duration(milliseconds: 480) - gap);
+            expect(states(tester), [false, false]);
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(opened.confirms, 0);
+
+            await tester.pump(const Duration(milliseconds: 40));
+            expect(states(tester), [true, true]);
+            await tester.tapAt(point);
+            await tester.pump();
+            expect(opened.confirms, 1);
+            await tester.pump(_breakTime);
+            await _closeOut(tester);
+            expect(opened.result, isTrue);
+            expect(find.byType(NbModal), findsNothing);
+          });
+        }
+      }
+
+      testWidgets('a cover taken away with removeRoute also counts 500 ms '
+          'before the buttons come back', (tester) async {
+        await _mount(tester, code: code);
+        final opened = await _open(tester);
+        final cover = pushCover(_homeKey.currentContext!);
+        await tester.pump();
+        await tester.pump(modalTransitionDuration);
+
+        cover.route.navigator!.removeRoute(cover.route);
+        await tester.pump();
+        expect(states(tester), [false, false]);
+        await tester.pump(const Duration(milliseconds: 499));
+        expect(states(tester), [false, false]);
+        await tester.pump(const Duration(milliseconds: 1));
+        expect(states(tester), [true, true]);
+        await tester.tap(_buttonFinder(strings.cancelButton));
+        await _closeOut(tester);
+        expect(opened.result, isFalse);
+      });
+    });
+
+    group('[$code] coverOnly: unpair has no delay and ignores the lifecycle '
+        '(points 159 and 243)', () {
+      testWidgets('both buttons are on in the very first frame', (
+        tester,
+      ) async {
+        await _mount(tester, code: code);
+        final opened = openWithoutPump();
+        await tester.pump();
+
+        expect(states(tester), [true, true]);
+        await tester.pump(modalTransitionDuration);
+        await tester.tap(_buttonFinder(strings.cancelButton));
+        await _closeOut(tester);
+        expect(opened.result, isFalse);
+      });
+
+      for (final target in const [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]) {
+        testWidgets('going to ${target.name} and back keeps both buttons on, '
+            'and Unpair works at once', (tester) async {
+          resumeOnTearDown(tester);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          await _mount(tester, code: code);
+          final opened = await _open(tester);
+
+          for (final state in lifecyclePath(
+            AppLifecycleState.resumed,
+            target,
+          )) {
+            await stepLifecycle(tester, state);
+            expect(states(tester), [true, true], reason: state.name);
+          }
+          await tester.pump(const Duration(seconds: 1));
+          expect(states(tester), [true, true]);
+          for (final state in lifecyclePath(
+            target,
+            AppLifecycleState.resumed,
+          )) {
+            await stepLifecycle(tester, state);
+            expect(states(tester), [true, true], reason: state.name);
+          }
+          await tester.tap(_buttonFinder(strings.unpairButton));
+          expect(opened.confirms, 1);
+          await tester.pump(_breakTime);
+          await _closeOut(tester);
+          expect(opened.result, isTrue);
+        });
+      }
+
+      testWidgets('opened with the app inactive, both buttons are on in the '
+          'first frame', (tester) async {
+        resumeOnTearDown(tester);
+        await _mount(tester, code: code);
+        await goToLifecycle(tester, AppLifecycleState.inactive);
+        final opened = openWithoutPump();
+        await tester.pump();
+
+        expect(states(tester), [true, true]);
+        await tester.pump(modalTransitionDuration);
+        await tester.tap(_buttonFinder(strings.cancelButton));
+        await _closeOut(tester);
+        expect(opened.result, isFalse);
+      });
+    });
+  }
 
   group('E289 the touched files: no literal text, no literal color and no '
       'comments', () {

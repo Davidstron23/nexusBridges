@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -1556,6 +1558,102 @@ void main() {
       expect(find.byType(NbModal), findsNothing);
       expect(tester.takeException(), isNull);
       expect(switcher.log.disposed, containsAll(['A', 'B']));
+    });
+  });
+
+  group('H1 closeOwnRoute closes the route of its context (point 243)', () {
+    const lowerKey = ValueKey('lower');
+    const upperKey = ValueKey('upper');
+
+    Widget marker(Key key) => SizedBox(key: key, width: 20, height: 20);
+
+    for (final reduceMotion in const [false, true]) {
+      testWidgets('on top it pops with its result and the route below becomes '
+          'the top (reduceMotion: $reduceMotion)', (tester) async {
+        await _mount(tester, reduceMotion: reduceMotion);
+        final lower = await _open(tester, (_) => marker(lowerKey));
+        final upper = await _open(tester, (_) => marker(upperKey));
+        String? upperResult;
+        unawaited(upper.result.then((value) => upperResult = value));
+
+        closeOwnRoute(tester.element(find.byKey(upperKey)), 'upper');
+        await tester.pump();
+
+        expect(upperResult, 'upper');
+        expect(upper.route.isActive, isFalse);
+        expect(lower.route.isCurrent, isTrue);
+        expect(lower.route.isActive, isTrue);
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump();
+        expect(find.byKey(upperKey), findsNothing);
+        expect(find.byKey(lowerKey), findsOneWidget);
+      });
+
+      testWidgets('under another route it is removed with its result and the '
+          'route on top stays current and untouched (reduceMotion: '
+          '$reduceMotion)', (tester) async {
+        await _mount(tester, reduceMotion: reduceMotion);
+        final lower = await _open(tester, (_) => marker(lowerKey));
+        final upper = await _open(tester, (_) => marker(upperKey));
+        await tester.pump(const Duration(milliseconds: 100));
+        String? lowerResult;
+        var upperFinished = false;
+        unawaited(lower.result.then((value) => lowerResult = value));
+        unawaited(upper.result.then((_) => upperFinished = true));
+
+        closeOwnRoute(tester.element(find.byKey(lowerKey)), 'lower');
+        await tester.pump();
+
+        expect(lowerResult, 'lower');
+        expect(lower.route.isActive, isFalse);
+        expect(upper.route.isCurrent, isTrue);
+        expect(upper.route.animation!.status, AnimationStatus.completed);
+        expect(upperFinished, isFalse);
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump();
+        expect(find.byKey(lowerKey), findsNothing);
+        expect(find.byKey(upperKey), findsOneWidget);
+        expect(upper.route.isCurrent, isTrue);
+        expect(upperFinished, isFalse);
+      });
+    }
+
+    testWidgets('called again once its route is gone it does nothing', (
+      tester,
+    ) async {
+      await _mount(tester, reduceMotion: true);
+      final lower = await _open(tester, (_) => marker(lowerKey));
+      final upper = await _open(tester, (_) => marker(upperKey));
+      final upperContext = tester.element(find.byKey(upperKey));
+      var upperResults = 0;
+      unawaited(upper.result.then((_) => upperResults++));
+
+      closeOwnRoute(upperContext, 'first');
+      closeOwnRoute(upperContext, 'second');
+      await tester.pump();
+      await tester.pump();
+
+      expect(upperResults, 1);
+      expect(await upper.result, 'first');
+      expect(lower.route.isActive, isTrue);
+      expect(lower.route.isCurrent, isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('with a context outside any route it does nothing', (
+      tester,
+    ) async {
+      await _mount(tester, reduceMotion: true);
+      final upper = await _open(tester, (_) => marker(upperKey));
+      var finished = false;
+      unawaited(upper.result.then((_) => finished = true));
+
+      closeOwnRoute(tester.element(find.byType(Navigator)), 'none');
+      await tester.pump();
+
+      expect(finished, isFalse);
+      expect(upper.route.isCurrent, isTrue);
+      expect(find.byKey(upperKey), findsOneWidget);
     });
   });
 }
