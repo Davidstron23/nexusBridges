@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -21,6 +22,8 @@ import 'theme/tokens.dart';
 const int _shortFingerprintLength = 8;
 const Duration _farewellDuration = Duration(milliseconds: 1750);
 const double _rowRadius = 16;
+const double _rowGap = 12;
+const double _discSize = 48;
 const double _arrowSize = 30;
 const double _arrowOverlap = 7;
 const double _arrowRingWidth = 5;
@@ -531,55 +534,76 @@ class _DeviceRow extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              disc,
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final pillRoom = math.max(
+                0.0,
+                constraints.maxWidth - _discSize - 2 * _rowGap,
+              );
+              return Row(
+                children: [
+                  disc,
+                  const SizedBox(width: _rowGap),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Text(
-                            data.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: NbText.bodyStrong.copyWith(
-                              fontSize: 15,
-                              height: 20 / 15,
-                              color: colors.text,
-                            ),
+                        LayoutBuilder(
+                          builder: (context, nameBox) => Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  data.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: NbText.bodyStrong.copyWith(
+                                    fontSize: 15,
+                                    height: 20 / 15,
+                                    color: colors.text,
+                                  ),
+                                ),
+                              ),
+                              if (data.mine)
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxWidth: nameBox.maxWidth,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(left: 8),
+                                    child: StatusChip(
+                                      label: strings.chipMine,
+                                      tone: ChipTone.run,
+                                      height: 20,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
-                        if (data.mine) ...[
-                          const SizedBox(width: 8),
-                          StatusChip(
-                            label: strings.chipMine,
-                            tone: ChipTone.run,
-                            height: 20,
+                        const SizedBox(height: 3),
+                        Text(
+                          _shortFingerprint(data.fingerprint),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: NbText.caption.copyWith(
+                            letterSpacing: 0.72,
+                            color: colors.textWeak,
                           ),
-                        ],
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      _shortFingerprint(data.fingerprint),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: NbText.caption.copyWith(
-                        letterSpacing: 0.72,
-                        color: colors.textWeak,
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: _rowGap),
+                    child: _VisibilityPill(
+                      visible: data.visible,
+                      maxWidth: math.max(0.0, pillRoom),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              _VisibilityPill(visible: data.visible),
-            ],
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -588,9 +612,10 @@ class _DeviceRow extends StatelessWidget {
 }
 
 class _VisibilityPill extends StatelessWidget {
-  const _VisibilityPill({required this.visible});
+  const _VisibilityPill({required this.visible, required this.maxWidth});
 
   final bool visible;
+  final double maxWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -598,24 +623,30 @@ class _VisibilityPill extends StatelessWidget {
     final strings = AppStringsDelegate.of(context);
     final fill = visible ? colors.successWeak : colors.dangerWeak;
     final ink = visible ? colors.successInk : colors.danger;
-    return Container(
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 9),
-      decoration: ShapeDecoration(color: fill, shape: const StadiumBorder()),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(color: ink, shape: BoxShape.circle),
-            child: const SizedBox.square(dimension: 6),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            visible ? strings.visibleLabel : strings.notVisibleLabel,
-            maxLines: 1,
-            style: NbText.label.copyWith(height: 1, color: ink),
-          ),
-        ],
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: Container(
+        height: 22,
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        decoration: ShapeDecoration(color: fill, shape: const StadiumBorder()),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(color: ink, shape: BoxShape.circle),
+              child: const SizedBox.square(dimension: 6),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                visible ? strings.visibleLabel : strings.notVisibleLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: NbText.label.copyWith(height: 1, color: ink),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
