@@ -1,5 +1,5 @@
 import 'package:nexus_bridges_core/nexus_bridges_core.dart'
-    show TransferOutcome;
+    show PairingOutcome, TransferOutcome;
 
 import 'app_strings.dart';
 
@@ -237,6 +237,37 @@ final class AppStringsEn implements AppStrings {
       'Is this device yours? If it is, what it sends will come in without '
       'asking and it will be able to browse the folders you share. If it '
       'belongs to someone else, it will always ask for your permission.';
+
+  @override
+  String get mineQuestion => 'Is this device yours?';
+
+  @override
+  String get mineYesDetail =>
+      'What it sends comes in without asking and it can browse the folders '
+      'you share.';
+
+  @override
+  String get mineNoDetail =>
+      'It will always ask for your permission before sending you anything.';
+
+  @override
+  String replaceShortBody(String newName) =>
+      '$newName has the same name as a paired device that is not visible. If '
+      'it is the same one reinstalled, replace it.';
+
+  @override
+  String pairingEyebrow(PairingOutcome? outcome) => switch (outcome) {
+    PairingOutcome.paired => 'Nexus bridge established',
+    PairingOutcome.rejected => 'Connection rejected',
+    PairingOutcome.busy => 'Device busy',
+    PairingOutcome.paused => 'Connection frozen',
+    PairingOutcome.cancelledByPeer => 'Connection cancelled',
+    PairingOutcome.expired => 'Time is up',
+    PairingOutcome.lost => 'Device vanished',
+    PairingOutcome.networkChanged => 'Network changed',
+    PairingOutcome.failed || null => 'Unexpected error',
+    PairingOutcome.notSaved => 'Could not save',
+  };
 
   @override
   String get mineYesButton => "It's mine";

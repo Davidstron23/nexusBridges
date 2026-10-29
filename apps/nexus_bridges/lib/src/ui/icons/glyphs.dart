@@ -171,6 +171,93 @@ abstract final class Glyphs {
     ],
   );
 
+  static const Glyph cross = Glyph(
+    box: 16,
+    strokeWidth: 1.8,
+    parts: [GlyphPart(SvgShape('M4.5 4.5l7 7M11.5 4.5l-7 7'))],
+  );
+
+  static const Glyph tick = Glyph(
+    box: 16,
+    strokeWidth: 1.8,
+    parts: [GlyphPart(SvgShape('M3.5 8.4l3 2.9 6-6.6'))],
+  );
+
+  static const Glyph swap = Glyph(
+    box: 16,
+    strokeWidth: 1.7,
+    parts: [
+      GlyphPart(
+        SvgShape('M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13'),
+      ),
+    ],
+  );
+
+  static const Glyph unlink = Glyph(
+    box: 16,
+    strokeWidth: 1.6,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M7.3 4.6l1-1a2.6 2.6 0 0 1 3.7 3.7l-1 1'
+          'M8.7 11.4l-1 1A2.6 2.6 0 0 1 4 8.7l1-1'
+          'M3 3l1.5 1.5M13 13l-1.5-1.5',
+        ),
+      ),
+    ],
+  );
+
+  static const Glyph arrowDown = Glyph(
+    box: 16,
+    strokeWidth: 2,
+    parts: [GlyphPart(SvgShape('M8 3.5v9M4.5 9L8 12.5 11.5 9'))],
+  );
+
+  static const Glyph mine = Glyph(
+    box: 24,
+    strokeWidth: 1.6,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M4 10.6L12 4l8 6.6V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z',
+        ),
+        tint: true,
+      ),
+      GlyphPart(SvgShape('M9 14.6l2.2 2.1 4-4.3')),
+    ],
+  );
+
+  static const Glyph someoneElse = Glyph(
+    box: 24,
+    strokeWidth: 1.6,
+    parts: [
+      GlyphPart(CircleShape(Offset(9, 8.5), 3.2), tint: true),
+      GlyphPart(
+        SvgShape('M3.5 19.5c.6-3.3 2.8-5.2 5.5-5.2c2.7 0 4.9 1.9 5.5 5.2'),
+      ),
+      GlyphPart(
+        SvgShape('M15.5 6.2a3 3 0 0 1 0 5.6M17.5 14.6c1.6.6 2.6 2.2 3 4.9'),
+      ),
+    ],
+  );
+
+  static const Glyph networkShield = Glyph(
+    box: 24,
+    strokeWidth: 1.5,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M12 1.8l8.4 3.1v6.3c0 5.3-3.4 9.1-8.4 11.1-5-2-8.4-5.8-8.4-11.1V4.9z',
+        ),
+        tint: true,
+      ),
+      GlyphPart(
+        SvgShape('M7.2 10.2a6.8 6.8 0 0 1 9.6 0M9.1 12.4a4 4 0 0 1 5.8 0'),
+      ),
+      GlyphPart(CircleShape(Offset(12, 15), 0.6), solid: true),
+    ],
+  );
+
   static const Glyph more = Glyph(
     box: 16,
     strokeWidth: 1.5,

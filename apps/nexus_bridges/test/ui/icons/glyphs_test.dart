@@ -24,6 +24,25 @@ const Map<String, Glyph> _glyphs = {
   'phone': Glyphs.phone,
   'shield': Glyphs.shield,
   'more': Glyphs.more,
+  'cross': Glyphs.cross,
+  'tick': Glyphs.tick,
+  'swap': Glyphs.swap,
+  'unlink': Glyphs.unlink,
+  'arrowDown': Glyphs.arrowDown,
+  'mine': Glyphs.mine,
+  'someoneElse': Glyphs.someoneElse,
+  'networkShield': Glyphs.networkShield,
+};
+
+const Set<String> _modalGlyphs = {
+  'cross',
+  'tick',
+  'swap',
+  'unlink',
+  'arrowDown',
+  'mine',
+  'someoneElse',
+  'networkShield',
 };
 
 const Map<String, (double, double, List<String>)> _fromDesign = {
@@ -104,6 +123,53 @@ const Map<String, (double, double, List<String>)> _fromDesign = {
       'circle (8, 3.5) r1.25 | solid',
       'circle (8, 8) r1.25 | solid',
       'circle (8, 12.5) r1.25 | solid',
+    ],
+  ),
+  'cross': (16, 1.8, ['M4.5 4.5l7 7M11.5 4.5l-7 7 | stroke 1.8']),
+  'tick': (16, 1.8, ['M3.5 8.4l3 2.9 6-6.6 | stroke 1.8']),
+  'swap': (
+    16,
+    1.7,
+    [
+      'M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13 '
+          '| stroke 1.7',
+    ],
+  ),
+  'unlink': (
+    16,
+    1.6,
+    [
+      'M7.3 4.6l1-1a2.6 2.6 0 0 1 3.7 3.7l-1 1M8.7 11.4l-1 1A2.6 2.6 0 0 1 '
+          '4 8.7l1-1M3 3l1.5 1.5M13 13l-1.5-1.5 | stroke 1.6',
+    ],
+  ),
+  'arrowDown': (16, 2, ['M8 3.5v9M4.5 9L8 12.5 11.5 9 | stroke 2']),
+  'mine': (
+    24,
+    1.6,
+    [
+      'M4 10.6L12 4l8 6.6V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z '
+          '| stroke 1.6 | tint',
+      'M9 14.6l2.2 2.1 4-4.3 | stroke 1.6',
+    ],
+  ),
+  'someoneElse': (
+    24,
+    1.6,
+    [
+      'circle (9, 8.5) r3.2 | stroke 1.6 | tint',
+      'M3.5 19.5c.6-3.3 2.8-5.2 5.5-5.2c2.7 0 4.9 1.9 5.5 5.2 | stroke 1.6',
+      'M15.5 6.2a3 3 0 0 1 0 5.6M17.5 14.6c1.6.6 2.6 2.2 3 4.9 | stroke 1.6',
+    ],
+  ),
+  'networkShield': (
+    24,
+    1.5,
+    [
+      'M12 1.8l8.4 3.1v6.3c0 5.3-3.4 9.1-8.4 11.1-5-2-8.4-5.8-8.4-11.1V4.9z '
+          '| stroke 1.5 | tint',
+      'M7.2 10.2a6.8 6.8 0 0 1 9.6 0M9.1 12.4a4 4 0 0 1 5.8 0 | stroke 1.5',
+      'circle (12, 15) r0.6 | stroke 1.5 | solid',
     ],
   ),
 };
@@ -251,8 +317,11 @@ const Color _blue = Color(0xFF1040AA);
 
 void main() {
   group('E258: glyph data copied from DESIGN.md', () {
-    test('Glyphs holds the eleven glyphs of the 005', () {
+    test('Glyphs holds the nineteen glyphs of the 005: the eleven of '
+        'DESIGN.md and the eight of the modals (E281)', () {
+      expect(_glyphs, hasLength(19));
       expect(_glyphs.keys.toSet(), _fromDesign.keys.toSet());
+      expect(_glyphs.keys.toSet().containsAll(_modalGlyphs), isTrue);
     });
 
     for (final entry in _fromDesign.entries) {
@@ -268,7 +337,7 @@ void main() {
 
   group('E258: paintGlyph', () {
     for (final entry in _glyphs.entries) {
-      for (final size in [14.0, 16.0, 24.0, 38.0]) {
+      for (final size in [14.0, 16.0, 24.0, 38.0, 40.0]) {
         test('${entry.key} at $size px paints inside its rect', () {
           final rect = Rect.fromLTWH(10, 20, size, size);
           final recording = _record(
@@ -431,17 +500,152 @@ void main() {
     });
   });
 
+  group('E281: glyphs of the modals', () {
+    test('no glyph path uses a command the reader does not support', () {
+      final unsupported = RegExp('[sSqQtT]');
+      for (final entry in _glyphs.entries) {
+        for (final part in entry.value.parts) {
+          if (part.shape case SvgShape(:final data)) {
+            expect(unsupported.hasMatch(data), isFalse, reason: entry.key);
+            expect(() => parseSvgPath(data), returnsNormally);
+          }
+        }
+      }
+    });
+
+    test('someoneElse rewrites the smooth curve of the design as the '
+        'equivalent cubic', () {
+      final body = Glyphs.someoneElse.parts
+          .map((part) => part.shape)
+          .whereType<SvgShape>()
+          .first
+          .data;
+      expect(body, isNot(contains('s')));
+      final parsed = parseSvgPath(body);
+      final smooth = Path()
+        ..moveTo(3.5, 19.5)
+        ..cubicTo(4.1, 16.2, 6.3, 14.3, 9, 14.3)
+        ..cubicTo(9 + (9 - 6.3), 14.3, 13.9, 16.2, 14.5, 19.5);
+      final got = parsed.computeMetrics().single;
+      final want = smooth.computeMetrics().single;
+      expect(got.length, closeTo(want.length, 1e-3));
+      for (var i = 0; i <= 40; i++) {
+        final a = got.getTangentForOffset(got.length * i / 40)!.position;
+        final b = want.getTangentForOffset(want.length * i / 40)!.position;
+        expect((a - b).distance, lessThan(1e-3), reason: 'sample $i');
+      }
+    });
+
+    test('the tinted parts fill at 16 % under their stroke and none of the '
+        'eight cuts', () {
+      final counts = {
+        'cross': 1,
+        'tick': 1,
+        'swap': 1,
+        'unlink': 1,
+        'arrowDown': 1,
+        'mine': 3,
+        'someoneElse': 4,
+        'networkShield': 5,
+      };
+      expect(counts.keys.toSet(), _modalGlyphs);
+      for (final name in _modalGlyphs) {
+        final glyph = _glyphs[name]!;
+        final recording = _record(
+          (canvas) => paintGlyph(
+            canvas,
+            glyph,
+            Rect.fromLTWH(0, 0, glyph.box, glyph.box),
+            _red,
+          ),
+        );
+        expect(recording.calls, isNot(contains(#saveLayer)), reason: name);
+        expect(recording.drawn, hasLength(counts[name]), reason: name);
+        for (final drawn in recording.drawn) {
+          expect(drawn.paint.blendMode, BlendMode.srcOver, reason: name);
+          if (drawn.paint.style == PaintingStyle.stroke) {
+            expect(
+              drawn.paint.strokeWidth,
+              closeTo(glyph.strokeWidth, 1e-6),
+              reason: name,
+            );
+            expect(drawn.paint.strokeCap, StrokeCap.round, reason: name);
+            expect(drawn.paint.strokeJoin, StrokeJoin.round, reason: name);
+            expect(drawn.paint.color.a, closeTo(1, 1e-6), reason: name);
+          }
+        }
+      }
+    });
+
+    test('mine is a tinted house with a check', () {
+      final recording = _record(
+        (canvas) => paintGlyph(
+          canvas,
+          Glyphs.mine,
+          const Rect.fromLTWH(0, 0, 24, 24),
+          _red,
+        ),
+      );
+      final paints = [for (final drawn in recording.drawn) drawn.paint];
+      expect(paints[0].style, PaintingStyle.fill);
+      expect(paints[0].color.a, closeTo(0.16, 1e-6));
+      expect(recording.drawn[0].path.contains(const Offset(12, 15)), isTrue);
+      expect(paints[1].style, PaintingStyle.stroke);
+      expect(paints[2].style, PaintingStyle.stroke);
+    });
+
+    test('someoneElse has a tinted head', () {
+      final recording = _record(
+        (canvas) => paintGlyph(
+          canvas,
+          Glyphs.someoneElse,
+          const Rect.fromLTWH(0, 0, 24, 24),
+          _red,
+        ),
+      );
+      final head = recording.drawn[0];
+      expect(head.paint.style, PaintingStyle.fill);
+      expect(head.paint.color.a, closeTo(0.16, 1e-6));
+      expect(head.path.contains(const Offset(9, 8.5)), isTrue);
+      expect(head.path.contains(const Offset(9, 12)), isFalse);
+      expect(recording.drawn[1].paint.style, PaintingStyle.stroke);
+    });
+
+    test('networkShield is a tinted, stroked shield with two arcs and a '
+        'solid dot', () {
+      final recording = _record(
+        (canvas) => paintGlyph(
+          canvas,
+          Glyphs.networkShield,
+          const Rect.fromLTWH(0, 0, 24, 24),
+          _red,
+        ),
+      );
+      final paints = [for (final drawn in recording.drawn) drawn.paint];
+      expect(paints[0].style, PaintingStyle.fill);
+      expect(paints[0].color.a, closeTo(0.16, 1e-6));
+      expect(paints[1].style, PaintingStyle.stroke);
+      expect(paints[2].style, PaintingStyle.stroke);
+      expect(recording.drawn[2].path.computeMetrics().toList(), hasLength(2));
+      expect(paints[3].style, PaintingStyle.fill);
+      expect(paints[3].color.a, closeTo(1, 1e-6));
+      final dot = recording.drawn[3].path;
+      expect(dot.contains(const Offset(12, 15)), isTrue);
+      expect(dot.contains(const Offset(12, 15.8)), isFalse);
+      expect(paints[4].style, PaintingStyle.stroke);
+    });
+  });
+
   group('E258: GlyphIcon', () {
     for (final brightness in Brightness.values) {
-      testWidgets('every glyph at 14, 16, 24 and 38 px in ${brightness.name}', (
-        tester,
-      ) async {
+      testWidgets('every glyph at 14, 16, 24, 38 and 40 px in '
+          '${brightness.name}', (tester) async {
         await _pump(
           tester,
           Wrap(
             children: [
               for (final entry in _glyphs.entries)
-                for (final size in [14.0, 16.0, 24.0, 38.0])
+                for (final size in [14.0, 16.0, 24.0, 38.0, 40.0])
                   GlyphIcon(
                     entry.value,
                     size: size,
@@ -453,7 +657,7 @@ void main() {
         );
         expect(tester.takeException(), isNull);
         for (final entry in _glyphs.entries) {
-          for (final size in [14.0, 16.0, 24.0, 38.0]) {
+          for (final size in [14.0, 16.0, 24.0, 38.0, 40.0]) {
             expect(
               tester.getSize(find.byKey(ValueKey('${entry.key}-$size'))),
               Size.square(size),

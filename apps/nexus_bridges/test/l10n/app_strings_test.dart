@@ -7,7 +7,7 @@ import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/l10n/app_strings_en.dart';
 import 'package:nexus_bridges/src/l10n/app_strings_es.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart'
-    show TransferOutcome;
+    show PairingOutcome, TransferOutcome;
 
 typedef _Text = String Function(AppStrings strings);
 
@@ -179,6 +179,48 @@ final Map<String, _Text> _texts = {
   'chipUnconfirmed': (s) => s.chipUnconfirmed,
   'foreignSenderNote': (s) => s.foreignSenderNote(_sampleShort),
   'incomingExpiresNote': (s) => s.incomingExpiresNote,
+  for (final outcome in PairingOutcome.values)
+    'pairingEyebrow(${outcome.name})': (s) => s.pairingEyebrow(outcome),
+  'mineQuestion': (s) => s.mineQuestion,
+  'mineYesDetail': (s) => s.mineYesDetail,
+  'mineNoDetail': (s) => s.mineNoDetail,
+  'replaceShortBody': (s) => s.replaceShortBody(_sampleName),
+};
+
+final Map<String, (String, String)> _expectedPairingDesign = {
+  'pairingEyebrow(paired)': (
+    'Nexus bridge established',
+    'Puente Nexus establecido',
+  ),
+  'pairingEyebrow(rejected)': ('Connection rejected', 'Conexión rechazada'),
+  'pairingEyebrow(busy)': ('Device busy', 'Dispositivo ocupado'),
+  'pairingEyebrow(paused)': ('Connection frozen', 'Conexión congelada'),
+  'pairingEyebrow(cancelledByPeer)': (
+    'Connection cancelled',
+    'Conexión cancelada',
+  ),
+  'pairingEyebrow(expired)': ('Time is up', 'Tiempo agotado'),
+  'pairingEyebrow(lost)': ('Device vanished', 'Equipo desaparecido'),
+  'pairingEyebrow(networkChanged)': ('Network changed', 'Cambio de red'),
+  'pairingEyebrow(failed)': ('Unexpected error', 'Error inesperado'),
+  'pairingEyebrow(notSaved)': ('Could not save', 'Error al guardar'),
+  'mineQuestion': ('Is this device yours?', '¿Este equipo es tuyo?'),
+  'mineYesDetail': (
+    'What it sends comes in without asking and it can browse the folders you '
+        'share.',
+    'Lo que envíe entra sin preguntar y puede explorar las carpetas que '
+        'compartas.',
+  ),
+  'mineNoDetail': (
+    'It will always ask for your permission before sending you anything.',
+    'Siempre te pedirá permiso antes de enviarte nada.',
+  ),
+  'replaceShortBody': (
+    '$_sampleName has the same name as a paired device that is not visible. '
+        'If it is the same one reinstalled, replace it.',
+    '$_sampleName se llama igual que uno vinculado que no está a la '
+        'vista. Si es el mismo reinstalado, sustitúyelo.',
+  ),
 };
 
 final Map<String, (String, String)> _expectedDesign = {
@@ -733,6 +775,7 @@ const Set<String> _withName = {
   'receivingFromTitle',
   'toPeer',
   'fromPeer',
+  'replaceShortBody',
 };
 
 const Set<String> _withShort = {
@@ -894,7 +937,7 @@ final Map<String, (String, String)> _expectedPairing = {
         'reinstalado, sustitúyelo para quitar la vinculación antigua.',
   ),
   'replaceButton': ('Replace', 'Sustituir'),
-  'keepBothButton': ('Keep both', 'Conservar los dos'),
+  'keepBothButton': ('Keep both', 'Conservar ambos'),
   'mineTitle': ('Paired with $_sampleName', 'Vinculado con $_sampleName'),
   'mineBody': (
     'Is this device yours? If it is, what it sends will come in without '
@@ -1012,12 +1055,13 @@ void main() {
   final spanish = AppStringsEs();
 
   group('RF-62: every text exists in both languages', () {
-    test('the table covers the 162 texts of the plans of 001 to 005: the 84 '
-        'of 001, 002 and 003, the 54 of the transfer (E145) and the 24 of '
-        'the design (E256)', () {
-      expect(_texts.length, 162);
+    test('the table covers the 176 texts of the plans of 001 to 005: the 84 '
+        'of 001, 002 and 003, the 54 of the transfer (E145), the 24 of the '
+        'design (E256) and the 14 of the pairing design (E281)', () {
+      expect(_texts.length, 176);
       expect(_expectedTransfer.length, 54);
       expect(_expectedDesign.length, 24);
+      expect(_expectedPairingDesign.length, 14);
       expect(
         _expected.keys.toSet().intersection(_expectedPairing.keys.toSet()),
         isEmpty,
@@ -1039,13 +1083,59 @@ void main() {
         }),
         isEmpty,
       );
+      expect(
+        _expectedPairingDesign.keys.toSet().intersection({
+          ..._expected.keys,
+          ..._expectedPairing.keys,
+          ..._expectedTransfer.keys,
+          ..._expectedDesign.keys,
+          ..._meaningOnly,
+        }),
+        isEmpty,
+      );
       expect({
         ..._expected.keys,
         ..._expectedPairing.keys,
         ..._expectedTransfer.keys,
         ..._expectedDesign.keys,
+        ..._expectedPairingDesign.keys,
         ..._meaningOnly,
       }, _texts.keys.toSet());
+    });
+
+    for (final entry in _expectedPairingDesign.entries) {
+      test('${entry.key} matches the exact text of point 196 of the plan of '
+          '004 (E281)', () {
+        final text = _texts[entry.key]!;
+        expect(text(english), entry.value.$1);
+        expect(text(spanish), entry.value.$2);
+      });
+    }
+
+    test('the pairing design texts differ from each other in each language '
+        '(E281)', () {
+      for (final strings in [english, spanish]) {
+        final seen = <String, String>{};
+        for (final key in _expectedPairingDesign.keys) {
+          final text = _texts[key]!(strings);
+          expect(seen[text], isNull, reason: '$key repeats ${seen[text]}');
+          seen[text] = key;
+        }
+      }
+    });
+
+    test('the pairing design texts reuse no older key with the same text '
+        '(E281)', () {
+      for (final strings in [english, spanish]) {
+        final older = {
+          for (final key in _texts.keys)
+            if (!_expectedPairingDesign.containsKey(key)) _texts[key]!(strings),
+        };
+        expect(older, hasLength(greaterThan(150)));
+        for (final key in _expectedPairingDesign.keys) {
+          expect(older, isNot(contains(_texts[key]!(strings))), reason: key);
+        }
+      }
     });
 
     for (final entry in _expectedDesign.entries) {
@@ -1469,6 +1559,114 @@ void main() {
         );
       });
     }
+  });
+
+  group('E281: pairing design texts', () {
+    test('the table covers the 10 values of PairingOutcome', () {
+      expect(PairingOutcome.values, hasLength(10));
+      expect(
+        {
+          for (final key in _expectedPairingDesign.keys)
+            if (key.startsWith('pairingEyebrow(')) key,
+        },
+        {
+          for (final outcome in PairingOutcome.values)
+            'pairingEyebrow(${outcome.name})',
+        },
+      );
+    });
+
+    for (final strings in [english, spanish]) {
+      final language = strings is AppStringsEs ? 'es' : 'en';
+
+      test('pairingEyebrow(null) gives the failed eyebrow ($language)', () {
+        expect(
+          strings.pairingEyebrow(null),
+          strings.pairingEyebrow(PairingOutcome.failed),
+        );
+        expect(
+          strings.pairingEyebrow(null),
+          language == 'es' ? 'Error inesperado' : 'Unexpected error',
+        );
+      });
+
+      test('every outcome has its own eyebrow ($language)', () {
+        expect({
+          for (final outcome in PairingOutcome.values)
+            strings.pairingEyebrow(outcome),
+        }, hasLength(PairingOutcome.values.length));
+      });
+
+      test('the eyebrow is not the result text of the same outcome '
+          '($language)', () {
+        expect(
+          strings.pairingEyebrow(PairingOutcome.expired),
+          isNot(strings.outcomeExpired),
+        );
+        expect(
+          strings.pairingEyebrow(PairingOutcome.networkChanged),
+          isNot(strings.outcomeNetworkChanged),
+        );
+        expect(
+          strings.pairingEyebrow(PairingOutcome.notSaved),
+          isNot(strings.outcomeNotSaved),
+        );
+        expect(
+          strings.pairingEyebrow(PairingOutcome.paired),
+          isNot(strings.pairingResultTitle),
+        );
+      });
+
+      test('replaceShortBody changes with the new name and keeps it whole '
+          '($language)', () {
+        const odd = 'Equipo «raro» 5G';
+        expect(strings.replaceShortBody(odd), startsWith(odd));
+        expect(
+          strings.replaceShortBody('A1'),
+          isNot(strings.replaceShortBody('B2')),
+        );
+        expect(
+          strings.replaceShortBody(_sampleName),
+          isNot(strings.replaceBody(_sampleName, _sampleOldName)),
+        );
+      });
+
+      test('the mine question and its details differ from the old mineBody '
+          'and from the buttons ($language)', () {
+        for (final text in [
+          strings.mineQuestion,
+          strings.mineYesDetail,
+          strings.mineNoDetail,
+        ]) {
+          expect(text, isNot(strings.mineBody));
+          expect(text, isNot(strings.mineYesButton));
+          expect(text, isNot(strings.mineNoButton));
+        }
+      });
+    }
+
+    test('keepBothButton is "Conservar ambos" in Spanish and stays "Keep '
+        'both" in English', () {
+      expect(spanish.keepBothButton, 'Conservar ambos');
+      expect(english.keepBothButton, 'Keep both');
+    });
+
+    test('pairingResultTitle, mineBody and replaceBody are kept (point '
+        '196)', () {
+      for (final name in [
+        'app_strings.dart',
+        'app_strings_en.dart',
+        'app_strings_es.dart',
+      ]) {
+        final source = File(
+          'lib${Platform.pathSeparator}src${Platform.pathSeparator}l10n'
+          '${Platform.pathSeparator}$name',
+        ).readAsStringSync();
+        for (final key in ['pairingResultTitle', 'mineBody', 'replaceBody']) {
+          expect(source, contains(key), reason: '$name: $key');
+        }
+      }
+    });
   });
 
   group('E145: sentOutcome and receivedOutcome', () {

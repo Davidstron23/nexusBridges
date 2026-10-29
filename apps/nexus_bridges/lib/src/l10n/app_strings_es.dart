@@ -1,5 +1,5 @@
 import 'package:nexus_bridges_core/nexus_bridges_core.dart'
-    show TransferOutcome;
+    show PairingOutcome, TransferOutcome;
 
 import 'app_strings.dart';
 
@@ -228,7 +228,7 @@ final class AppStringsEs implements AppStrings {
   String get replaceButton => 'Sustituir';
 
   @override
-  String get keepBothButton => 'Conservar los dos';
+  String get keepBothButton => 'Conservar ambos';
 
   @override
   String mineTitle(String name) => 'Vinculado con $name';
@@ -238,6 +238,37 @@ final class AppStringsEs implements AppStrings {
       '¿Este equipo es tuyo? Si es tuyo, lo que envíe entrará sin preguntar y '
       'podrá explorar las carpetas que compartas. Si es de otra persona, '
       'siempre te pedirá permiso.';
+
+  @override
+  String get mineQuestion => '¿Este equipo es tuyo?';
+
+  @override
+  String get mineYesDetail =>
+      'Lo que envíe entra sin preguntar y puede explorar las carpetas que '
+      'compartas.';
+
+  @override
+  String get mineNoDetail =>
+      'Siempre te pedirá permiso antes de enviarte nada.';
+
+  @override
+  String replaceShortBody(String newName) =>
+      '$newName se llama igual que uno vinculado que no está a la vista. Si '
+      'es el mismo reinstalado, sustitúyelo.';
+
+  @override
+  String pairingEyebrow(PairingOutcome? outcome) => switch (outcome) {
+    PairingOutcome.paired => 'Puente Nexus establecido',
+    PairingOutcome.rejected => 'Conexión rechazada',
+    PairingOutcome.busy => 'Dispositivo ocupado',
+    PairingOutcome.paused => 'Conexión congelada',
+    PairingOutcome.cancelledByPeer => 'Conexión cancelada',
+    PairingOutcome.expired => 'Tiempo agotado',
+    PairingOutcome.lost => 'Equipo desaparecido',
+    PairingOutcome.networkChanged => 'Cambio de red',
+    PairingOutcome.failed || null => 'Error inesperado',
+    PairingOutcome.notSaved => 'Error al guardar',
+  };
 
   @override
   String get mineYesButton => 'Es mío';

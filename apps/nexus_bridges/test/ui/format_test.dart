@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/format.dart';
 
 final String _ellipsis = String.fromCharCode(0x2026);
@@ -207,6 +208,35 @@ void main() {
       expect(percentOf(5 * _tib ~/ 2, 5 * _tib), 50);
       expect(percentOf(1024 * _tib - 1, 1024 * _tib), 99);
       expect(percentOf(1024 * _tib, 1024 * _tib), 100);
+    });
+  });
+
+  group('E281: formatPercent', () {
+    test('Spanish puts a space before the percent sign and English does '
+        'not', () {
+      expect(formatPercent(0, 'es'), '0 %');
+      expect(formatPercent(0, 'en'), '0%');
+      expect(formatPercent(61, 'es'), '61 %');
+      expect(formatPercent(61, 'en'), '61%');
+      expect(formatPercent(100, 'es'), '100 %');
+      expect(formatPercent(100, 'en'), '100%');
+    });
+
+    test('any language other than Spanish gets the English form', () {
+      for (final code in ['', 'fr', 'de', 'pt']) {
+        expect(formatPercent(61, code), '61%', reason: code);
+      }
+    });
+
+    test('the figure is the same as the one that starts progressLine', () {
+      expect(
+        stringsFor('es').progressLine(61, 'a', 'b'),
+        startsWith('${formatPercent(61, 'es')} '),
+      );
+      expect(
+        stringsFor('en').progressLine(61, 'a', 'b'),
+        startsWith('${formatPercent(61, 'en')} '),
+      );
     });
   });
 

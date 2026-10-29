@@ -62,6 +62,21 @@ final RegExp _pathConstant = RegExp(
 );
 final RegExp _literal = RegExp(r"'([^']*)'");
 
+const List<String> _modalGlyphPaths = [
+  'M4.5 4.5l7 7M11.5 4.5l-7 7',
+  'M3.5 8.4l3 2.9 6-6.6',
+  'M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13',
+  'M7.3 4.6l1-1a2.6 2.6 0 0 1 3.7 3.7l-1 1M8.7 11.4l-1 1A2.6 2.6 0 0 1 4 '
+      '8.7l1-1M3 3l1.5 1.5M13 13l-1.5-1.5',
+  'M8 3.5v9M4.5 9L8 12.5 11.5 9',
+  'M4 10.6L12 4l8 6.6V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z',
+  'M9 14.6l2.2 2.1 4-4.3',
+  'M3.5 19.5c.6-3.3 2.8-5.2 5.5-5.2c2.7 0 4.9 1.9 5.5 5.2',
+  'M15.5 6.2a3 3 0 0 1 0 5.6M17.5 14.6c1.6.6 2.6 2.2 3 4.9',
+  'M12 1.8l8.4 3.1v6.3c0 5.3-3.4 9.1-8.4 11.1-5-2-8.4-5.8-8.4-11.1V4.9z',
+  'M7.2 10.2a6.8 6.8 0 0 1 9.6 0M9.1 12.4a4 4 0 0 1 5.8 0',
+];
+
 Map<String, List<String>> _programPaths() {
   final found = <String, List<String>>{};
   final directory = Directory(
@@ -358,6 +373,14 @@ void main() {
         Glyphs.phone,
         Glyphs.shield,
         Glyphs.more,
+        Glyphs.cross,
+        Glyphs.tick,
+        Glyphs.swap,
+        Glyphs.unlink,
+        Glyphs.arrowDown,
+        Glyphs.mine,
+        Glyphs.someoneElse,
+        Glyphs.networkShield,
       ];
       for (final glyph in glyphs) {
         for (final part in glyph.parts) {
@@ -371,6 +394,34 @@ void main() {
       expect(_metrics(parseSvgPath(brandMarkFullPath)), hasLength(6));
     });
 
+    test('the eight glyphs of the modals parse into the expected shapes '
+        '(E281)', () {
+      _expectRect(
+        _tightBounds(parseSvgPath(_modalGlyphPaths[0])),
+        const Rect.fromLTRB(4.5, 4.5, 11.5, 11.5),
+      );
+      expect(_metrics(parseSvgPath(_modalGlyphPaths[0])), hasLength(2));
+      _expectRect(
+        _tightBounds(parseSvgPath(_modalGlyphPaths[2])),
+        const Rect.fromLTRB(3, 3, 13, 13),
+      );
+      expect(_metrics(parseSvgPath(_modalGlyphPaths[2])), hasLength(4));
+      expect(_metrics(parseSvgPath(_modalGlyphPaths[3])), hasLength(4));
+      _expectRect(
+        _tightBounds(parseSvgPath(_modalGlyphPaths[4])),
+        const Rect.fromLTRB(4.5, 3.5, 11.5, 12.5),
+      );
+      final house = _metrics(parseSvgPath(_modalGlyphPaths[5])).single;
+      expect(house.isClosed, isTrue);
+      final body = parseSvgPath(_modalGlyphPaths[7]);
+      expect(_metrics(body), hasLength(1));
+      _expectOffset(_startOf(_metrics(body).single), const Offset(3.5, 19.5));
+      _expectOffset(_endOf(_metrics(body).single), const Offset(14.5, 19.5));
+      final shield = _metrics(parseSvgPath(_modalGlyphPaths[9])).single;
+      expect(shield.isClosed, isTrue);
+      expect(_metrics(parseSvgPath(_modalGlyphPaths[10])), hasLength(2));
+    });
+
     test('every path literal in lib/src/ui parses without throwing', () {
       final found = _programPaths();
       expect(
@@ -379,8 +430,9 @@ void main() {
       );
       expect(found['file_icon.dart'], hasLength(greaterThanOrEqualTo(6)));
       expect(found['brand_mark.dart'], hasLength(2));
+      expect(found['glyphs.dart'], containsAll(_modalGlyphPaths));
       final all = found.values.expand((paths) => paths).toList();
-      expect(all.length, greaterThanOrEqualTo(26));
+      expect(all.length, greaterThanOrEqualTo(37));
       for (final data in all) {
         expect(data.trim(), isNotEmpty);
         expect(() => parseSvgPath(data), returnsNormally, reason: data);

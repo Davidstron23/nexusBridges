@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart'
-    show TransferOutcome;
+    show PairingOutcome, TransferOutcome;
 
 import 'app_strings_en.dart';
 import 'app_strings_es.dart';
@@ -79,6 +79,11 @@ abstract class AppStrings {
   String get keepBothButton;
   String mineTitle(String name);
   String get mineBody;
+  String get mineQuestion;
+  String get mineYesDetail;
+  String get mineNoDetail;
+  String replaceShortBody(String newName);
+  String pairingEyebrow(PairingOutcome? outcome);
   String get mineYesButton;
   String get mineNoButton;
   String unpairTitle(String name);

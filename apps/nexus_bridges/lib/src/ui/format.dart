@@ -42,3 +42,6 @@ int percentOf(int done, int total) {
   if (total == 0) return 100;
   return done * 100 ~/ total;
 }
+
+String formatPercent(int percent, String languageCode) =>
+    languageCode == 'es' ? '$percent %' : '$percent%';
