@@ -167,7 +167,7 @@ void main() {
     });
 
     test('protocolVersion is re-exported by the protocol module', () {
-      expect(protocolVersion, '1.0');
+      expect(protocolVersion, '1.1');
     });
 
     test('PortInUseException keeps the port and prints it', () {

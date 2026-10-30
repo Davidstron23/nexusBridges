@@ -96,6 +96,14 @@ void main() {
       TransferOutcome.noFreeName: TransferResultKind.failed,
       TransferOutcome.interfaceDown: TransferResultKind.failed,
       TransferOutcome.unconfirmed: TransferResultKind.unconfirmed,
+      TransferOutcome.shortcut: TransferResultKind.rejected,
+      TransferOutcome.wholeDrive: TransferResultKind.rejected,
+      TransferOutcome.protectedData: TransferResultKind.rejected,
+      TransferOutcome.notFound: TransferResultKind.failed,
+      TransferOutcome.tooManyEntries: TransferResultKind.rejected,
+      TransferOutcome.tooDeep: TransferResultKind.rejected,
+      TransferOutcome.tooLargeForPeer: TransferResultKind.rejected,
+      TransferOutcome.unexpectedData: TransferResultKind.failed,
     };
 
     test('the table covers every outcome of the plan, in its order', () {

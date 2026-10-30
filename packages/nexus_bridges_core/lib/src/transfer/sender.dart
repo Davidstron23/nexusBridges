@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import '../identity/identity.dart' show DeviceIdentity;
 import '../pairing/pairing.dart' show PairedDevicesStore;
@@ -12,17 +13,41 @@ import '../transport/transport.dart'
         StreamPostAnswered,
         StreamPostFailed,
         StreamPostFailure;
+import 'folder_plan.dart';
+import 'folder_send.dart';
+import 'folder_stream.dart';
+import 'folders.dart' show isInsideTempFolder, isSameOrInside;
 import 'hashing.dart';
 import 'link.dart';
 import 'messages.dart';
 import 'names.dart'
-    show baseName, isBlockedType, isProgram, isValidFileName, visibleFileName;
+    show
+        baseName,
+        isBlockedType,
+        isDriveRoot,
+        isProgram,
+        isShortcutName,
+        isValidFileName,
+        visibleFileName;
 import 'platform.dart';
 import 'transfer.dart';
 
 const Duration _pollMargin = Duration(seconds: 3);
 
 const Duration _retryDelay = Duration(seconds: 1);
+
+const int _manifestSliceBytes = 65536;
+
+Stream<List<int>> _slices(Uint8List data) async* {
+  for (var offset = 0; offset < data.length; offset += _manifestSliceBytes) {
+    final end = offset + _manifestSliceBytes;
+    yield Uint8List.sublistView(
+      data,
+      offset,
+      end < data.length ? end : data.length,
+    );
+  }
+}
 
 String _randomHex32() {
   final random = Random.secure();
@@ -42,7 +67,34 @@ final class _OutSession {
     required this.peerName,
     required this.isProgram,
     required this.typeCheck,
+    this.isFolder = false,
+    this.realPath,
   });
+
+  final bool isFolder;
+
+  final String? realPath;
+
+  final Completer<TransferResultView?> completion =
+      Completer<TransferResultView?>();
+
+  FolderPlanJob? planJob;
+
+  FolderPlan? plan;
+
+  FrameLayout? layout;
+
+  FolderSummaryView? summary;
+
+  int sentFiles = 0;
+
+  int preparedEntries = 0;
+
+  int preparedFiles = 0;
+
+  String? problemPath;
+
+  String? finalName;
 
   final SendTarget target;
 
@@ -106,7 +158,16 @@ final class TransferSender {
     required this._onChanged,
     required this._log,
     this._onFilePicker,
+    this._dataDirPath = '',
+    this._exclusions = const NoExclusionSource(),
+    this._beforeStreamEntry,
   });
+
+  final String _dataDirPath;
+
+  final ExclusionSource _exclusions;
+
+  final Future<void> Function(int entry)? _beforeStreamEntry;
 
   final DeviceIdentity _identity;
 
@@ -140,7 +201,9 @@ final class TransferSender {
 
   bool _closed = false;
 
-  bool get sending => _active != null || _filePickerOpen;
+  bool _starting = false;
+
+  bool get sending => _active != null || _filePickerOpen || _starting;
 
   TransferResultView? get lastSent => _lastSent;
 
@@ -156,7 +219,39 @@ final class TransferSender {
       phase: session.phase,
       sentBytes: session.sentBytes,
       cancelling: session.cancelling,
+      isFolder: session.isFolder,
+      fileCount: session.plan?.manifest.files ?? 0,
+      sentFiles: session.sentFiles,
+      preparedEntries: session.preparedEntries,
+      preparedFiles: session.preparedFiles,
+      summary: session.summary,
     );
+  }
+
+  Future<TransferResultView?> sendElement(
+    SendTarget target,
+    String path, {
+    required SendTarget? Function() refresh,
+    SendDestination destination = const ReceiveFolderDestination(),
+  }) async {
+    if (_closed || _active != null || _starting) return null;
+    _starting = true;
+    _OutSession? session;
+    try {
+      session = await _beginElement(target, path, refresh);
+    } catch (e) {
+      _log('send element failed: ${e.runtimeType}');
+      _record(
+        target.fingerprint,
+        null,
+        baseName(path),
+        TransferOutcome.noContact,
+      );
+    } finally {
+      _starting = false;
+    }
+    if (session == null) return _closed ? null : _lastSent;
+    return session.completion.future;
   }
 
   Future<SendStart> sendFile(
@@ -341,12 +436,115 @@ final class TransferSender {
     unawaited(_run(session, path));
   }
 
+  Future<_OutSession?> _beginElement(
+    SendTarget target,
+    String path,
+    SendTarget? Function() refresh,
+  ) async {
+    final name = baseName(path);
+    final device = _paired.deviceOf(target.fingerprint);
+    final peerName = device == null ? null : sanitizeDisplayName(device.name);
+    SendTarget? current;
+    try {
+      current = refresh();
+    } catch (e) {
+      _log('send target refresh failed: ${e.runtimeType}');
+    }
+    void record(TransferOutcome outcome, {String? problemPath}) {
+      _record(
+        target.fingerprint,
+        peerName,
+        name,
+        outcome,
+        problemPath: problemPath,
+      );
+    }
+
+    if (device == null) {
+      record(TransferOutcome.unpaired);
+      return null;
+    }
+    if (current == null || current.fingerprint != target.fingerprint) {
+      record(TransferOutcome.noContact);
+      return null;
+    }
+    if (isDriveRoot(path)) {
+      record(TransferOutcome.wholeDrive);
+      return null;
+    }
+    if (isShortcutName(name)) {
+      record(TransferOutcome.shortcut);
+      return null;
+    }
+    final FileSystemEntityType kind;
+    try {
+      kind = await FileSystemEntity.type(path, followLinks: true);
+    } catch (_) {
+      record(TransferOutcome.unreadable);
+      return null;
+    }
+    if (kind == FileSystemEntityType.notFound) {
+      record(TransferOutcome.notFound);
+      return null;
+    }
+    if (kind != FileSystemEntityType.file &&
+        kind != FileSystemEntityType.directory) {
+      record(TransferOutcome.unreadable);
+      return null;
+    }
+    final real = await _fs.realPath(path);
+    if (real == null) {
+      record(TransferOutcome.unreadable);
+      return null;
+    }
+    if (isDriveRoot(real)) {
+      record(TransferOutcome.wholeDrive);
+      return null;
+    }
+    final dataReal = _dataDirPath.isEmpty
+        ? null
+        : await _fs.realPath(_dataDirPath) ?? _dataDirPath;
+    if (isInsideTempFolder(real) ||
+        (dataReal != null && isSameOrInside(real, dataReal))) {
+      record(TransferOutcome.protectedData);
+      return null;
+    }
+    if (_closed) return null;
+    final isFolder = kind == FileSystemEntityType.directory;
+    if (!isValidFileName(name)) {
+      record(TransferOutcome.invalidName, problemPath: isFolder ? name : null);
+      return null;
+    }
+    if (isBlockedType(name)) {
+      record(TransferOutcome.blockedType, problemPath: isFolder ? name : null);
+      return null;
+    }
+    final session = _OutSession(
+      target: current,
+      link: TransferLink(identity: _identity, target: current),
+      path: path,
+      name: name,
+      peerName: peerName,
+      isProgram: isFolder ? false : isProgram(name),
+      typeCheck: isFolder
+          ? Future<bool>.value(false)
+          : isProgramHere(name, _fs),
+      isFolder: isFolder,
+      realPath: real,
+    );
+    _active = session;
+    _onChanged();
+    unawaited(_run(session, path));
+    return session;
+  }
+
   void _record(
     String fingerprint,
     String? peerName,
     String name,
-    TransferOutcome outcome,
-  ) {
+    TransferOutcome outcome, {
+    String? problemPath,
+  }) {
     _lastSent = TransferResultView(
       direction: TransferDirection.outgoing,
       peerFingerprint: fingerprint,
@@ -355,6 +553,7 @@ final class TransferSender {
       isProgram: isProgram(name),
       outcome: outcome,
       canReveal: false,
+      problemPath: problemPath,
     );
     _onChanged();
   }
@@ -368,7 +567,193 @@ final class TransferSender {
     }
   }
 
+  Future<List<String>> _loadExclusions() async {
+    try {
+      final loaded = await _exclusions.load();
+      if (loaded != null &&
+          loaded.length <= 64 &&
+          loaded.every(isValidFileName)) {
+        return loaded;
+      }
+    } catch (e) {
+      _log('exclusions load failed: ${e.runtimeType}');
+    }
+    return defaultExclusions;
+  }
+
+  Future<void> _prepareFolder(_OutSession session) async {
+    final root = session.realPath;
+    if (root == null) {
+      await _conclude(session, TransferOutcome.unreadable);
+      return;
+    }
+    final exclusions = await _loadExclusions();
+    if (session.done) return;
+    final dataReal = _dataDirPath.isEmpty
+        ? ''
+        : await _fs.realPath(_dataDirPath) ?? _dataDirPath;
+    if (session.done) return;
+    final job = FolderPlanJob.start(
+      rootRealPath: root,
+      name: session.name,
+      exclusions: exclusions,
+      dataDirPath: _dataDirPath,
+      dataDirRealPath: dataReal,
+      onProgress: (entries, hashed) {
+        if (session.done) return;
+        session.preparedEntries = entries;
+        session.preparedFiles = hashed;
+        _onChanged();
+      },
+    );
+    session.planJob = job;
+    final result = await job.result;
+    session.planJob = null;
+    if (session.done) return;
+    switch (result) {
+      case PlanCancelled():
+        _finish(session, TransferOutcome.cancelledHere);
+      case PlanStopped(:final outcome, :final problemPath):
+        session.problemPath = problemPath;
+        _finish(session, outcome);
+      case PlanReady(:final plan):
+        await _requestFolder(session, plan);
+    }
+  }
+
+  Future<void> _requestFolder(_OutSession session, FolderPlan plan) async {
+    final manifest = plan.manifest;
+    final id = _randomHex32();
+    session
+      ..id = id
+      ..plan = plan
+      ..summary = plan.summary
+      ..layout = FrameLayout(manifest)
+      ..size = manifest.totalBytes
+      ..isProgram = plan.summary.containsPrograms
+      ..phase = OutgoingPhase.requesting;
+    _onChanged();
+    final offer = FolderOfferRequest(
+      transfer: id,
+      name: session.name,
+      entries: manifest.length,
+      files: manifest.files,
+      bytes: manifest.totalBytes,
+      depth: manifest.depth,
+      longest: manifest.longest,
+      manifestBytes: plan.encoded.length,
+    );
+    final reply = await session.link.post(
+      ApiPaths.transferOffer,
+      offer.toJson(),
+      abort: session.abort,
+    );
+    if (session.done) return;
+    if (reply == null) {
+      unawaited(
+        _sendCancel(
+          session,
+          CancelReason.noContact,
+          Limits.transferCloseCancelTimeout,
+        ),
+      );
+      _finish(session, TransferOutcome.noContact);
+      return;
+    }
+    final (status, json) = reply;
+    final state = status == 202 ? RemoteState.tryParse(json) : null;
+    final permit = state?.permit;
+    if (state != null &&
+        state.status == RemoteStatus.manifest &&
+        permit != null) {
+      await _sendManifest(session, permit);
+      return;
+    }
+    _finish(
+      session,
+      status == 200 || status == 202
+          ? TransferOutcome.noContact
+          : offerOutcome(status, json),
+    );
+  }
+
+  Future<void> _sendManifest(_OutSession session, String permit) async {
+    final id = session.id;
+    final plan = session.plan;
+    if (id == null || plan == null) {
+      _finish(session, TransferOutcome.noContact);
+      return;
+    }
+    final result = await session.link.uploadManifest(
+      transfer: id,
+      permit: permit,
+      body: _slices(plan.encoded),
+      contentLength: plan.encoded.length,
+      onProgress: (_) {},
+      onBodySent: () {},
+      idleTimeout: _idleTimeout,
+      answerTimeout: Limits.transferMessageTimeout,
+      abort: session.abort,
+    );
+    if (session.done) return;
+    switch (result) {
+      case StreamPostAnswered(:final response):
+        final json = decodeJsonObject(response.body);
+        final status = response.status;
+        final state = (status == 200 || status == 202) && json != null
+            ? RemoteState.tryParse(json)
+            : null;
+        final accepted = state?.permit;
+        if (status == 200 &&
+            state != null &&
+            state.status == RemoteStatus.accepted &&
+            accepted != null) {
+          await _accept(session, accepted);
+          return;
+        }
+        if (status == 202 &&
+            state != null &&
+            state.status == RemoteStatus.waiting) {
+          await _awaitDecision(session, id, picker: state.picker ?? false);
+          return;
+        }
+        _finish(
+          session,
+          status == 200 || status == 202
+              ? TransferOutcome.noContact
+              : offerOutcome(status, json ?? const <String, Object?>{}),
+        );
+      case StreamPostFailed():
+        unawaited(
+          _sendCancel(
+            session,
+            CancelReason.noContact,
+            Limits.transferCloseCancelTimeout,
+          ),
+        );
+        _finish(session, TransferOutcome.noContact);
+    }
+  }
+
+  Future<void> _entryProblem(_OutSession session, int entry) async {
+    final plan = session.plan;
+    if (plan == null) return;
+    session
+      ..problemPath = plan.manifest.relativePath(entry)
+      ..stopping = true;
+    await _sendCancel(
+      session,
+      CancelReason.unreadable,
+      Limits.transferCancelTimeout,
+      entry: entry,
+    );
+  }
+
   Future<void> _prepareAndRequest(_OutSession session, String path) async {
+    if (session.isFolder) {
+      await _prepareFolder(session);
+      return;
+    }
     unawaited(
       session.typeCheck.then((value) {
         if (session.done || value == session.isProgram) return;
@@ -498,7 +883,10 @@ final class TransferSender {
           }
           return;
         default:
-          _finish(session, outcomeOfRemote(state) ?? TransferOutcome.noContact);
+          _finish(
+            session,
+            _resolve(session, state) ?? TransferOutcome.noContact,
+          );
           return;
       }
     }
@@ -519,21 +907,46 @@ final class TransferSender {
       _finish(session, TransferOutcome.noContact);
       return;
     }
-    final result = await session.link.upload(
-      transfer: id,
-      permit: permit,
-      filePath: session.path,
-      size: session.size,
-      onProgress: (sent) => _progress(session, sent),
-      onBodySent: () => _bodySent(session),
-      idleTimeout: _idleTimeout,
-      answerTimeout: Limits.transferConfirmCap,
-      abort: session.abort,
-    );
+    final plan = session.plan;
+    final layout = session.layout;
+    final result = session.isFolder && plan != null && layout != null
+        ? await session.link.uploadFolder(
+            transfer: id,
+            permit: permit,
+            body: folderStream(
+              plan,
+              abort: session.abort,
+              onEntryProblem: (entry) => _entryProblem(session, entry),
+              beforeEntry: (entry) async {
+                await _beforeStreamEntry?.call(entry);
+              },
+            ),
+            contentLength: layout.totalBytes,
+            onProgress: (sent) => _progress(session, sent),
+            onBodySent: () => _bodySent(session),
+            idleTimeout: _idleTimeout,
+            answerTimeout: Limits.transferConfirmCap,
+            abort: session.abort,
+          )
+        : await session.link.upload(
+            transfer: id,
+            permit: permit,
+            filePath: session.path,
+            size: session.size,
+            onProgress: (sent) => _progress(session, sent),
+            onBodySent: () => _bodySent(session),
+            idleTimeout: _idleTimeout,
+            answerTimeout: Limits.transferConfirmCap,
+            abort: session.abort,
+          );
     if (session.done) return;
+    if (session.problemPath != null) {
+      _finish(session, TransferOutcome.unreadable);
+      return;
+    }
     if (session.stopping) {
       final outcome = result is StreamPostAnswered
-          ? _outcomeOfUpload(result.response)
+          ? _outcomeOfUpload(session, result.response)
           : null;
       if (outcome != null && outcome.kind == TransferResultKind.saved) {
         _finish(session, outcome);
@@ -542,7 +955,7 @@ final class TransferSender {
     }
     switch (result) {
       case StreamPostAnswered(:final response):
-        final outcome = _outcomeOfUpload(response);
+        final outcome = _outcomeOfUpload(session, response);
         if (outcome != null) {
           _finish(session, outcome);
           return;
@@ -561,11 +974,13 @@ final class TransferSender {
             _finish(session, TransferOutcome.uploadNotStarted);
           case StreamPostFailure.sourceError:
             session.stopping = true;
-            await _sendCancel(
-              session,
-              CancelReason.unreadable,
-              Limits.transferCancelTimeout,
-            );
+            if (session.problemPath == null) {
+              await _sendCancel(
+                session,
+                CancelReason.unreadable,
+                Limits.transferCancelTimeout,
+              );
+            }
             _finish(session, TransferOutcome.unreadable);
           case StreamPostFailure.stalled:
             await _finishAfterConsult(session, TransferOutcome.idle);
@@ -584,11 +999,29 @@ final class TransferSender {
     }
   }
 
-  TransferOutcome? _outcomeOfUpload(HttpsResponse response) {
+  TransferOutcome? _outcomeOfUpload(
+    _OutSession session,
+    HttpsResponse response,
+  ) {
     if (response.status != 200) return null;
     final json = decodeJsonObject(response.body);
     final state = json == null ? null : RemoteState.tryParse(json);
-    return state == null ? null : outcomeOfRemote(state);
+    return state == null ? null : _resolve(session, state);
+  }
+
+  TransferOutcome? _resolve(_OutSession session, RemoteState state) {
+    final outcome = outcomeOfRemote(state);
+    if (state.status != RemoteStatus.saved) return outcome;
+    final name = state.name;
+    if (session.isFolder) {
+      if (name == null || !isValidFileName(name) || isBlockedType(name)) {
+        return TransferOutcome.noContact;
+      }
+      session.finalName = name;
+    } else if (name != null) {
+      return TransferOutcome.noContact;
+    }
+    return outcome;
   }
 
   Future<void> _finishAfterConsult(
@@ -628,14 +1061,22 @@ final class TransferSender {
         await _keepGap(session, sentAt);
         continue;
       }
-      return outcomeOfRemote(state);
+      return _resolve(session, state);
     }
     return null;
   }
 
   void _progress(_OutSession session, int sent) {
     if (session.done) return;
-    session.sentBytes = min(sent, session.size);
+    final layout = session.layout;
+    if (session.isFolder && layout != null) {
+      final progress = layout.progressAt(sent);
+      session
+        ..sentBytes = min(progress.payload, session.size)
+        ..sentFiles = progress.files;
+    } else {
+      session.sentBytes = min(sent, session.size);
+    }
     final now = _clock();
     final lastAt = session.lastProgressAt;
     if (session.sentBytes >= session.size ||
@@ -651,6 +1092,7 @@ final class TransferSender {
     final now = _clock();
     session
       ..sentBytes = session.size
+      ..sentFiles = session.plan?.manifest.files ?? 0
       ..phase = OutgoingPhase.verifying
       ..lastByteAt = now
       ..lastRenewAt = now;
@@ -707,7 +1149,7 @@ final class TransferSender {
           ? RemoteState.tryParse(reply.$2)
           : null;
       if (state != null && state.status == RemoteStatus.saved) {
-        outcome = outcomeOfRemote(state);
+        outcome = _resolve(session, state);
       }
     } catch (e) {
       _log('send cancel failed: ${e.runtimeType}');
@@ -757,13 +1199,14 @@ final class TransferSender {
   Future<(int, Map<String, Object?>)?> _sendCancel(
     _OutSession session,
     CancelReason reason,
-    Duration timeout,
-  ) {
+    Duration timeout, {
+    int? entry,
+  }) {
     final transfer = session.id;
     if (transfer == null) return Future.value();
     final pending = session.link.post(
       ApiPaths.transferCancel,
-      CancelRequest(transfer: transfer, reason: reason).toJson(),
+      CancelRequest(transfer: transfer, reason: reason, entry: entry).toJson(),
       timeout: timeout,
     );
     _cancels.add(pending);
@@ -781,17 +1224,26 @@ final class TransferSender {
     if (session.done) return;
     session.done = true;
     session.abort.abort();
+    session.planJob?.cancel();
     if (identical(_active, session)) _active = null;
-    _lastSent = TransferResultView(
+    final result = TransferResultView(
       direction: TransferDirection.outgoing,
       peerFingerprint: session.target.fingerprint,
       peerName: session.peerName,
-      fileName: visibleFileName(session.name),
+      fileName: visibleFileName(
+        session.isFolder ? session.finalName ?? session.name : session.name,
+      ),
       isProgram: session.isProgram,
       outcome: outcome,
       canReveal: false,
+      isFolder: session.isFolder,
+      fileCount: session.plan?.manifest.files ?? 0,
+      problemPath: session.problemPath,
+      size: session.size,
     );
+    _lastSent = result;
     _onChanged();
+    if (!session.completion.isCompleted) session.completion.complete(result);
   }
 
   Future<void> _keepGap(_OutSession session, Duration sentAt) {

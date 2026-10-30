@@ -145,6 +145,17 @@ final class FakePlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<FreeNameMove> moveFolderToFreeName(
+    String from,
+    String folder,
+    String name, {
+    required int maxNameUnits,
+  }) async {
+    await _record('moveFolderToFreeName', from);
+    return const MoveFailed();
+  }
+
+  @override
   Future<bool> markFromInternet(String filePath) async {
     await _record('markFromInternet', filePath);
     return false;

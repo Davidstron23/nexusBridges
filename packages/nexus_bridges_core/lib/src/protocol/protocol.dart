@@ -25,6 +25,7 @@ abstract final class ApiPaths {
   static const String transferWait = '$apiPrefix/transfer/wait';
   static const String transferCancel = '$apiPrefix/transfer/cancel';
   static const String transferUpload = '$apiPrefix/transfer/upload';
+  static const String transferManifest = '$apiPrefix/transfer/manifest';
   static const Set<String> anonymous = {
     register,
     pairStart,
@@ -126,6 +127,27 @@ abstract final class Limits {
   static const Duration replaceAfterAbsence = Duration(minutes: 2);
   static const Duration goodbyeCheckInterval = Duration(seconds: 5);
   static const int maxCombiningMarks = 4;
+  static const int maxFolderEntries = 100000;
+  static const int maxFolderDepth = 64;
+  static const int maxSelectionItems = 1000;
+  static const int maxManifestBytes = 16777216;
+  static const int maxManifestLineBytes = 2048;
+  static const int folderDirPathReserve = 12;
+  static const int folderNameMargin = 4;
+  static const int maxDangerousExtensions = 4096;
+  static const int folderWriterHighWater = 8388608;
+  static const int folderWriterLowWater = 4194304;
+  static const Duration transferManifestStartTimeout = Duration(seconds: 10);
+  static const Duration workerStopGrace = Duration(seconds: 2);
+  static const Duration queueElementGap = Duration(milliseconds: 200);
+  static const int mineTransferRequestsPerMinute = 300;
+  static const int foreignManifestsPerMinute = 12;
+  static const int queueFolderPlaceholderBytes = 67108864;
+  static const Duration manifestIdleTimeout = Duration(seconds: 5);
+  static const Duration manifestCapBase = Duration(seconds: 10);
+  static const int manifestMinBytesPerSecond = 262144;
+  static const Duration folderMeasureCap = Duration(seconds: 10);
+  static const int folderMeasureMaxEntries = 500000;
 }
 
 final Stopwatch _monotonicWatch = Stopwatch()..start();

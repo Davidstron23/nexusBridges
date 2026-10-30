@@ -77,6 +77,99 @@ final class OfferRequest {
   }
 }
 
+const int _maxLongestPath = 32767;
+
+final class FolderOfferRequest {
+  const FolderOfferRequest({
+    required this.transfer,
+    required this.name,
+    required this.entries,
+    required this.files,
+    required this.bytes,
+    required this.depth,
+    required this.longest,
+    required this.manifestBytes,
+  });
+
+  final String transfer;
+  final String name;
+  final int entries;
+  final int files;
+  final int bytes;
+  final int depth;
+  final int longest;
+  final int manifestBytes;
+
+  Map<String, Object?> toJson() => {
+    'protocol': protocolVersion,
+    'transfer': transfer,
+    'kind': 'folder',
+    'name': name,
+    'entries': entries,
+    'files': files,
+    'bytes': bytes,
+    'depth': depth,
+    'longest': longest,
+    'manifestBytes': manifestBytes,
+  };
+
+  bool get exceedsLimits =>
+      entries > Limits.maxFolderEntries ||
+      depth > Limits.maxFolderDepth ||
+      manifestBytes > Limits.maxManifestBytes;
+
+  static FolderOfferRequest? tryParse(Object? json) {
+    final map = _objectWithKeys(json, const {
+      'protocol',
+      'transfer',
+      'kind',
+      'name',
+      'entries',
+      'files',
+      'bytes',
+      'depth',
+      'longest',
+      'manifestBytes',
+    });
+    if (map == null || !_compatibleProtocol(map['protocol'])) return null;
+    final transfer = _transferId(map['transfer']);
+    final name = map['name'];
+    final entries = map['entries'];
+    final files = map['files'];
+    final bytes = map['bytes'];
+    final depth = map['depth'];
+    final longest = map['longest'];
+    final manifestBytes = map['manifestBytes'];
+    if (transfer == null || map['kind'] != 'folder' || name is! String) {
+      return null;
+    }
+    if (entries is! int || entries < 0) return null;
+    if (files is! int || files < 0 || files > entries) return null;
+    if (bytes is! int || bytes < 0 || bytes > Limits.maxTransferSize) {
+      return null;
+    }
+    if (depth is! int || depth < 0) return null;
+    if (longest is! int || longest < 0 || longest > _maxLongestPath) {
+      return null;
+    }
+    if (manifestBytes is! int ||
+        manifestBytes < 0 ||
+        manifestBytes < entries * 6) {
+      return null;
+    }
+    return FolderOfferRequest(
+      transfer: transfer,
+      name: name,
+      entries: entries,
+      files: files,
+      bytes: bytes,
+      depth: depth,
+      longest: longest,
+      manifestBytes: manifestBytes,
+    );
+  }
+}
+
 final class WaitRequest {
   const WaitRequest({required this.transfer});
 
@@ -103,25 +196,44 @@ enum CancelReason {
 }
 
 final class CancelRequest {
-  const CancelRequest({required this.transfer, required this.reason});
+  const CancelRequest({
+    required this.transfer,
+    required this.reason,
+    this.entry,
+  });
 
   final String transfer;
   final CancelReason reason;
+  final int? entry;
 
   Map<String, Object?> toJson() => {
     'transfer': transfer,
     'reason': reason.wire,
+    if (entry != null) 'entry': entry,
   };
 
   static CancelRequest? tryParse(Object? json) {
-    final map = _objectWithKeys(json, const {'transfer', 'reason'});
+    final map =
+        _objectWithKeys(json, const {'transfer', 'reason'}) ??
+        _objectWithKeys(json, const {'transfer', 'reason', 'entry'});
     if (map == null) return null;
     final transfer = _transferId(map['transfer']);
     final wire = map['reason'];
     if (transfer == null || wire is! String) return null;
+    final entry = map['entry'];
+    if (map.containsKey('entry')) {
+      if (entry is! int || entry < 1 || entry > Limits.maxFolderEntries) {
+        return null;
+      }
+      if (wire != CancelReason.unreadable.wire) return null;
+    }
     for (final reason in CancelReason.values) {
       if (reason.wire == wire) {
-        return CancelRequest(transfer: transfer, reason: reason);
+        return CancelRequest(
+          transfer: transfer,
+          reason: reason,
+          entry: map.containsKey('entry') ? entry as int : null,
+        );
       }
     }
     return null;
@@ -130,6 +242,7 @@ final class CancelRequest {
 
 enum RemoteStatus {
   waiting,
+  manifest,
   accepted,
   uploading,
   saving,
@@ -160,6 +273,7 @@ const Map<String, TransferOutcome> _failedReasons = {
   'no_free_name': TransferOutcome.noFreeName,
   'interface_down': TransferOutcome.interfaceDown,
   'unreadable': TransferOutcome.unreadable,
+  'unexpected_data': TransferOutcome.unexpectedData,
 };
 
 String? _wireReason(Map<String, TransferOutcome> reasons, TransferOutcome o) {
@@ -174,12 +288,21 @@ final class RemoteState {
     : status = RemoteStatus.waiting,
       permit = null,
       marked = null,
+      name = null,
+      reason = null;
+
+  const RemoteState.manifest({required String this.permit})
+    : status = RemoteStatus.manifest,
+      picker = null,
+      marked = null,
+      name = null,
       reason = null;
 
   const RemoteState.accepted({required String this.permit})
     : status = RemoteStatus.accepted,
       picker = null,
       marked = null,
+      name = null,
       reason = null;
 
   const RemoteState.uploading()
@@ -187,6 +310,7 @@ final class RemoteState {
       picker = null,
       permit = null,
       marked = null,
+      name = null,
       reason = null;
 
   const RemoteState.saving()
@@ -194,9 +318,10 @@ final class RemoteState {
       picker = null,
       permit = null,
       marked = null,
+      name = null,
       reason = null;
 
-  const RemoteState.saved({required bool this.marked})
+  const RemoteState.saved({required bool this.marked, this.name})
     : status = RemoteStatus.saved,
       picker = null,
       permit = null,
@@ -206,33 +331,37 @@ final class RemoteState {
     : status = RemoteStatus.rejected,
       picker = null,
       permit = null,
-      marked = null;
+      marked = null,
+      name = null;
 
   const RemoteState.cancelled()
     : status = RemoteStatus.cancelled,
       picker = null,
       permit = null,
       marked = null,
+      name = null,
       reason = null;
 
   const RemoteState.failed({required String this.reason})
     : status = RemoteStatus.failed,
       picker = null,
       permit = null,
-      marked = null;
+      marked = null,
+      name = null;
 
   final RemoteStatus status;
   final bool? picker;
   final String? permit;
   final bool? marked;
+  final String? name;
   final String? reason;
 
   Map<String, Object?> toJson() => {
     'state': status.name,
     ...switch (status) {
       RemoteStatus.waiting => {'picker': picker},
-      RemoteStatus.accepted => {'permit': permit},
-      RemoteStatus.saved => {'marked': marked},
+      RemoteStatus.manifest || RemoteStatus.accepted => {'permit': permit},
+      RemoteStatus.saved => {'marked': marked, if (name != null) 'name': name},
       RemoteStatus.rejected || RemoteStatus.failed => {'reason': reason},
       RemoteStatus.uploading ||
       RemoteStatus.saving ||
@@ -251,6 +380,10 @@ final class RemoteState {
         final map = _objectWithKeys(json, const {'state', 'picker'});
         final picker = map?['picker'];
         return picker is bool ? RemoteState.waiting(picker: picker) : null;
+      case RemoteStatus.manifest:
+        final map = _objectWithKeys(json, const {'state', 'permit'});
+        final permit = _transferId(map?['permit']);
+        return permit == null ? null : RemoteState.manifest(permit: permit);
       case RemoteStatus.accepted:
         final map = _objectWithKeys(json, const {'state', 'permit'});
         final permit = _transferId(map?['permit']);
@@ -268,9 +401,17 @@ final class RemoteState {
             ? null
             : const RemoteState.cancelled();
       case RemoteStatus.saved:
-        final map = _objectWithKeys(json, const {'state', 'marked'});
-        final marked = map?['marked'];
-        return marked is bool ? RemoteState.saved(marked: marked) : null;
+        final plain = _objectWithKeys(json, const {'state', 'marked'});
+        if (plain != null) {
+          final marked = plain['marked'];
+          return marked is bool ? RemoteState.saved(marked: marked) : null;
+        }
+        final named = _objectWithKeys(json, const {'state', 'marked', 'name'});
+        final marked = named?['marked'];
+        final name = named?['name'];
+        return marked is bool && name is String
+            ? RemoteState.saved(marked: marked, name: name)
+            : null;
       case RemoteStatus.rejected:
         final map = _objectWithKeys(json, const {'state', 'reason'});
         final reason = map?['reason'];
@@ -293,10 +434,11 @@ final class RemoteState {
       other.picker == picker &&
       other.permit == permit &&
       other.marked == marked &&
+      other.name == name &&
       other.reason == reason;
 
   @override
-  int get hashCode => Object.hash(status, picker, permit, marked, reason);
+  int get hashCode => Object.hash(status, picker, permit, marked, name, reason);
 }
 
 TransferOutcome? outcomeOfRemote(RemoteState state) => switch (state.status) {
@@ -308,6 +450,7 @@ TransferOutcome? outcomeOfRemote(RemoteState state) => switch (state.status) {
   RemoteStatus.failed => _failedReasons[state.reason],
   RemoteStatus.cancelled => TransferOutcome.cancelledByPeer,
   RemoteStatus.waiting ||
+  RemoteStatus.manifest ||
   RemoteStatus.accepted ||
   RemoteStatus.uploading ||
   RemoteStatus.saving => null,
@@ -337,6 +480,7 @@ TransferOutcome offerOutcome(int status, Map<String, Object?> json) {
   return switch (status) {
     409 || 429 || 503 => TransferOutcome.busy,
     403 when error == 'declined' => TransferOutcome.declined,
+    413 when error == 'too_large' => TransferOutcome.tooLargeForPeer,
     400 || 413 => TransferOutcome.incompatible,
     422 when error == 'path_too_long' => TransferOutcome.pathTooLong,
     422 => TransferOutcome.invalidName,

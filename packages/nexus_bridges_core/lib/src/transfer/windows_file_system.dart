@@ -7,8 +7,15 @@ import 'package:win32/win32.dart';
 
 import '../protocol/protocol.dart' show Limits;
 import 'names.dart'
-    show baseName, candidateName, isBlockedType, isValidFileName;
+    show
+        baseName,
+        candidateFolderName,
+        candidateName,
+        isBlockedType,
+        isValidFileName;
 import 'platform.dart';
+import 'windows_folder_io.dart'
+    show extendedPath, isDangerousTypeSync, stripExtendedPrefix;
 
 const int _errorAccessDenied = 5;
 const int _errorSharingViolation = 32;
@@ -32,6 +39,19 @@ const List<Duration> _moveRetryWaits = [
   Duration(milliseconds: 320),
 ];
 
+const List<Duration> _folderMoveRetryWaits = [
+  Duration(milliseconds: 20),
+  Duration(milliseconds: 40),
+  Duration(milliseconds: 80),
+  Duration(milliseconds: 160),
+  Duration(milliseconds: 320),
+  Duration(milliseconds: 640),
+  Duration(milliseconds: 640),
+  Duration(milliseconds: 640),
+  Duration(milliseconds: 640),
+  Duration(milliseconds: 640),
+];
+
 const String _zoneIdentifierText = '[ZoneTransfer]\r\nZoneId=3\r\n';
 
 typedef _CfGetSyncRootInfoNative = Int32 Function(
@@ -49,10 +69,6 @@ typedef _CfGetSyncRootInfo = int Function(
   int,
   Pointer<Uint32>,
 );
-
-typedef _AssocIsDangerousNative = Int32 Function(Pointer<Utf16>);
-
-typedef _AssocIsDangerous = int Function(Pointer<Utf16>);
 
 final class WindowsFileSystemPlatform implements FileSystemPlatform {
   const WindowsFileSystemPlatform();
@@ -99,6 +115,17 @@ final class WindowsFileSystemPlatform implements FileSystemPlatform {
   );
 
   @override
+  Future<FreeNameMove> moveFolderToFreeName(
+    String from,
+    String folder,
+    String name, {
+    required int maxNameUnits,
+  }) => _inIsolate<FreeNameMove>(
+    () => _moveFolderToFreeNameSync(from, folder, name, maxNameUnits),
+    const MoveFailed(),
+  );
+
+  @override
   Future<bool> markFromInternet(String filePath) async {
     try {
       if (!await File(filePath).exists()) return false;
@@ -112,7 +139,7 @@ final class WindowsFileSystemPlatform implements FileSystemPlatform {
 
   @override
   Future<bool> isDangerousType(String extension) =>
-      _inIsolate<bool>(() => _isDangerousTypeSync(extension), false);
+      _inIsolate<bool>(() => isDangerousTypeSync(extension), false);
 }
 
 Future<T> _inIsolate<T>(T Function() work, T fallback) async {
@@ -148,19 +175,6 @@ T? _withHandle<T>(String path, T? Function(Arena arena, HANDLE handle) body) {
   });
 }
 
-String _stripExtendedPrefix(String path) {
-  if (path.startsWith(r'\\?\UNC\')) return r'\\' + path.substring(8);
-  if (path.startsWith(r'\\?\')) return path.substring(4);
-  return path;
-}
-
-String _extendedPath(String path) {
-  final normal = path.replaceAll('/', r'\');
-  if (normal.startsWith(r'\\?\')) return normal;
-  if (normal.startsWith(r'\\')) return r'\\?\UNC\' + normal.substring(2);
-  return r'\\?\' + normal;
-}
-
 bool _isUncPath(String path) {
   if (path.startsWith(r'\\?\UNC\')) return true;
   return path.startsWith(r'\\') &&
@@ -183,7 +197,7 @@ String? _realPathSync(String path) {
       FILE_NAME_NORMALIZED,
     );
     if (value == 0 || value >= _finalPathChars) return null;
-    return _stripExtendedPrefix(buffer.toDartString(length: value));
+    return stripExtendedPrefix(buffer.toDartString(length: value));
   });
 }
 
@@ -267,19 +281,6 @@ bool _isCloudSyncedSync(String path) {
           0xFFFFFFFF;
       return result == 0 || result == _hresultMoreData;
     });
-  } catch (_) {
-    return false;
-  }
-}
-
-bool _isDangerousTypeSync(String extension) {
-  try {
-    final library = DynamicLibrary.open('shlwapi.dll');
-    final query = library
-        .lookupFunction<_AssocIsDangerousNative, _AssocIsDangerous>(
-          'AssocIsDangerous',
-        );
-    return using((arena) => query(arena.pcwstr(extension)) != 0);
   } catch (_) {
     return false;
   }
@@ -372,9 +373,13 @@ bool _setHiddenSync(String path) {
   });
 }
 
-MoveOutcome _moveNoReplaceSync(String from, String to) {
-  final source = _extendedPath(from);
-  final target = _extendedPath(to);
+MoveOutcome _moveNoReplaceSync(
+  String from,
+  String to, {
+  List<Duration> waits = _moveRetryWaits,
+}) {
+  final source = extendedPath(from);
+  final target = extendedPath(to);
   var retry = 0;
   while (true) {
     final int code = using((arena) {
@@ -395,10 +400,10 @@ MoveOutcome _moveNoReplaceSync(String from, String to) {
     }
     final retryable =
         code == _errorSharingViolation || code == _errorAccessDenied;
-    if (!retryable || retry >= _moveRetryWaits.length) {
+    if (!retryable || retry >= waits.length) {
       return MoveOutcome.failed;
     }
-    sleep(_moveRetryWaits[retry]);
+    sleep(waits[retry]);
     retry++;
   }
 }
@@ -422,6 +427,44 @@ FreeNameMove _moveToFreeNameSync(String from, String folder, String name) {
     final target = '$prefix$candidate';
     if (target.length > Limits.maxFinalPathChars) return const MoveFailed();
     switch (_moveNoReplaceSync(from, target)) {
+      case MoveOutcome.moved:
+        return MovedTo(candidate);
+      case MoveOutcome.nameTaken:
+        taken.add(upper);
+      case MoveOutcome.failed:
+        return const MoveFailed();
+    }
+  }
+  return const NoFreeName();
+}
+
+FreeNameMove _moveFolderToFreeNameSync(
+  String from,
+  String folder,
+  String name,
+  int maxNameUnits,
+) {
+  if (!isValidFileName(name) || isBlockedType(name)) return const MoveFailed();
+  final taken = <String>{};
+  try {
+    for (final entry in Directory(folder).listSync(followLinks: false)) {
+      taken.add(baseName(entry.path).toUpperCase());
+    }
+  } catch (_) {
+    return const MoveFailed();
+  }
+  final prefix = folder.endsWith(r'\') ? folder : '$folder\\';
+  for (var n = 0; n <= _maxNameAttempts; n++) {
+    final candidate = candidateFolderName(name, n);
+    if (candidate == null) return const NameTooLong();
+    if (candidate.length > maxNameUnits) return const NameTooLong();
+    final upper = candidate.toUpperCase();
+    if (taken.contains(upper)) continue;
+    switch (_moveNoReplaceSync(
+      from,
+      '$prefix$candidate',
+      waits: _folderMoveRetryWaits,
+    )) {
       case MoveOutcome.moved:
         return MovedTo(candidate);
       case MoveOutcome.nameTaken:

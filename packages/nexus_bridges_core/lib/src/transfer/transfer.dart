@@ -54,7 +54,15 @@ enum TransferOutcome {
   moveFailed,
   noFreeName,
   interfaceDown,
-  unconfirmed;
+  unconfirmed,
+  shortcut,
+  wholeDrive,
+  protectedData,
+  notFound,
+  tooManyEntries,
+  tooDeep,
+  tooLargeForPeer,
+  unexpectedData;
 
   TransferResultKind get kind => switch (this) {
     saved || savedWithoutMark => TransferResultKind.saved,
@@ -66,7 +74,13 @@ enum TransferOutcome {
     incompatible ||
     noSpace ||
     noFolder ||
-    pathTooLong => TransferResultKind.rejected,
+    pathTooLong ||
+    shortcut ||
+    wholeDrive ||
+    protectedData ||
+    tooManyEntries ||
+    tooDeep ||
+    tooLargeForPeer => TransferResultKind.rejected,
     cancelledHere ||
     cancelledByPeer ||
     unpaired => TransferResultKind.cancelled,
@@ -82,7 +96,9 @@ enum TransferOutcome {
     markFailed ||
     moveFailed ||
     noFreeName ||
-    interfaceDown => TransferResultKind.failed,
+    interfaceDown ||
+    notFound ||
+    unexpectedData => TransferResultKind.failed,
     unconfirmed => TransferResultKind.unconfirmed,
   };
 }
@@ -115,6 +131,84 @@ enum RevealResult { shown, folderOnly, unavailable }
 
 enum SendStart { started, nothingChosen, alreadySending }
 
+final class FolderSummaryView {
+  const FolderSummaryView({
+    required this.files,
+    required this.folders,
+    required this.totalBytes,
+    required this.excludedFolders,
+    required this.excludedBytes,
+    required this.linksOmitted,
+    required this.protectedOmitted,
+    required this.blockedOmitted,
+    required this.containsPrograms,
+    this.excludedBytesPartial = false,
+  });
+
+  final int files;
+  final int folders;
+  final int totalBytes;
+  final int excludedFolders;
+  final int excludedBytes;
+  final int linksOmitted;
+  final int protectedOmitted;
+  final int blockedOmitted;
+  final bool containsPrograms;
+  final bool excludedBytesPartial;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FolderSummaryView &&
+      other.files == files &&
+      other.folders == folders &&
+      other.totalBytes == totalBytes &&
+      other.excludedFolders == excludedFolders &&
+      other.excludedBytes == excludedBytes &&
+      other.linksOmitted == linksOmitted &&
+      other.protectedOmitted == protectedOmitted &&
+      other.blockedOmitted == blockedOmitted &&
+      other.containsPrograms == containsPrograms &&
+      other.excludedBytesPartial == excludedBytesPartial;
+
+  @override
+  int get hashCode => Object.hash(
+    files,
+    folders,
+    totalBytes,
+    excludedFolders,
+    excludedBytes,
+    linksOmitted,
+    protectedOmitted,
+    blockedOmitted,
+    containsPrograms,
+    excludedBytesPartial,
+  );
+}
+
+final class FirstLevelItem {
+  const FirstLevelItem({required this.name, required this.isFolder});
+
+  final String name;
+  final bool isFolder;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FirstLevelItem &&
+      other.name == name &&
+      other.isFolder == isFolder;
+
+  @override
+  int get hashCode => Object.hash(name, isFolder);
+}
+
+bool _sameItems(List<FirstLevelItem> a, List<FirstLevelItem> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
 final class OutgoingTransferView {
   const OutgoingTransferView({
     required this.peerFingerprint,
@@ -125,6 +219,12 @@ final class OutgoingTransferView {
     required this.phase,
     required this.sentBytes,
     required this.cancelling,
+    this.isFolder = false,
+    this.fileCount = 0,
+    this.sentFiles = 0,
+    this.preparedEntries = 0,
+    this.preparedFiles = 0,
+    this.summary,
   });
 
   final String peerFingerprint;
@@ -135,6 +235,12 @@ final class OutgoingTransferView {
   final OutgoingPhase phase;
   final int sentBytes;
   final bool cancelling;
+  final bool isFolder;
+  final int fileCount;
+  final int sentFiles;
+  final int preparedEntries;
+  final int preparedFiles;
+  final FolderSummaryView? summary;
 
   @override
   bool operator ==(Object other) =>
@@ -146,7 +252,13 @@ final class OutgoingTransferView {
       other.isProgram == isProgram &&
       other.phase == phase &&
       other.sentBytes == sentBytes &&
-      other.cancelling == cancelling;
+      other.cancelling == cancelling &&
+      other.isFolder == isFolder &&
+      other.fileCount == fileCount &&
+      other.sentFiles == sentFiles &&
+      other.preparedEntries == preparedEntries &&
+      other.preparedFiles == preparedFiles &&
+      other.summary == summary;
 
   @override
   int get hashCode => Object.hash(
@@ -158,6 +270,12 @@ final class OutgoingTransferView {
     phase,
     sentBytes,
     cancelling,
+    isFolder,
+    fileCount,
+    sentFiles,
+    preparedEntries,
+    preparedFiles,
+    summary,
   );
 }
 
@@ -231,6 +349,12 @@ final class IncomingTransferView {
     this.withoutMark = false,
     this.folder,
     this.receivedBytes = 0,
+    this.isFolder = false,
+    this.fileCount = 0,
+    this.receivedFiles = 0,
+    this.firstLevel = const [],
+    this.moreFirstLevel = 0,
+    this.canCancel = true,
   });
 
   final String sessionId;
@@ -243,6 +367,12 @@ final class IncomingTransferView {
   final bool withoutMark;
   final FolderQuestionView? folder;
   final int receivedBytes;
+  final bool isFolder;
+  final int fileCount;
+  final int receivedFiles;
+  final List<FirstLevelItem> firstLevel;
+  final int moreFirstLevel;
+  final bool canCancel;
 
   @override
   bool operator ==(Object other) =>
@@ -256,7 +386,13 @@ final class IncomingTransferView {
       other.stage == stage &&
       other.withoutMark == withoutMark &&
       other.folder == folder &&
-      other.receivedBytes == receivedBytes;
+      other.receivedBytes == receivedBytes &&
+      other.isFolder == isFolder &&
+      other.fileCount == fileCount &&
+      other.receivedFiles == receivedFiles &&
+      _sameItems(other.firstLevel, firstLevel) &&
+      other.moreFirstLevel == moreFirstLevel &&
+      other.canCancel == canCancel;
 
   @override
   int get hashCode => Object.hash(
@@ -270,6 +406,12 @@ final class IncomingTransferView {
     withoutMark,
     folder,
     receivedBytes,
+    isFolder,
+    fileCount,
+    receivedFiles,
+    Object.hashAll(firstLevel),
+    moreFirstLevel,
+    canCancel,
   );
 }
 
@@ -282,6 +424,10 @@ final class TransferResultView {
     required this.isProgram,
     required this.outcome,
     required this.canReveal,
+    this.isFolder = false,
+    this.fileCount = 0,
+    this.problemPath,
+    this.size = 0,
   });
 
   final TransferDirection direction;
@@ -291,6 +437,10 @@ final class TransferResultView {
   final bool isProgram;
   final TransferOutcome outcome;
   final bool canReveal;
+  final bool isFolder;
+  final int fileCount;
+  final String? problemPath;
+  final int size;
 
   @override
   bool operator ==(Object other) =>
@@ -301,7 +451,11 @@ final class TransferResultView {
       other.fileName == fileName &&
       other.isProgram == isProgram &&
       other.outcome == outcome &&
-      other.canReveal == canReveal;
+      other.canReveal == canReveal &&
+      other.isFolder == isFolder &&
+      other.fileCount == fileCount &&
+      other.problemPath == problemPath &&
+      other.size == size;
 
   @override
   int get hashCode => Object.hash(
@@ -312,6 +466,10 @@ final class TransferResultView {
     isProgram,
     outcome,
     canReveal,
+    isFolder,
+    fileCount,
+    problemPath,
+    size,
   );
 }
 
@@ -349,6 +507,27 @@ final class ReceiveFolder {
 
   final String path;
   final String volumeId;
+}
+
+sealed class SendDestination {
+  const SendDestination();
+}
+
+final class ReceiveFolderDestination extends SendDestination {
+  const ReceiveFolderDestination();
+}
+
+abstract interface class ExclusionSource {
+  Future<List<String>?> load();
+}
+
+const List<String> defaultExclusions = ['node_modules', 'build', '.dart_tool'];
+
+final class NoExclusionSource implements ExclusionSource {
+  const NoExclusionSource();
+
+  @override
+  Future<List<String>?> load() async => null;
 }
 
 abstract interface class ReceiveFolderStore {
@@ -394,6 +573,8 @@ final class TransferCoordinator {
     Duration confirmTimeout = Limits.transferConfirmTimeout,
     Future<void> Function(RandomAccessFile file, List<int> bytes) writeBytes =
         writeAllBytes,
+    ExclusionSource exclusions = const NoExclusionSource(),
+    Future<void> Function(int entry)? beforeStreamEntry,
     this._log = _noLog,
   }) : _revealer = revealer ?? const WindowsFolderRevealer() {
     _pickers = PickerTracker(
@@ -428,6 +609,9 @@ final class TransferCoordinator {
       onChanged: _notify,
       onFilePicker: (open) => open ? _pickers.open() : _pickers.close(),
       log: _log,
+      dataDirPath: dataDirPath,
+      exclusions: exclusions,
+      beforeStreamEntry: beforeStreamEntry,
     );
   }
 
@@ -579,6 +763,18 @@ final class TransferCoordinator {
     SendTarget target, {
     required SendTarget? Function() refresh,
   }) => _sender.sendFile(target, refresh: refresh);
+
+  Future<TransferResultView?> sendElement(
+    SendTarget target,
+    String path, {
+    required SendTarget? Function() refresh,
+    SendDestination destination = const ReceiveFolderDestination(),
+  }) => _sender.sendElement(
+    target,
+    path,
+    refresh: refresh,
+    destination: destination,
+  );
 
   void cancelOutgoing() => _sender.cancelOutgoing();
 
