@@ -1045,14 +1045,14 @@ void main() {
   });
 
   test('the upload route is paired only, outside the anonymous paths and '
-      'limited to 12 a minute', () async {
+      'limited to 300 a minute per address', () async {
     final s = await stack();
     final route = s.coordinator.uploadRoutes.singleWhere(
       (route) => route.path == ApiPaths.transferUpload,
     );
     expect(route.path, ApiPaths.transferUpload);
     expect(ApiPaths.anonymous, isNot(contains(route.path)));
-    expect(route.limit?.maxPerWindow, 12);
+    expect(route.limit?.maxPerWindow, 300);
     expect(route.limit?.window, const Duration(minutes: 1));
     expect(route.limit?.block, const Duration(minutes: 1));
     expect(

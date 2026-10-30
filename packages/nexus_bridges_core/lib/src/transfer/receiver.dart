@@ -18,6 +18,7 @@ import 'names.dart'
     show isBlockedType, isProgram, isValidFileName, visibleFileName;
 import 'pickers.dart';
 import 'platform.dart';
+import 'rate_limits.dart';
 import 'recent_rejections.dart';
 import 'transfer.dart';
 import 'writer.dart';
@@ -54,31 +55,9 @@ const ApiReply _uploadForbidden = ApiReply(403, {'error': 'forbidden'});
 
 const ApiReply _tooLarge = ApiReply(413, {'error': 'too_large'});
 
-const RouteLimit _offerLimit = RouteLimit(
-  maxPerWindow: Limits.transferOffersPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
+const ApiReply _rateLimited = ApiReply(429, {'error': 'rate_limited'});
 
-const RouteLimit _waitLimit = RouteLimit(
-  maxPerWindow: Limits.transferPollsPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
-
-const RouteLimit _cancelLimit = RouteLimit(
-  maxPerWindow: Limits.transferCancelsPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
-
-const RouteLimit _uploadLimit = RouteLimit(
-  maxPerWindow: Limits.transferUploadsPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
-
-const RouteLimit _manifestLimit = RouteLimit(
+const RouteLimit _transferRouteLimit = RouteLimit(
   maxPerWindow: Limits.mineTransferRequestsPerMinute,
   window: Duration(minutes: 1),
   block: Limits.routeBlock,
@@ -236,6 +215,8 @@ final class _InSession {
   Duration? lastPollAt;
 
   bool permitUsed = false;
+
+  bool uploadReserved = false;
 
   Duration? lastDataAt;
 
@@ -408,6 +389,10 @@ final class TransferReceiver {
 
   late final RecentRejections _recentNoSpace = RecentRejections(clock: _clock);
 
+  late final TransferRateLimiter _limiter = TransferRateLimiter(clock: _clock);
+
+  final Map<String, PeerRelation> _seenRelations = {};
+
   final Map<(String, String), _Record> _records = {};
 
   _InSession? _active;
@@ -450,21 +435,21 @@ final class TransferReceiver {
       access: RouteAccess.paired,
       handle: _handleOffer,
       maxBodyBytes: Limits.maxTransferBodyBytes,
-      limit: _offerLimit,
+      limit: _transferRouteLimit,
     ),
     ApiRoute(
       path: ApiPaths.transferWait,
       access: RouteAccess.paired,
       handle: _handleWait,
       maxBodyBytes: Limits.maxTransferBodyBytes,
-      limit: _waitLimit,
+      limit: _transferRouteLimit,
     ),
     ApiRoute(
       path: ApiPaths.transferCancel,
       access: RouteAccess.paired,
       handle: _handleCancel,
       maxBodyBytes: Limits.maxTransferBodyBytes,
-      limit: _cancelLimit,
+      limit: _transferRouteLimit,
     ),
   ]);
 
@@ -472,12 +457,12 @@ final class TransferReceiver {
     ApiUploadRoute(
       path: ApiPaths.transferUpload,
       handle: _handleUpload,
-      limit: _uploadLimit,
+      limit: _transferRouteLimit,
     ),
     ApiUploadRoute(
       path: ApiPaths.transferManifest,
       handle: _handleManifest,
-      limit: _manifestLimit,
+      limit: _transferRouteLimit,
     ),
   ]);
 
@@ -596,16 +581,27 @@ final class TransferReceiver {
   }
 
   void pairedChanged() {
+    if (_closed) return;
+    for (final fingerprint in List<String>.of(_seenRelations.keys)) {
+      final device = _paired.deviceOf(fingerprint);
+      if (device == null) {
+        _forgetRelation(fingerprint);
+      } else {
+        _noteRelation(fingerprint, device.relation);
+      }
+    }
     final session = _active;
-    if (_closed || session == null) return;
+    if (session == null) return;
     if (session.phase == _InPhase.finishing) return;
     if (_paired.deviceOf(session.fingerprint) != null) return;
     _end(session, TransferOutcome.unpaired);
   }
 
   void peerUnpaired(String fingerprint) {
+    if (_closed) return;
+    _forgetRelation(fingerprint);
     final session = _active;
-    if (_closed || session == null) return;
+    if (session == null) return;
     if (session.phase == _InPhase.finishing) return;
     if (session.fingerprint != fingerprint) return;
     _end(session, TransferOutcome.unpaired);
@@ -1194,6 +1190,66 @@ final class TransferReceiver {
     return cut <= 0 ? null : path.substring(0, cut);
   }
 
+  void _noteRelation(String fingerprint, PeerRelation relation) {
+    final previous = _seenRelations[fingerprint];
+    _seenRelations[fingerprint] = relation;
+    if (previous != null && previous != relation) {
+      _limiter.relationChanged(fingerprint, previous, relation);
+    }
+  }
+
+  void _forgetRelation(String fingerprint) {
+    _seenRelations.remove(fingerprint);
+    _limiter.forget(fingerprint);
+  }
+
+  bool _reserve(
+    String fingerprint,
+    TransferRoute route,
+    PeerRelation relation,
+  ) {
+    _noteRelation(fingerprint, relation);
+    final verdict = _limiter.check(fingerprint, route, relation);
+    if (verdict == RateVerdict.limited) {
+      _log('transfer ${route.name} rate limited');
+    }
+    return verdict == RateVerdict.allowed;
+  }
+
+  bool _hasRoomFor(
+    String fingerprint,
+    PeerRelation relation, {
+    required bool folder,
+  }) {
+    _noteRelation(fingerprint, relation);
+    return _limiter.hasRoom(fingerprint, TransferRoute.upload, relation) &&
+        (!folder ||
+            _limiter.hasRoom(fingerprint, TransferRoute.manifest, relation));
+  }
+
+  ApiReply _decide(_InSession session, {bool cut = true}) {
+    if (!session.uploadReserved) {
+      final device = _paired.deviceOf(session.fingerprint);
+      if (device != null) {
+        if (!_reserve(
+          session.fingerprint,
+          TransferRoute.upload,
+          device.relation,
+        )) {
+          _end(
+            session,
+            TransferOutcome.cancelledByPeer,
+            register: false,
+            cut: cut,
+          );
+          return _rateLimited;
+        }
+        session.uploadReserved = true;
+      }
+    }
+    return _offerReply(session, _advance(session, defer: true));
+  }
+
   Future<ApiReply> _handleOffer(ApiCall call) async {
     if (_closed) return _unavailable;
     _InSession? session;
@@ -1216,6 +1272,9 @@ final class TransferReceiver {
     if (fingerprint == null) return (refusal: _unauthorized, session: null);
     final device = _paired.deviceOf(fingerprint);
     if (device == null) return (refusal: _unauthorized, session: null);
+    if (!_reserve(fingerprint, TransferRoute.offer, device.relation)) {
+      return (refusal: _rateLimited, session: null);
+    }
     if (!device.permissions.contains(Permission.receive)) {
       return (refusal: _declined, session: null);
     }
@@ -1251,6 +1310,13 @@ final class TransferReceiver {
       if (device.relation != PeerRelation.mine) {
         return (refusal: _incompatible, session: null);
       }
+    }
+    if (!_hasRoomFor(
+      fingerprint,
+      device.relation,
+      folder: folderRequest != null,
+    )) {
+      return (refusal: _rateLimited, session: null);
     }
     final session = _InSession(
       localId: _randomHex32(),
@@ -1321,10 +1387,20 @@ final class TransferReceiver {
       ..target = target
       ..proposedPath = proposal;
     if (isFolder) return _askManifest(session);
-    return _offerReply(session, _advance(session, defer: true));
+    return _decide(session);
   }
 
   ApiReply _askManifest(_InSession session) {
+    final device = _paired.deviceOf(session.fingerprint);
+    if (device != null &&
+        !_reserve(
+          session.fingerprint,
+          TransferRoute.manifest,
+          device.relation,
+        )) {
+      _end(session, TransferOutcome.cancelledByPeer, register: false);
+      return _rateLimited;
+    }
     final permit = _randomHex32();
     session
       ..manifestPermit = permit
@@ -1593,7 +1669,7 @@ final class TransferReceiver {
         session
           ..manifest = manifest
           ..upload = null;
-        return _offerReply(session, _advance(session, defer: true));
+        return _decide(session, cut: false);
     }
   }
 
@@ -2031,10 +2107,15 @@ final class TransferReceiver {
   }
 
   Future<ApiReply> _wait(ApiCall call) async {
-    final request = WaitRequest.tryParse(call.json);
-    if (request == null) return _incompatible;
     final fingerprint = call.clientFingerprint;
     if (fingerprint == null) return _unauthorized;
+    final device = _paired.deviceOf(fingerprint);
+    if (device == null) return _unauthorized;
+    if (!_reserve(fingerprint, TransferRoute.wait, device.relation)) {
+      return _rateLimited;
+    }
+    final request = WaitRequest.tryParse(call.json);
+    if (request == null) return _incompatible;
     final session = _activeFor(fingerprint, request.transfer);
     if (session == null) {
       final record = _recordOf(fingerprint, request.transfer);
@@ -2073,10 +2154,15 @@ final class TransferReceiver {
   }
 
   Future<ApiReply> _cancel(ApiCall call) async {
-    final request = CancelRequest.tryParse(call.json);
-    if (request == null) return _incompatible;
     final fingerprint = call.clientFingerprint;
     if (fingerprint == null) return _unauthorized;
+    final device = _paired.deviceOf(fingerprint);
+    if (device == null) return _unauthorized;
+    if (!_reserve(fingerprint, TransferRoute.cancel, device.relation)) {
+      return _rateLimited;
+    }
+    final request = CancelRequest.tryParse(call.json);
+    if (request == null) return _incompatible;
     final session = _activeFor(fingerprint, request.transfer);
     if (session == null) {
       final record = _recordOf(fingerprint, request.transfer);
