@@ -195,7 +195,7 @@ List<RawEntry> listDirectorySync(String directoryPath) {
           data,
         );
         if (!more) {
-          if (nextError == _errorNoMoreFiles) break;
+          if (nextError == _errorNoMoreFiles || nextError == 0) break;
           throw const FileSystemException('The folder could not be listed');
         }
       }
