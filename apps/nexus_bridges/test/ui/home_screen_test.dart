@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/brand/brand_mark.dart';
+import 'package:nexus_bridges/src/ui/device_list.dart';
+import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
@@ -8,19 +12,22 @@ import 'fake_app_controller.dart';
 const _home = NetworkPrompt('net-home', 'Casa');
 const _office = NetworkPrompt('net-office', 'Oficina');
 
+Finder _rowOf(String name) =>
+    find.ancestor(of: find.text(name), matching: find.byType(DeviceRow));
+
 List<String> _tileTexts(WidgetTester tester, String name) {
-  final tile = find.ancestor(
-    of: find.text(name),
-    matching: find.byType(ListTile),
-  );
-  expect(tile, findsOneWidget);
+  final row = _rowOf(name);
+  expect(row, findsOneWidget);
   return [
     for (final text in tester.widgetList<Text>(
-      find.descendant(of: tile, matching: find.byType(Text)),
+      find.descendant(of: row, matching: find.byType(Text)),
     ))
       text.data ?? '',
   ];
 }
+
+Finder _discIn(String name) =>
+    find.descendant(of: _rowOf(name), matching: find.byType(DeviceDisc));
 
 DeviceEntry _entryWith({
   required String fingerprint,
@@ -48,11 +55,19 @@ Set<String> _allowedTexts(
   List<int> ports = const [],
 }) {
   return {
+    strings.activityTab,
+    strings.devicesTab,
+    strings.trustedNetworkLabel,
+    strings.onlyPairedCanSend,
     strings.devicesTitle,
     strings.noDevicesYet,
     strings.rescanHint,
     strings.rescanButton,
     strings.pausedBanner,
+    strings.sectionUnpaired,
+    strings.chipMine,
+    strings.visibleLabel,
+    strings.sendFileButton,
     for (final network in networks) strings.trustNetworkButton(network),
     strings.networkPromptTitle,
     for (final network in networks) strings.networkPromptBody(network),
@@ -76,19 +91,26 @@ void main() {
   for (final code in languageCodes) {
     final strings = stringsFor(code);
 
-    group('[$code] title', () {
-      testWidgets('shows devicesTitle in every screen', (tester) async {
+    group('[$code] title (point 153)', () {
+      testWidgets('no screen paints the mark nor appTitle, which the native '
+          'title bar already shows', (tester) async {
         final controller = FakeAppController();
         await pumpHome(tester, controller, code);
-        expect(find.text(strings.devicesTitle), findsOneWidget);
+        expect(find.text(strings.identityFailed), findsOneWidget);
+        expect(find.text(strings.appTitle), findsNothing);
+        expect(find.byType(BrandMark), findsNothing);
 
         controller.emit(const NodeState(portInUse: 53530));
         await tester.pumpAndSettle();
-        expect(find.text(strings.devicesTitle), findsOneWidget);
+        expect(find.text(strings.portInUse(53530)), findsOneWidget);
+        expect(find.text(strings.appTitle), findsNothing);
+        expect(find.byType(BrandMark), findsNothing);
 
         controller.emit(const NodeState());
         await tester.pumpAndSettle();
-        expect(find.text(strings.devicesTitle), findsOneWidget);
+        expect(find.text(strings.noDevicesYet), findsOneWidget);
+        expect(find.text(strings.appTitle), findsNothing);
+        expect(find.byType(BrandMark), findsNothing);
       });
     });
 
@@ -351,7 +373,7 @@ void main() {
           controller.calls.where((call) => call.startsWith('decideNetwork')),
           isEmpty,
         );
-        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(NbModal), findsNothing);
       });
 
       testWidgets('not paused shows no banner', (tester) async {
@@ -421,18 +443,38 @@ void main() {
           _tileTexts(tester, 'PC principal'),
           unorderedEquals([
             'PC principal',
-            strings.deviceTypeDesktop,
-            strings.pairedMineLabel,
+            strings.chipMine,
+            strings.visibleLabel,
+            strings.sendFileButton,
           ]),
         );
         expect(
           _tileTexts(tester, 'Movil'),
           unorderedEquals([
             'Movil',
-            strings.deviceTypeMobile,
             strings.notPairedLabel,
+            strings.visibleLabel,
+            strings.pairButton,
           ]),
         );
+        expect(
+          tester.widget<DeviceDisc>(_discIn('PC principal')).glyph,
+          DeviceGlyph.pc,
+        );
+        expect(
+          tester.widget<DeviceDisc>(_discIn('Movil')).glyph,
+          DeviceGlyph.phone,
+        );
+        final semantics = tester.ensureSemantics();
+        expect(
+          tester.getSemantics(_discIn('PC principal')).label,
+          strings.deviceTypeDesktop,
+        );
+        expect(
+          tester.getSemantics(_discIn('Movil')).label,
+          strings.deviceTypeMobile,
+        );
+        semantics.dispose();
         expect(find.text(strings.noDevicesYet), findsNothing);
         expect(find.text(strings.rescanHint), findsNothing);
       });
@@ -464,7 +506,7 @@ void main() {
           );
           expect(
             _tileTexts(tester, 'Laptop \u00B7 9F8E7D6C'),
-            contains(strings.pairedMineLabel),
+            contains(strings.chipMine),
           );
         },
       );
@@ -515,7 +557,7 @@ void main() {
         await pumpHome(tester, controller, code);
 
         expect(find.text(strings.rescanHint), findsOneWidget);
-        expect(find.text(strings.rescanButton), findsOneWidget);
+        expect(find.text(strings.rescanButton), findsNWidgets(2));
         expect(find.text(strings.noDevicesYet), findsNothing);
       });
 
@@ -525,7 +567,7 @@ void main() {
         );
         await pumpHome(tester, controller, code);
 
-        await tester.tap(find.text(strings.rescanButton));
+        await tester.tap(find.text(strings.rescanButton).last);
         await tester.pumpAndSettle();
 
         expect(controller.calls, ['rescan']);
@@ -537,7 +579,7 @@ void main() {
 
         expect(find.text(strings.noDevicesYet), findsOneWidget);
         expect(find.text(strings.rescanHint), findsNothing);
-        expect(find.text(strings.rescanButton), findsNothing);
+        expect(find.text(strings.rescanButton), findsOneWidget);
       });
 
       testWidgets('a non-empty list never shows the hint', (tester) async {
@@ -552,7 +594,7 @@ void main() {
 
         expect(find.text('PC'), findsOneWidget);
         expect(find.text(strings.rescanHint), findsNothing);
-        expect(find.text(strings.rescanButton), findsNothing);
+        expect(find.text(strings.rescanButton), findsOneWidget);
         expect(find.text(strings.noDevicesYet), findsNothing);
       });
     });

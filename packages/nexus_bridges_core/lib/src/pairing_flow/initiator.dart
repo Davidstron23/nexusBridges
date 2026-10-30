@@ -41,6 +41,8 @@ final class _InitiatorRun {
 
   PairingOutcome? outcome;
 
+  bool isNew = false;
+
   bool localConfirmed = false;
 
   bool saving = false;
@@ -122,6 +124,7 @@ final class PairingInitiator {
           ? run.code
           : null,
       outcome: run.outcome,
+      isNew: run.isNew,
     );
   }
 
@@ -144,7 +147,7 @@ final class PairingInitiator {
     final run = _run;
     if (_closed || run == null || run.finished || run.saving) return;
     if (!matches) {
-      cancel();
+      if (run.phase != PairingPhase.waitingPeer) cancel();
       return;
     }
     if (run.phase != PairingPhase.comparing) return;
@@ -158,7 +161,8 @@ final class PairingInitiator {
     final run = _run;
     if (_closed || run == null || run.saving) return;
     if (run.phase != PairingPhase.connecting &&
-        run.phase != PairingPhase.comparing) {
+        run.phase != PairingPhase.comparing &&
+        run.phase != PairingPhase.waitingPeer) {
       return;
     }
     unawaited(_sendCancel(run, CancelReason.cancelled));
@@ -528,7 +532,8 @@ final class PairingInitiator {
           result = PairingOutcome.failed;
       }
     }
-    _finish(run, isNew ? null : result);
+    run.isNew = isNew;
+    _finish(run, result);
     if (_closed) return;
     switch (result) {
       case PairingOutcome.paired:

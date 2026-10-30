@@ -47,6 +47,15 @@ String _earlyExit(String source) {
   fail('unbalanced braces after the second-instance check');
 }
 
+final RegExp _nextCase = RegExp(r'\n\s*(case\s+\w+\s*:|default\s*:)');
+
+String _caseBlock(String source, String message) {
+  final start = _indexOf(source, 'case $message:');
+  final end = source.indexOf(_nextCase, start + 1);
+  expect(end, isNonNegative, reason: 'no case after $message');
+  return source.substring(start, end);
+}
+
 void main() {
   late String source;
 
@@ -207,6 +216,156 @@ void main() {
         ),
         isTrue,
       );
+    });
+  });
+
+  group('E254 and E280: minimum client area and an always dark title bar', () {
+    late String rawWindow;
+    late String window;
+
+    setUpAll(() {
+      rawWindow = File(_windowPath).readAsStringSync();
+      window = _withoutLineComments(rawWindow);
+    });
+
+    test('the minimum client area is 760 by 520', () {
+      expect(window, contains('constexpr int kMinWindowWidth = 760;'));
+      expect(window, contains('constexpr int kMinWindowHeight = 520;'));
+      expect(_count(window, 'kMinWindowWidth = '), 1);
+      expect(_count(window, 'kMinWindowHeight = '), 1);
+    });
+
+    test('WM_GETMINMAXINFO is handled once in Win32Window::MessageHandler', () {
+      final handler = _indexOf(window, 'Win32Window::MessageHandler(');
+      expect(_count(window, 'case WM_GETMINMAXINFO:'), 1);
+      expect(_indexOf(window, 'case WM_GETMINMAXINFO:'), greaterThan(handler));
+    });
+
+    test('there is no WM_SETTINGCHANGE handler any more', () {
+      expect(rawWindow.contains('WM_SETTINGCHANGE'), isFalse);
+      expect(rawWindow.contains('ImmersiveColorSet'), isFalse);
+      expect(rawWindow.contains('wcscmp'), isFalse);
+      expect(rawWindow.contains('#include <cwchar>'), isFalse);
+    });
+
+    test('UpdateTheme sets TRUE in DWMWA_USE_IMMERSIVE_DARK_MODE without '
+        'reading the registry', () {
+      final start = _indexOf(
+        window,
+        'void Win32Window::UpdateTheme(HWND const window) {',
+      );
+      final open = window.indexOf('{', start);
+      final close = window.indexOf('\n}', open);
+      expect(close, isNonNegative);
+      final body = window
+          .substring(open + 1, close)
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      expect(
+        body,
+        'BOOL enable_dark_mode = TRUE; '
+        'DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, '
+        '&enable_dark_mode, sizeof(enable_dark_mode));',
+      );
+      expect(_count(window, 'void Win32Window::UpdateTheme('), 1);
+    });
+
+    test('nothing reads the Windows theme from the registry', () {
+      for (final gone in [
+        'RegGetValue',
+        'AppsUseLightTheme',
+        'kGetPreferredBrightnessRegKey',
+        'kGetPreferredBrightnessRegValue',
+        r'Themes\\Personalize',
+        'Registry key for app theme preference',
+        'light_mode',
+      ]) {
+        expect(rawWindow.contains(gone), isFalse, reason: gone);
+      }
+    });
+
+    test('the window still applies the theme when it is created', () {
+      final create = _indexOf(window, 'Win32Window::Create(');
+      expect(_indexOf(window, 'UpdateTheme(window);', create), greaterThan(0));
+    });
+
+    test('WM_GETMINMAXINFO sets ptMinTrackSize from the client area scaled '
+        'to the monitor', () {
+      final block = _caseBlock(window, 'WM_GETMINMAXINFO');
+      expect(block, contains('reinterpret_cast<MINMAXINFO*>(lparam)'));
+      expect(block, contains('FlutterDesktopGetDpiForMonitor('));
+      expect(
+        block,
+        contains('MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)'),
+      );
+      expect(block, contains('dpi / 96.0'));
+      expect(block, contains('Scale(kMinWindowWidth, scale)'));
+      expect(block, contains('Scale(kMinWindowHeight, scale)'));
+      expect(block, contains('ptMinTrackSize.x'));
+      expect(block, contains('ptMinTrackSize.y'));
+    });
+
+    test('WM_GETMINMAXINFO turns the client area into a window size with '
+        'AdjustWindowRectExForDpi before using it', () {
+      final block = _caseBlock(window, 'WM_GETMINMAXINFO');
+      final adjust = _indexOf(block, 'AdjustWindowRectExForDpi(');
+      final style = _indexOf(block, 'GWL_STYLE', adjust);
+      final extended = _indexOf(block, 'GWL_EXSTYLE', style);
+      final width = _indexOf(block, 'ptMinTrackSize.x', extended);
+      final height = _indexOf(block, 'ptMinTrackSize.y', extended);
+      expect(width, greaterThan(adjust));
+      expect(height, greaterThan(adjust));
+      expect(
+        block.contains(
+          RegExp(r'ptMinTrackSize\.x\s*=\s*frame\.right\s*-\s*frame\.left;'),
+        ),
+        isTrue,
+      );
+      expect(
+        block.contains(
+          RegExp(r'ptMinTrackSize\.y\s*=\s*frame\.bottom\s*-\s*frame\.top;'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('WM_GETMINMAXINFO ends the message with return 0', () {
+      final block = _caseBlock(window, 'WM_GETMINMAXINFO');
+      expect(_count(block, 'return 0;'), 1);
+      expect(_count(block, 'return'), 1);
+      final assigned = block.lastIndexOf('ptMinTrackSize.y');
+      expect(block.indexOf('return 0;'), greaterThan(assigned));
+    });
+
+    test('the colorization message still updates the theme', () {
+      expect(
+        window.contains(
+          RegExp(
+            r'case WM_DWMCOLORIZATIONCOLORCHANGED:\s*UpdateTheme\(hwnd\);',
+          ),
+        ),
+        isTrue,
+      );
+    });
+
+    test('the new C++ has no comments', () {
+      final block = _caseBlock(rawWindow, 'WM_GETMINMAXINFO');
+      expect(block.contains('//'), isFalse);
+      expect(block.contains('/*'), isFalse);
+      final start = _indexOf(rawWindow, 'void Win32Window::UpdateTheme(');
+      final end = rawWindow.indexOf('\n}', start);
+      final updateTheme = rawWindow.substring(start, end);
+      expect(updateTheme.contains('//'), isFalse);
+      expect(updateTheme.contains('/*'), isFalse);
+      for (final line in rawWindow.split('\n')) {
+        if (line.contains('kMinWindow')) {
+          expect(line.contains('//'), isFalse, reason: line);
+        }
+      }
+    });
+
+    test('the initial window size is still 1280 by 720', () {
+      expect(source, contains('Win32Window::Size size(1280, 720);'));
     });
   });
 }

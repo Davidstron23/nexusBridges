@@ -6,14 +6,22 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'src/app_controller.dart';
 import 'src/l10n/app_strings.dart';
+import 'src/ui/exit_flow.dart';
 import 'src/ui/home_screen.dart';
 import 'src/ui/network_prompt_dialog.dart';
 import 'src/ui/pairing_dialogs.dart';
+import 'src/ui/theme/app_theme.dart';
+
+const String windowClassName = 'FLUTTER_RUNNER_WIN32_WINDOW';
+const String windowTitle = 'NexusBridges';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final controller = AppController(
-    startNode: () => NexusNode.start(),
+    startNode: () => NexusNode.start(
+      ownerWindowClass: windowClassName,
+      ownerWindowTitle: windowTitle,
+    ),
     loadLanguage: () => loadLanguage(
       platformLanguageCode: PlatformDispatcher.instance.locale.languageCode,
     ),
@@ -33,19 +41,17 @@ class NexusBridgesApp extends StatefulWidget {
 
 class _NexusBridgesAppState extends State<NexusBridgesApp> {
   late final AppLifecycleListener _lifecycle;
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  Future<AppExitResponse>? _exiting;
 
   @override
   void initState() {
     super.initState();
     _lifecycle = AppLifecycleListener(
-      onExitRequested: () async {
-        try {
-          await widget.controller.shutdown().timeout(
-            const Duration(seconds: 3),
-          );
-        } catch (_) {}
-        return AppExitResponse.exit;
-      },
+      onExitRequested: () => _exiting ??= handleExitRequest(
+        widget.controller,
+        context: () => _navigatorKey.currentContext,
+      ).whenComplete(() => _exiting = null),
     );
   }
 
@@ -58,6 +64,7 @@ class _NexusBridgesAppState extends State<NexusBridgesApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       onGenerateTitle: (context) => AppStringsDelegate.of(context).appTitle,
       locale: Locale(widget.controller.languageCode),
       supportedLocales: const [Locale('en'), Locale('es')],
@@ -67,9 +74,10 @@ class _NexusBridgesAppState extends State<NexusBridgesApp> {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-      ),
+      theme: buildTheme(Brightness.light),
+      darkTheme: buildTheme(Brightness.dark),
+      themeMode: ThemeMode.dark,
+      themeAnimationDuration: Duration.zero,
       home: NetworkPromptHost(
         controller: widget.controller,
         child: PairingHost(

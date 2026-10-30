@@ -3,14 +3,22 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/main.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/format.dart';
+import 'package:nexus_bridges/src/ui/modal/code_boxes.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
+import 'package:nexus_bridges/src/ui/modal/stage.dart';
+import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
 import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
+import 'lifecycle_fixtures.dart';
 import 'pairing_fixtures.dart';
 
 final String _oldFingerprint = fingerprintOf('9999AAAA');
-const String _oldName = 'Portátil de Ana · 9999AAAA';
+const String _oldShort = '9999AAAA';
+const String _oldName = 'Port\u00E1til de Ana \u00B7 9999AAAA';
+final String _oldTitleName = glueFingerprint(_oldName, _oldShort);
 
 final MineQuestion _mine = MineQuestion(
   fingerprint: peerFingerprint,
@@ -51,6 +59,7 @@ Future<FakeAppController> _pumpWith(
     controller,
     code,
     settle: pairing?.phase != PairingPhase.connecting,
+    reduceMotion: true,
   );
   await tester.pump(dialogActivationDelay);
   return controller;
@@ -96,7 +105,7 @@ Future<FakeAppController> _openLater(
   NodeState state,
 ) async {
   final controller = FakeAppController(state: const NodeState());
-  await pumpHome(tester, controller, code);
+  await pumpHome(tester, controller, code, reduceMotion: true);
   expect(dialog, findsNothing);
   controller.emit(state);
   await tester.pump();
@@ -122,9 +131,100 @@ bool _enabled(WidgetTester tester, String label) {
   return button.onPressed != null;
 }
 
-Map<String, bool> _buttonStates(WidgetTester tester) => {
-  for (final label in dialogButtons(tester)) label: _enabled(tester, label),
-};
+void _expectCodeRightUnderTitle(WidgetTester tester, String title) {
+  final titleRect = tester.getRect(
+    find.descendant(of: dialog, matching: find.text(title)),
+  );
+  final codeRect = tester.getRect(
+    find.descendant(of: dialog, matching: find.byType(CodeBoxes)),
+  );
+  expect(codeRect.top, greaterThanOrEqualTo(titleRect.bottom - 0.5));
+  for (final element
+      in find.descendant(of: dialog, matching: find.byType(Text)).evaluate()) {
+    final target = find.byElementPredicate((candidate) => candidate == element);
+    if (find
+        .ancestor(of: target, matching: find.byType(CodeBoxes))
+        .evaluate()
+        .isNotEmpty) {
+      continue;
+    }
+    final text = element.widget as Text;
+    final data = text.data ?? text.textSpan?.toPlainText() ?? '';
+    if (data == title) continue;
+    final rect = tester.getRect(target);
+    expect(
+      rect.bottom <= titleRect.top + 0.5 || rect.top >= codeRect.bottom - 0.5,
+      isTrue,
+      reason: '"$data" sits between the title and the code',
+    );
+  }
+}
+
+String _labelOf(WidgetTester tester, Element button) => [
+  for (final text in tester.widgetList<Text>(
+    find.descendant(
+      of: find.byElementPredicate((element) => element == button),
+      matching: find.byType(Text),
+    ),
+  ))
+    text.data ?? '',
+].join(' ');
+
+Map<String, bool> _buttonStates(WidgetTester tester) {
+  final buttons = find.descendant(
+    of: dialog,
+    matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
+  );
+  final states = <String, bool>{};
+  for (final button in buttons.evaluate()) {
+    final label = _labelOf(tester, button);
+    if (label.isEmpty) continue;
+    states[label] = (button.widget as ButtonStyleButton).onPressed != null;
+  }
+  expect(states.keys, dialogButtons(tester));
+  return states;
+}
+
+String _titleOf(WidgetTester tester) => tester
+    .widget<ModalView>(
+      find.descendant(of: dialog, matching: find.byType(ModalView)),
+    )
+    .title;
+
+void _expectResult(
+  WidgetTester tester,
+  AppStrings s,
+  PairingOutcome? outcome, {
+  String name = peerName,
+}) {
+  expect(find.text(s.pairingResultTitle), findsNothing);
+  expect(
+    find.descendant(
+      of: dialog,
+      matching: find.text(s.pairingEyebrow(outcome).toUpperCase()),
+    ),
+    findsOneWidget,
+  );
+  expect(_titleOf(tester), _outcomeText(s, outcome, name));
+  expect(find.text(_outcomeText(s, outcome, name)), findsOneWidget);
+}
+
+String _tileLabel(String title, String detail) => '$title $detail';
+
+List<Color?> _colorsOutsideButtons(WidgetTester tester) => [
+  for (final element
+      in find.descendant(of: dialog, matching: find.byType(Text)).evaluate())
+    if (find
+        .ancestor(
+          of: find.byElementPredicate((candidate) => candidate == element),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is ButtonStyleButton,
+          ),
+        )
+        .evaluate()
+        .isEmpty)
+      (element.widget as Text).style?.color,
+];
 
 Color? _colorOf(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
@@ -160,14 +260,16 @@ void main() {
         expect(find.text(strings.pairingWithTitle(peerName)), findsOneWidget);
         expect(find.text(strings.connectingTo(peerName)), findsOneWidget);
         expect(
-          find.descendant(
-            of: dialog,
-            matching: find.byType(CircularProgressIndicator),
-          ),
-          findsOneWidget,
+          tester
+              .widget<ModalStage>(
+                find.descendant(of: dialog, matching: find.byType(ModalStage)),
+              )
+              .scene,
+          StageScene.connecting,
         );
         expect(dialogButtons(tester), [strings.cancelButton]);
         expect(find.textContaining(RegExp(r'\d{3} \d{3}')), findsNothing);
+        expect(codeIn(tester, dialog), isNull);
 
         await tapInDialog(tester, strings.cancelButton);
         await pumpFrames(tester);
@@ -189,12 +291,12 @@ void main() {
 
         expect(find.text(strings.pairingWithTitle(peerName)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(rawCode), findsNothing);
         expect(dialogButtons(tester), [
-          strings.cancelButton,
           strings.doesNotMatchButton,
           strings.matchesButton,
+          strings.cancelButton,
         ]);
         expect(find.text(strings.ignoreDeviceButton), findsNothing);
         expect(find.text(strings.fingerprintLine(peerShort)), findsNothing);
@@ -227,8 +329,8 @@ void main() {
         ]);
       });
 
-      testWidgets('waitingPeer shows the code and the wait text with no '
-          'buttons, not even Cancel', (tester) async {
+      testWidgets('waitingPeer shows the code, the wait text and only '
+          'Cancel (RF-248)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -239,10 +341,10 @@ void main() {
         );
 
         expect(find.text(strings.pairingWithTitle(peerName)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(strings.waitingForPeer(peerName)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsNothing);
-        expect(dialogButtons(tester), isEmpty);
+        expect(dialogButtons(tester), [strings.cancelButton]);
       });
 
       for (final missing in [null, '']) {
@@ -286,7 +388,7 @@ void main() {
         await _tapOutside(tester);
 
         expect(dialog, findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(controller.calls, isEmpty);
       });
 
@@ -337,7 +439,7 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(dialog, findsOneWidget);
-          expect(find.text(formattedCode), findsOneWidget);
+          expect(codeIn(tester, dialog), formattedCode);
         }
         expect(find.text(strings.waitingForPeer(peerName)), findsOneWidget);
 
@@ -352,7 +454,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(dialog, findsOneWidget);
-        expect(find.text(strings.pairingResultTitle), findsOneWidget);
+        _expectResult(tester, strings, PairingOutcome.paired);
 
         controller.emit(_with());
         await tester.pumpAndSettle();
@@ -394,12 +496,12 @@ void main() {
         );
         expect(find.text(strings.fingerprintLine(peerShort)), findsOneWidget);
         expect(find.text(strings.compareCode(peerName)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(strings.alreadyPairedNote), findsNothing);
         expect(dialogButtons(tester), [
-          strings.ignoreDeviceButton,
           strings.doesNotMatchButton,
           strings.matchesButton,
+          strings.ignoreDeviceButton,
         ]);
         expect(find.text(strings.cancelButton), findsNothing);
         expect(find.textContaining(peerFingerprint), findsNothing);
@@ -445,7 +547,7 @@ void main() {
 
         expect(find.text(strings.alreadyPairedNote), findsOneWidget);
         expect(find.text(strings.fingerprintLine(peerShort)), findsOneWidget);
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(dialogButtons(tester), [
           strings.doesNotMatchButton,
           strings.matchesButton,
@@ -457,8 +559,8 @@ void main() {
         expect(controller.calls, ['answerRequest matches']);
       });
 
-      testWidgets('waitingPeer shows the code and receiverWaiting with no '
-          'buttons', (tester) async {
+      testWidgets('waitingPeer shows the code, receiverWaiting and only '
+          'Cancel (RF-248)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -472,9 +574,9 @@ void main() {
           find.text(strings.pairingRequestTitle(peerName)),
           findsOneWidget,
         );
-        expect(find.text(formattedCode), findsOneWidget);
+        expect(codeIn(tester, dialog), formattedCode);
         expect(find.text(strings.receiverWaiting(peerName)), findsOneWidget);
-        expect(dialogButtons(tester), isEmpty);
+        expect(dialogButtons(tester), [strings.cancelButton]);
       });
 
       testWidgets('a request without name is titled by its short '
@@ -555,13 +657,9 @@ void main() {
             ),
           );
 
-          expect(find.text(strings.pairingResultTitle), findsOneWidget);
-          expect(
-            find.text(_outcomeText(strings, outcome, peerName)),
-            findsOneWidget,
-          );
+          _expectResult(tester, strings, outcome);
           expect(dialogButtons(tester), [strings.closeButton]);
-          expect(find.text(formattedCode), findsNothing);
+          expect(codeIn(tester, dialog), isNull);
 
           await tapInDialog(tester, strings.closeButton);
           await tester.pumpAndSettle();
@@ -658,10 +756,13 @@ void main() {
         final controller = await _pumpWith(tester, code, questions: [_mine]);
 
         expect(find.text(strings.mineTitle(peerName)), findsOneWidget);
-        expect(find.text(strings.mineBody), findsOneWidget);
+        expect(find.text(strings.mineQuestion), findsOneWidget);
+        expect(find.text(strings.mineYesDetail), findsOneWidget);
+        expect(find.text(strings.mineNoDetail), findsOneWidget);
+        expect(find.text(strings.mineBody), findsNothing);
         expect(dialogButtons(tester), [
-          strings.mineNoButton,
-          strings.mineYesButton,
+          _tileLabel(strings.mineYesButton, strings.mineYesDetail),
+          _tileLabel(strings.mineNoButton, strings.mineNoDetail),
         ]);
         expect(controller.calls, isEmpty);
       });
@@ -734,7 +835,7 @@ void main() {
           questions: [_mine],
         );
 
-        expect(find.text(strings.pairingResultTitle), findsOneWidget);
+        _expectResult(tester, strings, PairingOutcome.paired);
         expect(find.text(strings.mineTitle(peerName)), findsNothing);
 
         controller.emit(_with(questions: [_mine]));
@@ -783,11 +884,20 @@ void main() {
       ) async {
         await _pumpWith(tester, code, questions: [_replace]);
 
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
+        expect(
+          strings.replaceTitle(_oldTitleName).replaceAll('\u00A0', ' '),
+          strings.replaceTitle(_oldName),
+        );
+        expect(find.text(strings.replaceShortBody(peerName)), findsOneWidget);
         expect(
           find.text(strings.replaceBody(peerName, _oldName)),
-          findsOneWidget,
+          findsNothing,
         );
+        expect(find.text(_oldName), findsNothing);
+        expect(find.text(peerName), findsNWidgets(2));
+        expect(find.text(_oldShort), findsOneWidget);
+        expect(find.text(peerShort), findsOneWidget);
         expect(dialogButtons(tester), [
           strings.keepBothButton,
           strings.replaceButton,
@@ -845,7 +955,7 @@ void main() {
           questions: [_replace, _mine],
         );
 
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
         expect(find.text(strings.mineTitle(peerName)), findsNothing);
         expect(dialog, findsOneWidget);
 
@@ -853,7 +963,9 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(dialog, findsOneWidget);
-        expect(find.text(strings.replaceTitle(_oldName)), findsNothing);
+        for (final name in [_oldName, _oldTitleName]) {
+          expect(find.text(strings.replaceTitle(name)), findsNothing);
+        }
         expect(find.text(strings.mineTitle(peerName)), findsOneWidget);
 
         await tester.pump(dialogActivationDelay);
@@ -900,7 +1012,8 @@ void main() {
           ),
         );
         await tester.pumpWidget(NexusBridgesApp(controller));
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(modalTransitionDuration);
 
         expect(
           find.text(strings.pairingRequestTitle(peerName)),
@@ -908,7 +1021,7 @@ void main() {
         );
         await tester.pump(dialogActivationDelay);
         await tapInDialog(tester, strings.matchesButton);
-        await tester.pumpAndSettle();
+        await tester.pump();
 
         expect(controller.calls, ['answerRequest matches']);
       });
@@ -917,8 +1030,9 @@ void main() {
     group('[$code] C133 namesake line (RF-73, RF-83)', () {
       final warning = strings.namesakeWarning(namesakeName);
 
-      testWidgets('the receiver comparing shows it in red right after the '
-          'fingerprint line', (tester) async {
+      testWidgets('the receiver comparing shows the code right under the '
+          'title, then the fingerprint line and the warning in red (point '
+          '244)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -932,23 +1046,27 @@ void main() {
         expect(find.text(warning), findsOneWidget);
         expect(warning, contains(namesakeName));
         final texts = textsIn(tester, dialog);
-        expect(texts.sublist(0, 4), [
+        expect(texts.sublist(0, 5), [
           strings.pairingRequestTitle(peerName),
+          formattedCode,
           strings.fingerprintLine(peerShort),
           warning,
           strings.compareCode(peerName),
         ]);
+        _expectCodeRightUnderTitle(
+          tester,
+          strings.pairingRequestTitle(peerName),
+        );
         expect(_colorOf(tester, warning), _errorColor(tester, warning));
         expect(dialogButtons(tester), [
-          strings.ignoreDeviceButton,
           strings.doesNotMatchButton,
           strings.matchesButton,
+          strings.ignoreDeviceButton,
         ]);
       });
 
-      testWidgets('the receiver waiting shows it in red as the first line', (
-        tester,
-      ) async {
+      testWidgets('the receiver waiting shows the code right under the title '
+          'and then the warning in red (point 244)', (tester) async {
         await _pumpWith(
           tester,
           code,
@@ -962,16 +1080,23 @@ void main() {
         final texts = textsIn(tester, dialog);
         expect(texts, [
           strings.pairingRequestTitle(peerName),
-          warning,
           formattedCode,
+          warning,
           strings.receiverWaiting(peerName),
+          strings.cancelButton,
         ]);
+        _expectCodeRightUnderTitle(
+          tester,
+          strings.pairingRequestTitle(peerName),
+        );
         expect(_colorOf(tester, warning), _errorColor(tester, warning));
       });
 
       for (final phase in [PairingPhase.comparing, PairingPhase.waitingPeer]) {
-        testWidgets('the initiator ${phase.name} shows it in red as the first '
-            'line', (tester) async {
+        testWidgets('the initiator ${phase.name} shows the code right under '
+            'the title and then the warning in red (point 244)', (
+          tester,
+        ) async {
           await _pumpWith(
             tester,
             code,
@@ -980,11 +1105,21 @@ void main() {
           );
 
           final texts = textsIn(tester, dialog);
-          expect(texts.first, strings.pairingWithTitle(peerName));
-          expect(texts[1], warning);
+          expect(texts.sublist(0, 4), [
+            strings.pairingWithTitle(peerName),
+            formattedCode,
+            warning,
+            phase == PairingPhase.comparing
+                ? strings.compareCode(peerName)
+                : strings.waitingForPeer(peerName),
+          ]);
           expect(texts.where((text) => text == warning), hasLength(1));
+          _expectCodeRightUnderTitle(
+            tester,
+            strings.pairingWithTitle(peerName),
+          );
           expect(_colorOf(tester, warning), _errorColor(tester, warning));
-          expect(find.text(formattedCode), findsOneWidget);
+          expect(codeIn(tester, dialog), formattedCode);
         });
       }
 
@@ -1022,7 +1157,7 @@ void main() {
               namesake: namesakeName,
             );
 
-            expect(find.text(strings.pairingResultTitle), findsOneWidget);
+            _expectResult(tester, strings, outcome);
             expect(find.text(warning), findsNothing);
           });
         }
@@ -1042,13 +1177,18 @@ void main() {
             );
 
             expect(find.text(warning), findsNothing);
-            final colors = [
-              for (final text in tester.widgetList<Text>(
-                find.descendant(of: dialog, matching: find.byType(Text)),
-              ))
-                text.style?.color,
-            ];
-            expect(colors, isNot(contains(_errorColor(tester, formattedCode))));
+            expect(
+              find.descendant(of: dialog, matching: find.byType(ModalAlert)),
+              findsNothing,
+            );
+            final colors = _colorsOutsideButtons(tester);
+            expect(colors, isNotEmpty);
+            expect(
+              colors,
+              isNot(
+                contains(Theme.of(tester.element(dialog)).colorScheme.error),
+              ),
+            );
           });
         }
       }
@@ -1146,6 +1286,14 @@ void main() {
         'initiator comparing': view(
           role: PairingRole.initiator,
           phase: PairingPhase.comparing,
+        ),
+        'initiator waiting': view(
+          role: PairingRole.initiator,
+          phase: PairingPhase.waitingPeer,
+        ),
+        'receiver waiting': view(
+          role: PairingRole.receiver,
+          phase: PairingPhase.waitingPeer,
         ),
         'receiver comparing': receiverComparing,
         'receiver already paired': view(
@@ -1421,7 +1569,7 @@ void main() {
           code,
           _with(questions: [_replace]),
         );
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
         expect(_buttonStates(tester), {
           strings.keepBothButton: false,
           strings.replaceButton: false,
@@ -1431,7 +1579,7 @@ void main() {
         await _tapNow(tester, strings.replaceButton);
         await _tapNow(tester, strings.keepBothButton);
         expect(controller.calls, isEmpty);
-        expect(find.text(strings.replaceTitle(_oldName)), findsOneWidget);
+        expect(find.text(strings.replaceTitle(_oldTitleName)), findsOneWidget);
 
         await _wait(tester, 400);
         await _tapNow(tester, strings.replaceButton);
@@ -1516,8 +1664,8 @@ void main() {
         expect(dialog, findsOneWidget);
         expect(find.text(strings.mineTitle(peerName)), findsOneWidget);
         expect(_buttonStates(tester), {
-          strings.mineNoButton: false,
-          strings.mineYesButton: false,
+          _tileLabel(strings.mineYesButton, strings.mineYesDetail): false,
+          _tileLabel(strings.mineNoButton, strings.mineNoDetail): false,
         });
 
         await _tapNow(tester, strings.mineYesButton);
@@ -1571,11 +1719,312 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     });
+    group('[$code] E279 Cancel while waiting for the peer (RF-248)', () {
+      for (final (role, call, answer) in [
+        (PairingRole.initiator, 'cancelPairing', 'answerCode true'),
+        (PairingRole.receiver, 'cancelRequest', 'answerRequest matches'),
+      ]) {
+        final waiting = view(role: role, phase: PairingPhase.waitingPeer);
+
+        for (final namesake in [null, namesakeName]) {
+          testWidgets('the ${role.name} waiting'
+              '${namesake == null ? '' : ' with a namesake'} has a single '
+              'Cancel, armed, that calls $call', (tester) async {
+            final controller = await _pumpWith(
+              tester,
+              code,
+              pairing: waiting,
+              namesake: namesake,
+            );
+
+            expect(dialogButtons(tester), [strings.cancelButton]);
+            for (final absent in [
+              strings.matchesButton,
+              strings.doesNotMatchButton,
+              strings.ignoreDeviceButton,
+            ]) {
+              expect(find.text(absent), findsNothing);
+            }
+            expect(
+              find.text(strings.namesakeWarning(namesakeName)),
+              namesake == null ? findsNothing : findsOneWidget,
+            );
+            expect(codeIn(tester, dialog), formattedCode);
+            expect(_enabled(tester, strings.cancelButton), isTrue);
+
+            await _tapNow(tester, strings.cancelButton);
+            expect(controller.calls, [call]);
+          });
+        }
+
+        testWidgets('the ${role.name} going from comparing to waitingPeer: '
+            'Cancel is off at 0 and 499 ms and calls $call at 500 ms', (
+          tester,
+        ) async {
+          final controller = await _pumpWith(
+            tester,
+            code,
+            pairing: view(role: role, phase: PairingPhase.comparing),
+          );
+          await _tapNow(tester, strings.matchesButton);
+          expect(controller.calls, [answer]);
+
+          controller.emit(_with(pairing: waiting));
+          await tester.pump();
+          expect(_buttonStates(tester), {strings.cancelButton: false});
+          await _tapNow(tester, strings.cancelButton);
+          await _wait(tester, 499);
+          expect(_enabled(tester, strings.cancelButton), isFalse);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, [answer]);
+
+          await _wait(tester, 1);
+          expect(_enabled(tester, strings.cancelButton), isTrue);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, [answer, call]);
+        });
+
+        testWidgets('Esc and a tap outside do not close the ${role.name} '
+            'wait and call nothing', (tester) async {
+          final controller = await _pumpWith(tester, code, pairing: waiting);
+
+          await _escape(tester);
+          await _tapOutside(tester);
+
+          expect(dialog, findsOneWidget);
+          expect(dialogButtons(tester), [strings.cancelButton]);
+          expect(controller.calls, isEmpty);
+        });
+
+        testWidgets('with the file picker open, Cancel of the ${role.name} '
+            'wait stays off and rearms 500 ms after it closes', (tester) async {
+          final controller = await _pumpWith(tester, code, pairing: waiting);
+          expect(_enabled(tester, strings.cancelButton), isTrue);
+
+          controller.emit(NodeState(pairing: waiting, pickerOpen: true));
+          await tester.pump();
+          expect(_enabled(tester, strings.cancelButton), isFalse);
+          await _wait(tester, 1000);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, isEmpty);
+
+          controller.emit(_with(pairing: waiting));
+          await tester.pump();
+          await _wait(tester, 499);
+          expect(_enabled(tester, strings.cancelButton), isFalse);
+          await _wait(tester, 1);
+          await _tapNow(tester, strings.cancelButton);
+          expect(controller.calls, [call]);
+        });
+      }
+    });
+
+    group('[$code] E275 dialogs of 003 out of the foreground or with a '
+        'picker (RF-83, RF-98, RF-125)', () {
+      final receiverComparing = view(
+        role: PairingRole.receiver,
+        phase: PairingPhase.comparing,
+      );
+
+      Future<void> expectRearmsAfterResume(
+        WidgetTester tester,
+        FakeAppController controller,
+        String label,
+      ) async {
+        await stepLifecycle(tester, AppLifecycleState.resumed);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 499);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, label);
+        expect(controller.calls, isEmpty);
+        await _wait(tester, 1);
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+      }
+
+      testWidgets('the receiver notice goes off in the background and It '
+          'matches counts 500 ms after resumed', (tester) async {
+        resumeOnTearDown(tester);
+        await stepLifecycle(tester, AppLifecycleState.resumed);
+        final controller = await _pumpWith(
+          tester,
+          code,
+          pairing: receiverComparing,
+        );
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+
+        await stepLifecycle(tester, AppLifecycleState.inactive);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 1000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        for (final label in dialogButtons(tester)) {
+          await _tapNow(tester, label);
+        }
+        expect(controller.calls, isEmpty);
+
+        await expectRearmsAfterResume(
+          tester,
+          controller,
+          strings.matchesButton,
+        );
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      testWidgets('a request that arrives in the background does not arm '
+          'until 500 ms after resumed', (tester) async {
+        resumeOnTearDown(tester);
+        await goToLifecycle(tester, AppLifecycleState.inactive);
+        final controller = await _openLater(
+          tester,
+          code,
+          _with(pairing: receiverComparing),
+        );
+        await _wait(tester, 2000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+
+        await expectRearmsAfterResume(
+          tester,
+          controller,
+          strings.matchesButton,
+        );
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      testWidgets('with the file picker open the notice stays off after 1 s '
+          'and It matches counts 500 ms after it closes', (tester) async {
+        final controller = await _pumpWith(
+          tester,
+          code,
+          pairing: receiverComparing,
+        );
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+
+        controller.emit(
+          NodeState(pairing: receiverComparing, pickerOpen: true),
+        );
+        await tester.pump();
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 1000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+
+        controller.emit(_with(pairing: receiverComparing));
+        await tester.pump();
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _wait(tester, 499);
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+        await _wait(tester, 1);
+        expect(_buttonStates(tester).values, everyElement(isTrue));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      testWidgets('a request that arrives with the file picker open stays '
+          'off until 500 ms after it closes', (tester) async {
+        final controller = await _openLater(
+          tester,
+          code,
+          NodeState(pairing: receiverComparing, pickerOpen: true),
+        );
+        await _wait(tester, 1000);
+        expect(_buttonStates(tester).values, everyElement(isFalse));
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+
+        controller.emit(_with(pairing: receiverComparing));
+        await tester.pump();
+        await _wait(tester, 499);
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, isEmpty);
+        await _wait(tester, 1);
+        await _tapNow(tester, strings.matchesButton);
+        expect(controller.calls, ['answerRequest matches']);
+      });
+
+      for (final (name, question, yes, answer) in [
+        (
+          'is it yours?',
+          _mine,
+          strings.mineYesButton,
+          'answerMine $peerFingerprint',
+        ),
+        (
+          'replace?',
+          _replace,
+          strings.replaceButton,
+          'answerReplace $peerFingerprint',
+        ),
+      ]) {
+        testWidgets('$name goes off in the background and its yes counts '
+            '500 ms after resumed', (tester) async {
+          resumeOnTearDown(tester);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          final controller = await _pumpWith(
+            tester,
+            code,
+            questions: [question],
+          );
+          expect(_buttonStates(tester).values, everyElement(isTrue));
+
+          await stepLifecycle(tester, AppLifecycleState.inactive);
+          expect(_buttonStates(tester).values, everyElement(isFalse));
+          await _wait(tester, 1000);
+          await _tapNow(tester, yes);
+          expect(controller.calls, isEmpty);
+          expect(dialog, findsOneWidget);
+
+          await expectRearmsAfterResume(tester, controller, yes);
+          await _tapNow(tester, yes);
+          await tester.pumpAndSettle();
+          expect(controller.calls, ['$answer true']);
+          expect(dialog, findsNothing);
+        });
+
+        testWidgets('$name: Esc right after resumed gives the safe answer at '
+            'once', (tester) async {
+          resumeOnTearDown(tester);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          final controller = await _pumpWith(
+            tester,
+            code,
+            questions: [question],
+          );
+          await stepLifecycle(tester, AppLifecycleState.inactive);
+          await stepLifecycle(tester, AppLifecycleState.resumed);
+          expect(_buttonStates(tester).values, everyElement(isFalse));
+
+          await _escape(tester);
+
+          expect(controller.calls, ['$answer false']);
+          expect(dialog, findsNothing);
+        });
+
+        testWidgets('$name follows only the lifecycle: the file picker does '
+            'not disarm it', (tester) async {
+          final controller = await _pumpWith(
+            tester,
+            code,
+            questions: [question],
+          );
+          expect(_buttonStates(tester).values, everyElement(isTrue));
+
+          controller.emit(NodeState(questions: [question], pickerOpen: true));
+          await tester.pump();
+          expect(dialog, findsOneWidget);
+          expect(_buttonStates(tester).values, everyElement(isTrue));
+        });
+      }
+    });
   }
 
   group('C91 rendered texts of the dialogs', () {
-    const names = [peerName, peerShort, _oldName, namesakeName];
-    const userTexts = {peerName, formattedCode, _oldName};
+    final names = [peerName, peerShort, _oldName, _oldTitleName, namesakeName];
+    const userTexts = {peerName, formattedCode, _oldName, peerShort, _oldShort};
     final scenarios = <String, (PairingView?, List<PairingQuestion>, String?)>{
       'initiator connecting': (
         view(role: PairingRole.initiator, phase: PairingPhase.connecting),

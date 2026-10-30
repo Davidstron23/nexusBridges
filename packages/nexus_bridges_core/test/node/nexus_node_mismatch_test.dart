@@ -140,14 +140,18 @@ void main() {
         a.zone.run(() => a.node.answerRequest(ReceiverAnswer.matches));
 
         await a.until(
-          (s) => a.hasPaired(b) && s.pairing == null,
-          reason: 'A paired again',
+          (s) =>
+              a.hasPaired(b) &&
+              s.pairing?.outcome == PairingOutcome.paired &&
+              s.pairing!.isNew,
+          reason: 'A paired again and shows it as new',
         );
         await b.until(
           (s) => b.entryOf(a.fingerprint)?.mismatch == false,
           reason: 'mark cleared in B',
         );
         expect(b.state.pairing?.outcome, PairingOutcome.paired);
+        expect(b.state.pairing!.isNew, isFalse);
         expect(b.state.questions, questionsBefore);
         expect(
           b.state.questions.whereType<MineQuestion>().where(

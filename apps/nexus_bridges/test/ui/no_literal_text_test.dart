@@ -1,8 +1,29 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexus_bridges/src/ui/icons/file_icon.dart';
 
 final RegExp _literalText = RegExp(r'''Text\(\s*['"]''');
+
+final RegExp _literalSpan = RegExp(
+  r'''TextSpan\(\s*(?:\w+:\s*[^,()]+,\s*)*text:\s*['"]''',
+);
+
+final RegExp _materialIcon = RegExp(r'\bIcons\.');
+
+const List<String> _acronyms = [
+  'PDF',
+  'XLS',
+  'DOC',
+  'PPT',
+  'ZIP',
+  'EXE',
+  '</>',
+];
+
+final RegExp _acronymLiteral = RegExp(
+  '[\'"](?:${_acronyms.map(RegExp.escape).join('|')})[\'"]',
+);
 
 List<File> _uiSources() {
   final directory = Directory(
@@ -61,6 +82,148 @@ void main() {
         for (final match in _literalText.allMatches(source)) {
           final line = '\n'.allMatches(source.substring(0, match.start)).length;
           offenders.add('${file.path}:${line + 1}');
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('point 124: no literal TextSpan in lib/src/ui', () {
+    test('the pattern catches literal spans and lets variables through', () {
+      expect(_literalSpan.hasMatch("TextSpan(text: 'Hola')"), isTrue);
+      expect(_literalSpan.hasMatch('TextSpan(text: "Hola")'), isTrue);
+      expect(
+        _literalSpan.hasMatch("const TextSpan(\n  text: 'Hola',\n)"),
+        isTrue,
+      );
+      expect(_literalSpan.hasMatch("TextSpan(text:'Hola')"), isTrue);
+      expect(_literalSpan.hasMatch("TextSpan(text: '''Hola''')"), isTrue);
+      expect(
+        _literalSpan.hasMatch("TextSpan(style: style, text: 'Hola')"),
+        isTrue,
+      );
+      expect(
+        _literalSpan.hasMatch(
+          "TextSpan(\n  style: NbText.title,\n  text: 'Hola',\n)",
+        ),
+        isTrue,
+      );
+      expect(_literalSpan.hasMatch('TextSpan(text: label, style: s)'), isFalse);
+      expect(
+        _literalSpan.hasMatch('TextSpan(text: strings.appTitle)'),
+        isFalse,
+      );
+      expect(
+        _literalSpan.hasMatch('TextSpan(style: style, text: scene.title)'),
+        isFalse,
+      );
+      expect(_literalSpan.hasMatch('TextSpan(children: spans)'), isFalse);
+    });
+
+    test('lib/src/ui does build TextSpans, so the check is not empty', () {
+      final spans = [
+        for (final file in _uiSources())
+          ...RegExp(r'TextSpan\(').allMatches(file.readAsStringSync()),
+      ];
+      expect(spans, isNotEmpty);
+    });
+
+    test('no file in lib/src/ui builds a TextSpan from a literal', () {
+      final offenders = <String>[];
+      for (final file in _uiSources()) {
+        final source = file.readAsStringSync();
+        for (final match in _literalSpan.allMatches(source)) {
+          final line = '\n'.allMatches(source.substring(0, match.start)).length;
+          offenders.add('${file.path}:${line + 1}');
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('point 124: no Material Icons in lib/src/ui', () {
+    test('the pattern catches Icons. and lets the own glyphs through', () {
+      expect(_materialIcon.hasMatch('Icon(Icons.computer)'), isTrue);
+      expect(
+        _materialIcon.hasMatch('icon: const Icon(Icons.more_vert),'),
+        isTrue,
+      );
+      expect(_materialIcon.hasMatch('Icons.smartphone'), isTrue);
+      expect(_materialIcon.hasMatch('(Icons.send)'), isTrue);
+      expect(_materialIcon.hasMatch('GlyphIcon(Glyphs.more)'), isFalse);
+      expect(_materialIcon.hasMatch('CupertinoIcons.add'), isFalse);
+      expect(_materialIcon.hasMatch('AppIcons.send'), isFalse);
+      expect(_materialIcon.hasMatch('IconsTheme.of(context)'), isFalse);
+      expect(_materialIcon.hasMatch('Glyphs.send'), isFalse);
+    });
+
+    test('lib/src/ui does draw its own glyphs, so the check is not empty', () {
+      final glyphs = [
+        for (final file in _uiSources())
+          ...RegExp(r'GlyphIcon\(').allMatches(file.readAsStringSync()),
+      ];
+      expect(glyphs, isNotEmpty);
+    });
+
+    test('no file in lib/src/ui uses Icons.', () {
+      final offenders = <String>[];
+      for (final file in _uiSources()) {
+        final source = file.readAsStringSync();
+        for (final match in _materialIcon.allMatches(source)) {
+          final line = '\n'.allMatches(source.substring(0, match.start)).length;
+          offenders.add('${file.path}:${line + 1}');
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+  });
+
+  group('E259 point 138: file type acronyms live only in fileKindLabels', () {
+    test('the pattern catches quoted acronyms and nothing else', () {
+      expect(_acronymLiteral.hasMatch("'PDF'"), isTrue);
+      expect(_acronymLiteral.hasMatch('"EXE"'), isTrue);
+      expect(_acronymLiteral.hasMatch("label: '</>',"), isTrue);
+      expect(_acronymLiteral.hasMatch("'PDFs'"), isFalse);
+      expect(_acronymLiteral.hasMatch("'a.pdf'"), isFalse);
+      expect(_acronymLiteral.hasMatch('FileKind.pdf'), isFalse);
+      expect(_acronymLiteral.hasMatch("'Doc'"), isFalse);
+    });
+
+    test('fileKindLabels holds exactly the closed list', () {
+      expect(fileKindLabels.values.toSet(), _acronyms.toSet());
+      expect(fileKindLabels, hasLength(_acronyms.length));
+    });
+
+    test('file_icon.dart writes each acronym once, inside the map', () {
+      final source = File(
+        'lib${Platform.pathSeparator}src${Platform.pathSeparator}ui'
+        '${Platform.pathSeparator}icons${Platform.pathSeparator}'
+        'file_icon.dart',
+      ).readAsStringSync();
+      final start = source.indexOf('fileKindLabels = {');
+      expect(start, isNot(-1));
+      final end = source.indexOf('};', start);
+      for (final acronym in _acronyms) {
+        final hits = RegExp('[\'"]${RegExp.escape(acronym)}[\'"]')
+            .allMatches(source)
+            .toList();
+        expect(hits, hasLength(1), reason: acronym);
+        expect(
+          hits.single.start,
+          inInclusiveRange(start, end),
+          reason: acronym,
+        );
+      }
+    });
+
+    test('no other file in lib/src/ui quotes an acronym', () {
+      final offenders = <String>[];
+      for (final file in _uiSources()) {
+        if (file.uri.pathSegments.last == 'file_icon.dart') continue;
+        final source = file.readAsStringSync();
+        for (final match in _acronymLiteral.allMatches(source)) {
+          final line = '\n'.allMatches(source.substring(0, match.start)).length;
+          offenders.add('${file.path}:${line + 1} ${match.group(0)}');
         }
       }
       expect(offenders, isEmpty);

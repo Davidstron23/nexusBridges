@@ -254,6 +254,7 @@ final class NexusNode {
   DateTime? _emptySince;
   List<NetworkPrompt> _prompts = const [];
   List<NetworkPrompt> _pausedNetworks = const [];
+  List<NetworkPrompt> _trustedInUse = const [];
   bool _paused = true;
   bool _decisionNotSaved = false;
   NetworkChange? _lastChange;
@@ -364,6 +365,13 @@ final class NexusNode {
     _callCoordinator(
       'answer request',
       (coordinator) => coordinator.answerAsReceiver(answer),
+    );
+  }
+
+  void cancelRequest() {
+    _callCoordinator(
+      'cancel request',
+      (coordinator) => coordinator.cancelAsReceiver(),
     );
   }
 
@@ -687,6 +695,7 @@ final class NexusNode {
     _displayNames = const {};
     _prompts = const [];
     _pausedNetworks = const [];
+    _trustedInUse = const [];
     _paused = true;
     _decisionNotSaved = false;
     _lastChange = null;
@@ -986,6 +995,7 @@ final class NexusNode {
     if (_closing) return;
     _prompts = plan.prompts;
     _pausedNetworks = plan.pausedNetworks;
+    _trustedInUse = _portInUse == null ? plan.activeNetworks : const [];
     _paused = plan.paused;
     _refreshSuggest();
     _emit();
@@ -1692,12 +1702,14 @@ final class NexusNode {
     final view = _coordinator?.view;
     final paired = _paired;
     final transfers = _transfers;
+    final incoming = transfers?.incoming;
     final next = NodeState(
       identityStatus: _identityStatus,
       identityError: _identityError,
       prompts: _prompts,
       paused: _paused,
       pausedNetworks: _pausedNetworks,
+      activeNetworks: _trustedInUse,
       devices: _devices,
       displayNames: _displayNames,
       suggestRescan: _suggestRescan,
@@ -1721,11 +1733,18 @@ final class NexusNode {
           (_ignored?.hasUnsavedChanges ?? false),
       scanning: _scanning,
       outgoing: transfers?.outgoing,
-      incoming: transfers?.incoming,
+      incoming: incoming,
       lastSent: transfers?.lastSent,
       lastReceived: transfers?.lastReceived,
       transferInProgress: transfers?.busy ?? false,
       pickerOpen: transfers?.pickerOpen ?? false,
+      incomingNamesake: incoming == null || paired == null
+          ? null
+          : namesakeOf(
+              name: incoming.peerName,
+              excluding: incoming.peerFingerprint,
+              paired: paired.devices,
+            ),
     );
     _state = next;
     final last = _lastEmitted;
@@ -1752,6 +1771,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.lastReceived == b.lastReceived &&
       a.transferInProgress == b.transferInProgress &&
       a.pickerOpen == b.pickerOpen &&
+      a.incomingNamesake == b.incomingNamesake &&
       a.pairing == b.pairing &&
       a.pairingNamesake == b.pairingNamesake &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&
@@ -1759,6 +1779,7 @@ bool _sameState(NodeState a, NodeState b) {
       _sameList(a.notices, b.notices, (x, y) => x == y) &&
       _sameList(a.prompts, b.prompts, (x, y) => x == y) &&
       _sameList(a.pausedNetworks, b.pausedNetworks, (x, y) => x == y) &&
+      _sameList(a.activeNetworks, b.activeNetworks, (x, y) => x == y) &&
       _sameMap(a.displayNames, b.displayNames) &&
       _sameList(a.devices, b.devices, _sameDevice);
 }

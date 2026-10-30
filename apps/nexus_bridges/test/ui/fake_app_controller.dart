@@ -8,6 +8,7 @@ import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/network_prompt_dialog.dart';
 import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
+import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 const List<String> languageCodes = ['es', 'en'];
@@ -87,6 +88,11 @@ class FakeAppController extends AppController {
   }
 
   @override
+  void cancelRequest() {
+    calls.add('cancelRequest');
+  }
+
+  @override
   void answerRequest(ReceiverAnswer answer) {
     calls.add('answerRequest ${answer.name}');
   }
@@ -133,6 +139,107 @@ class FakeAppController extends AppController {
   void dismissNotice(int id) {
     calls.add('dismissNotice $id');
   }
+
+  SendFileResult sendFileResult = SendFileResult.started;
+  RevealResult revealResult = RevealResult.shown;
+  Future<void> Function() shutdownResult = () async {};
+
+  @override
+  Future<SendFileResult> sendFile(String fingerprint) async {
+    calls.add('sendFile $fingerprint');
+    return sendFileResult;
+  }
+
+  @override
+  void cancelSending() {
+    calls.add('cancelSending');
+  }
+
+  @override
+  void cancelReceiving(String sessionId) {
+    calls.add('cancelReceiving $sessionId');
+  }
+
+  @override
+  void answerIncoming(String sessionId, {required bool accept}) {
+    calls.add('answerIncoming $sessionId $accept');
+  }
+
+  @override
+  Future<void> useProposedFolder(String sessionId) async {
+    calls.add('useProposedFolder $sessionId');
+  }
+
+  @override
+  Future<void> chooseOtherFolder(String sessionId) async {
+    calls.add('chooseOtherFolder $sessionId');
+  }
+
+  @override
+  void useFolderAnyway(String sessionId) {
+    calls.add('useFolderAnyway $sessionId');
+  }
+
+  @override
+  void cancelFolderQuestion(String sessionId) {
+    calls.add('cancelFolderQuestion $sessionId');
+  }
+
+  @override
+  Future<void> rememberFolderAfterEnd(
+    String sessionId, {
+    required bool remember,
+  }) async {
+    calls.add('rememberFolderAfterEnd $sessionId $remember');
+  }
+
+  @override
+  void dismissFolderPanel(String sessionId) {
+    calls.add('dismissFolderPanel $sessionId');
+  }
+
+  @override
+  Future<RevealResult> revealLastReceived() async {
+    calls.add('revealLastReceived');
+    return revealResult;
+  }
+
+  @override
+  Future<void> shutdown() {
+    calls.add('shutdown');
+    return shutdownResult();
+  }
+}
+
+Widget homeApp(
+  AppController controller,
+  String languageCode, {
+  bool reduceMotion = false,
+}) {
+  return MaterialApp(
+    locale: Locale(languageCode),
+    supportedLocales: const [Locale('en'), Locale('es')],
+    localizationsDelegates: const [
+      AppStringsDelegate(),
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    theme: buildTheme(Brightness.light),
+    darkTheme: buildTheme(Brightness.dark),
+    themeMode: ThemeMode.system,
+    themeAnimationDuration: Duration.zero,
+    builder: reduceMotion
+        ? (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          )
+        : null,
+    home: NetworkPromptHost(
+      controller: controller,
+      child: PairingHost(controller: controller, child: HomeScreen(controller)),
+    ),
+  );
 }
 
 Future<void> pumpHome(
@@ -140,25 +247,10 @@ Future<void> pumpHome(
   AppController controller,
   String languageCode, {
   bool settle = true,
+  bool reduceMotion = false,
 }) async {
   await tester.pumpWidget(
-    MaterialApp(
-      locale: Locale(languageCode),
-      supportedLocales: const [Locale('en'), Locale('es')],
-      localizationsDelegates: const [
-        AppStringsDelegate(),
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      home: NetworkPromptHost(
-        controller: controller,
-        child: PairingHost(
-          controller: controller,
-          child: HomeScreen(controller),
-        ),
-      ),
-    ),
+    homeApp(controller, languageCode, reduceMotion: reduceMotion),
   );
   if (settle) {
     await tester.pumpAndSettle();
@@ -196,9 +288,13 @@ DiscoveredDevice deviceWith({
   );
 }
 
+const String brandName = 'NexusBridges';
+
+final RegExp _digitsOnly = RegExp(r'^\d+$');
+
 List<String> visibleTexts(WidgetTester tester) {
   return [
     for (final text in tester.widgetList<Text>(find.byType(Text)))
       text.data ?? text.textSpan?.toPlainText() ?? '',
-  ];
+  ].where((text) => text != brandName && !_digitsOnly.hasMatch(text)).toList();
 }

@@ -589,6 +589,102 @@ void main() {
     }
   });
 
+  group('E277 RF-248 RF-106b own cancels while waiting count for the global '
+      'cap', () {
+    Future<void> failWithOwnCancel(ReceiverFixture fixture, int n) async {
+      final initiator = fixture.initiator(peer(n), from: origin(n));
+      await initiator.begin();
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+      expect(fixture.view!.phase, PairingPhase.waitingPeer);
+      fixture.coordinator.cancelAsReceiver();
+      expect(fixture.view, isNull);
+      expect(fixture.coordinator.busy, isFalse);
+      expectState(await initiator.wait(), 'cancelled');
+    }
+
+    test('three own cancels from three origins with the clock still: one '
+        'PairingPaused, no attempt event, and every next pair/start gets the '
+        'paused reply until the window is over', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      for (var n = 0; n < 3; n++) {
+        await failWithOwnCancel(fixture, n);
+      }
+
+      await eventually(() => fixture.events.isNotEmpty);
+      await settle();
+      expect(fixture.events.map(summary), [
+        'paused ${first.add(Limits.pairingGlobalWindow)}',
+      ]);
+      expectPaused(await freshStart(fixture, 3));
+      expectPaused(await freshStart(fixture, 0));
+      expectPaused(
+        await fixture
+            .initiator(DeviceIdentity.generate(), from: origin(41))
+            .start(),
+      );
+      fixture.now = first.add(
+        Limits.pairingGlobalWindow - const Duration(seconds: 1),
+      );
+      expectPaused(await freshStart(fixture, 4));
+      await settle();
+      expect(fixture.events, hasLength(1));
+
+      fixture.now = first.add(Limits.pairingGlobalWindow);
+      await startAndLeave(fixture, 5);
+    });
+
+    test('two own cancels do not pause anybody', () async {
+      final fixture = await receiver();
+      await failWithOwnCancel(fixture, 0);
+      await failWithOwnCancel(fixture, 1);
+
+      await startAndLeave(fixture, 2);
+      await startAndLeave(fixture, 0);
+      await settle();
+      expect(fixture.events, isEmpty);
+    });
+
+    test('an own cancel adds up with a cancel of the initiator and a '
+        '"mismatch": the third failure pauses, with one attempt event for the '
+        'cancel of the initiator only', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      await failWithOwnCancel(fixture, 0);
+      fixture.now = first.add(const Duration(minutes: 1));
+      await failWithPeerCancel(fixture, 1);
+      fixture.now = first.add(const Duration(minutes: 2));
+      await failWithMismatch(fixture, 2);
+
+      await eventually(() => fixture.events.length == 2);
+      await settle();
+      expect(fixture.events.map(summary), [
+        'rejected cancelledAfterReveal',
+        'paused ${first.add(Limits.pairingGlobalWindow)}',
+      ]);
+      expect(
+        (fixture.events.first as PairingAttemptRejected).fingerprint,
+        peer(1).fingerprint,
+      );
+      expectPaused(await freshStart(fixture, 3));
+    });
+
+    test('the window slides for own cancels too: the first leaves exactly 10 '
+        'minutes after it happened', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      await failWithOwnCancel(fixture, 0);
+      fixture.now = first.add(const Duration(minutes: 4));
+      await failWithOwnCancel(fixture, 1);
+      fixture.now = first.add(Limits.pairingGlobalWindow);
+      await failWithOwnCancel(fixture, 2);
+
+      await startAndLeave(fixture, 3);
+      await settle();
+      expect(fixture.events, isEmpty);
+    });
+  });
+
   group('signature budget on the anonymous routes (Q-7)', () {
     Map<String, Object?> statusBody(DeviceIdentity caller) {
       final challenge = randomBytes(challengeLength);

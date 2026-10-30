@@ -1208,4 +1208,143 @@ void main() {
       );
     });
   });
+
+  group('E252: trusted networks in use in the state (RF-247)', () {
+    test('trusting a network with two interfaces gives one cleaned entry in '
+        'the same emission, and distrusting it empties the list', () async {
+      final f = await _Fixture.create();
+      f.adapters = [_wifi(_home, 'Ho\u202Eme')];
+      await f.start(
+        activeOf: _onLoopback(const [('127.0.0.1', 32), ('127.0.0.2', 32)]),
+      );
+      final asked = await f.until((s) => s.prompts.isNotEmpty);
+
+      expect(asked.activeNetworks, isEmpty);
+      expect(f.states.every((s) => s.activeNetworks.isEmpty), isTrue);
+
+      await f.node.decideNetwork(_home, NetworkDecision.trusted);
+
+      expect(f.state.paused, isFalse);
+      expect(f.state.activeNetworks, [_homePrompt]);
+      await _eventually(() => f.states.any((s) => !s.paused));
+      expect(f.states.firstWhere((s) => !s.paused).activeNetworks, [
+        _homePrompt,
+      ]);
+
+      await f.node.decideNetwork(_home, NetworkDecision.untrusted);
+
+      expect(f.state.paused, isTrue);
+      expect(f.state.pausedNetworks, [_homePrompt]);
+      expect(f.state.activeNetworks, isEmpty);
+      await _eventually(() => f.states.last.paused);
+      expect(f.states.last.activeNetworks, isEmpty);
+    });
+
+    test('two states that only differ in activeNetworks are both emitted, '
+        'once', () async {
+      final f = await _Fixture.create();
+      await f.startTrusted(pollInterval: _fastPoll);
+      await _quiet();
+      final emitted = f.states.length;
+      final last = f.states.last;
+
+      expect(last.activeNetworks, [_homePrompt]);
+
+      f.adapters = [
+        _wifi(_home, 'Home 2', addresses: ['192.168.50.21', '192.168.50.22']),
+      ];
+      await f.until(
+        (s) => s.activeNetworks.contains(const NetworkPrompt(_home, 'Home 2')),
+      );
+      await Future<void>.delayed(_noEmission);
+
+      expect(f.states, hasLength(emitted + 1));
+      expect(f.states.last.activeNetworks, [
+        const NetworkPrompt(_home, 'Home 2'),
+      ]);
+      expect(_shape(f.states.last), _shape(last));
+    });
+
+    test('while the node starts and before the first read the list is empty, '
+        'even with a saved trusted network', () async {
+      final f = await _Fixture.create();
+      await f.startTrusted();
+      expect(f.state.activeNetworks, [_homePrompt]);
+      final gate = f.gate = Completer<void>();
+      final readsBefore = f.reads;
+      final statesBefore = f.states.length;
+
+      await f.restart();
+      await _eventually(() => f.reads > readsBefore);
+
+      expect(f.state.activeNetworks, isEmpty);
+      expect(f.state.paused, isTrue);
+
+      gate.complete();
+      final back = await f.until((s) => !s.paused);
+
+      expect(back.activeNetworks, [_homePrompt]);
+      final sinceRestart = f.states.skip(statesBefore).toList();
+      final firstActive = sinceRestart.indexWhere((s) => !s.paused);
+      expect(
+        sinceRestart.take(firstActive).every((s) => s.activeNetworks.isEmpty),
+        isTrue,
+      );
+    });
+
+    test(
+      'with the TCP port held by another process the list stays empty '
+      'although the network is trusted, and it fills once retry frees it',
+      () async {
+        final (line, release) = await _child(_holdTcpScript);
+        final f = await _Fixture.create(port: int.parse(line));
+        await f.start();
+        await f.until((s) => s.prompts.isNotEmpty);
+
+        await f.node.decideNetwork(_home, NetworkDecision.trusted);
+
+        expect(f.state.portInUse, f.port);
+        expect(f.state.prompts, isEmpty);
+        expect(f.state.activeNetworks, isEmpty);
+        await _quiet();
+        expect(f.states.every((s) => s.activeNetworks.isEmpty), isTrue);
+
+        await release();
+        await f.node.retry();
+
+        expect(f.state.portInUse, isNull);
+        expect(f.state.activeNetworks, [_homePrompt]);
+      },
+      timeout: _childTimeout,
+      testOn: 'windows',
+    );
+
+    test(
+      'with the UDP port held from the start the list stays empty although '
+      'the network is trusted, and it fills once retry frees it',
+      () async {
+        final (line, release) = await _child(_holdUdpScript);
+        final f = await _Fixture.create(port: int.parse(line));
+        await f.start();
+
+        expect(f.state.portInUse, f.port);
+
+        await f.until((s) => s.prompts.isNotEmpty);
+        await f.node.decideNetwork(_home, NetworkDecision.trusted);
+
+        expect(f.state.portInUse, f.port);
+        expect(f.state.activeNetworks, isEmpty);
+        await _quiet();
+        expect(f.states.every((s) => s.activeNetworks.isEmpty), isTrue);
+
+        await release();
+        await f.node.retry();
+
+        expect(f.state.portInUse, isNull);
+        expect(f.state.activeNetworks, [_homePrompt]);
+      },
+      timeout: _childTimeout,
+      testOn: 'windows',
+    );
+  });
 }

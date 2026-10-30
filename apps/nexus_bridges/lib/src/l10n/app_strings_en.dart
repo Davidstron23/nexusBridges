@@ -1,3 +1,6 @@
+import 'package:nexus_bridges_core/nexus_bridges_core.dart'
+    show PairingOutcome, TransferOutcome;
+
 import 'app_strings.dart';
 
 final class AppStringsEn implements AppStrings {
@@ -134,7 +137,7 @@ final class AppStringsEn implements AppStrings {
   String connectingTo(String name) => 'Connecting to $name…';
 
   @override
-  String compareCode(String name) => 'Check that $name shows this code:';
+  String compareCode(String name) => 'Check that $name shows the same code.';
 
   @override
   String get matchesButton => 'It matches';
@@ -236,6 +239,37 @@ final class AppStringsEn implements AppStrings {
       'belongs to someone else, it will always ask for your permission.';
 
   @override
+  String get mineQuestion => 'Is this device yours?';
+
+  @override
+  String get mineYesDetail =>
+      'What it sends comes in without asking and it can browse the folders '
+      'you share.';
+
+  @override
+  String get mineNoDetail =>
+      'It will always ask for your permission before sending you anything.';
+
+  @override
+  String replaceShortBody(String newName) =>
+      '$newName has the same name as a paired device that is not visible. If '
+      'it is the same one reinstalled, replace it.';
+
+  @override
+  String pairingEyebrow(PairingOutcome? outcome) => switch (outcome) {
+    PairingOutcome.paired => 'Nexus bridge established',
+    PairingOutcome.rejected => 'Connection rejected',
+    PairingOutcome.busy => 'Device busy',
+    PairingOutcome.paused => 'Connection frozen',
+    PairingOutcome.cancelledByPeer => 'Connection cancelled',
+    PairingOutcome.expired => 'Time is up',
+    PairingOutcome.lost => 'Device vanished',
+    PairingOutcome.networkChanged => 'Network changed',
+    PairingOutcome.failed || null => 'Unexpected error',
+    PairingOutcome.notSaved => 'Could not save',
+  };
+
+  @override
   String get mineYesButton => "It's mine";
 
   @override
@@ -311,4 +345,385 @@ final class AppStringsEn implements AppStrings {
   @override
   String noticePeerCancelledTransfer(String name) =>
       '$name cancelled the send.';
+
+  @override
+  String get sendFileButton => 'Send file';
+
+  @override
+  String get sendNeedsVisible => 'It has to be visible to send it files.';
+
+  @override
+  String get sendNeedsPairAgain => 'Pair it again before sending it files.';
+
+  @override
+  String get alreadySending => 'Wait for the current send to finish.';
+
+  @override
+  String get sendUnavailable =>
+      "You can't send files to this device right now.";
+
+  @override
+  String get searchingDevices => 'Searching for devices…';
+
+  @override
+  String sendingToTitle(String name) => 'Sending to $name';
+
+  @override
+  String fileLine(String file, String size) => 'File: $file ($size)';
+
+  @override
+  String get programLabel => "It's a program";
+
+  @override
+  String preparingFile(String file) => 'Preparing $file…';
+
+  @override
+  String contactingPeer(String name) => 'Contacting $name…';
+
+  @override
+  String waitingAcceptance(String name) => 'Waiting for $name to accept…';
+
+  @override
+  String progressLine(int percent, String done, String total) =>
+      '$percent% · $done of $total';
+
+  @override
+  String peerCheckingFile(String name) => '$name is checking the file…';
+
+  @override
+  String get cancellingTransfer => 'Cancelling…';
+
+  @override
+  String incomingRequestTitle(String name) => '$name wants to send you a file';
+
+  @override
+  String get withoutMarkNote =>
+      'It will be saved without the mark that tells Windows it comes from '
+      "another device, because that drive doesn't support it.";
+
+  @override
+  String get acceptButton => 'Accept';
+
+  @override
+  String get rejectButton => 'Reject';
+
+  @override
+  String folderQuestionTitle(String name) => '$name is sending you a file';
+
+  @override
+  String get folderFirstTimeBody =>
+      'Choose where to save the files you receive. '
+      'It will be remembered for next time.';
+
+  @override
+  String get folderThisTimeBody =>
+      "The usual folder isn't available right now. Choose where to save this "
+      'file; next time the usual one will be used again.';
+
+  @override
+  String proposedFolderLine(String path) => 'Folder: $path';
+
+  @override
+  String get useThisFolderButton => 'Use this one';
+
+  @override
+  String get chooseOtherFolderButton => 'Choose another';
+
+  @override
+  String get pickerOpenNote => 'Choose a folder in the Windows window…';
+
+  @override
+  String folderForbidden(String path) =>
+      "Received files can't be saved in $path. Choose another folder.";
+
+  @override
+  String folderCannotUse(String path) =>
+      "$path can't be created or written to. Choose another folder.";
+
+  @override
+  String folderStillUnavailable(String path) =>
+      '$path is still not available. Choose another folder.';
+
+  @override
+  String folderUnknownVolume(String path) =>
+      "Windows doesn't identify the drive of $path, so it can't be used to "
+      'receive files. Choose another folder.';
+
+  @override
+  String folderAdminShare(String path) =>
+      "$path is in an administrative share of Windows, so it can't be used "
+      'to receive files. Choose another folder.';
+
+  @override
+  String get checkingFolder => 'Checking the folder…';
+
+  @override
+  String cautionNoMark(String path) =>
+      "Files saved in $path won't carry the mark that tells Windows they come "
+      "from another device, so Windows won't warn you before opening a "
+      'received program.';
+
+  @override
+  String cautionRemote(String path) =>
+      '$path is on a network drive or in a folder synced with the cloud: what '
+      'you receive may be uploaded to the cloud or depend on the network.';
+
+  @override
+  String get useAnywayButton => 'Use it anyway';
+
+  @override
+  String get transferAlreadyEnded => 'That send has already ended.';
+
+  @override
+  String folderRememberedNote(String path) =>
+      'Files you receive will be saved in $path.';
+
+  @override
+  String folderNotUsable(String path) =>
+      "$path can't be used, so it hasn't been remembered.";
+
+  @override
+  String get rememberAnywayButton => 'Remember it anyway';
+
+  @override
+  String get dontRememberButton => "Don't remember it";
+
+  @override
+  String receivingFromTitle(String name) => 'Receiving from $name';
+
+  @override
+  String get waitingForData => 'Waiting for the data…';
+
+  @override
+  String get checkingFile => 'Checking the file…';
+
+  @override
+  String get lastSentTitle => 'Last send';
+
+  @override
+  String get lastReceivedTitle => 'Last received';
+
+  @override
+  String toPeer(String name) => 'To $name';
+
+  @override
+  String fromPeer(String name) => 'From $name';
+
+  @override
+  String get showInFolderButton => 'Show in folder';
+
+  @override
+  String get revealFolderOnly =>
+      "The folder was opened, but the file couldn't be selected. It may have "
+      'been moved, renamed or deleted.';
+
+  @override
+  String get folderUnavailable => "That folder isn't available.";
+
+  @override
+  String sentOutcome(TransferOutcome outcome) => switch (outcome) {
+    TransferOutcome.saved => 'It arrived intact.',
+    TransferOutcome.savedWithoutMark =>
+      'It arrived intact, but it was saved without the mark that tells '
+          'Windows it comes from another device.',
+    TransferOutcome.declined =>
+      "The other device didn't accept it. You can try again in a minute.",
+    TransferOutcome.busy =>
+      'The other device is busy with another send. Try again in a moment.',
+    TransferOutcome.unanswered => "The other device didn't respond.",
+    TransferOutcome.invalidName =>
+      "The other device doesn't accept that file name.",
+    TransferOutcome.blockedType =>
+      "The other device doesn't accept that type of file.",
+    TransferOutcome.incompatible =>
+      "Your request isn't compatible with the other device.",
+    TransferOutcome.noSpace => "There isn't enough space on the other device.",
+    TransferOutcome.noFolder =>
+      "The other device hasn't chosen where to save the files.",
+    TransferOutcome.pathTooLong =>
+      'The path where the other device would save it is too long for Windows.',
+    TransferOutcome.cancelledHere => 'You cancelled it.',
+    TransferOutcome.cancelledByPeer => 'The other device cancelled it.',
+    TransferOutcome.unpaired =>
+      "It was cancelled because you're no longer paired.",
+    TransferOutcome.unreadable => "The file couldn't be read.",
+    TransferOutcome.noContact => "Couldn't contact the other device.",
+    TransferOutcome.uploadNotStarted =>
+      "It didn't complete: the transfer didn't start in time.",
+    TransferOutcome.connectionLost =>
+      'The connection was cut before it finished.',
+    TransferOutcome.idle => 'It was cut because no data moved for 30 seconds.',
+    TransferOutcome.tooManyBytes =>
+      'It was cut because more data arrived than announced.',
+    TransferOutcome.writeFailed =>
+      "The other device couldn't write it (for example, because its disk is "
+          'full).',
+    TransferOutcome.diskFull =>
+      "The other device's disk filled up while receiving it, so it was "
+          'deleted.',
+    TransferOutcome.damaged =>
+      'It arrived damaged, so it was deleted. If the file changed while it '
+          'was being sent, send it again.',
+    TransferOutcome.markFailed =>
+      "It couldn't be marked as coming from another device, so it was "
+          'deleted.',
+    TransferOutcome.moveFailed =>
+      "It couldn't be moved to the folder, so it was deleted.",
+    TransferOutcome.noFreeName =>
+      "There was no free name for it in the folder, so it wasn't saved.",
+    TransferOutcome.interfaceDown =>
+      'It was cut because the network connection changed.',
+    TransferOutcome.unconfirmed =>
+      "Everything was sent, but the other device didn't confirm it: it's not "
+          'known whether it arrived.',
+  };
+
+  @override
+  String receivedOutcome(TransferOutcome outcome) => switch (outcome) {
+    TransferOutcome.saved => 'Saved.',
+    TransferOutcome.savedWithoutMark =>
+      'Saved without the mark that tells Windows it comes from another '
+          'device.',
+    TransferOutcome.declined => 'You rejected it.',
+    TransferOutcome.busy =>
+      'It was rejected because another send was in progress.',
+    TransferOutcome.unanswered => 'It expired without an answer.',
+    TransferOutcome.invalidName =>
+      "It was rejected because its name isn't valid.",
+    TransferOutcome.blockedType =>
+      "It was rejected because that type of file isn't accepted.",
+    TransferOutcome.incompatible =>
+      "It was rejected because the request wasn't compatible.",
+    TransferOutcome.noSpace =>
+      "It was rejected because there isn't enough space: the file size plus "
+          '1 GB must be free.',
+    TransferOutcome.noFolder =>
+      "It was rejected because you didn't choose where to save it.",
+    TransferOutcome.pathTooLong =>
+      'It was rejected because the path where it would be saved is too long '
+          'for Windows.',
+    TransferOutcome.cancelledHere => 'You cancelled it.',
+    TransferOutcome.cancelledByPeer => 'The other device cancelled it.',
+    TransferOutcome.unpaired =>
+      "It was cancelled because you're no longer paired.",
+    TransferOutcome.unreadable =>
+      'The other device could no longer read the file.',
+    TransferOutcome.noContact => "Couldn't contact the other device.",
+    TransferOutcome.uploadNotStarted =>
+      "It didn't complete: the transfer didn't start in time.",
+    TransferOutcome.connectionLost =>
+      'The connection was cut before it finished.',
+    TransferOutcome.idle => 'It was cut because no data moved for 30 seconds.',
+    TransferOutcome.tooManyBytes =>
+      'It was cut because more data arrived than announced.',
+    TransferOutcome.writeFailed =>
+      "It couldn't be written (for example, because the disk is full), so it "
+          'was deleted.',
+    TransferOutcome.diskFull =>
+      'The disk filled up while receiving it, so it was deleted.',
+    TransferOutcome.damaged => 'It arrived damaged, so it was deleted.',
+    TransferOutcome.markFailed =>
+      "It couldn't be marked as coming from another device, so it was "
+          'deleted.',
+    TransferOutcome.moveFailed =>
+      "It couldn't be moved to the folder, so it was deleted.",
+    TransferOutcome.noFreeName =>
+      "There was no free name for it in the folder, so it wasn't saved.",
+    TransferOutcome.interfaceDown =>
+      'It was cut because the network connection changed.',
+    TransferOutcome.unconfirmed =>
+      "Everything was sent, but it wasn't confirmed.",
+  };
+
+  @override
+  String get closeDuringTransferTitle => 'A send is in progress';
+
+  @override
+  String get closeDuringTransferBody =>
+      'If you close the app now, the send will be cancelled.';
+
+  @override
+  String get keepOpenButton => 'Keep open';
+
+  @override
+  String get closeAndCancelButton => 'Close and cancel';
+
+  @override
+  String get trustedNetworkLabel => 'Trusted network';
+
+  @override
+  String get onlyPairedCanSend => 'Only your paired devices can send you files';
+
+  @override
+  String get activityTab => 'Activity';
+
+  @override
+  String get devicesTab => 'Devices';
+
+  @override
+  String get activityEmpty =>
+      "Here you'll see the send in progress and the last file you sent or "
+      'received.';
+
+  @override
+  String get sectionUnpaired => 'Unpaired';
+
+  @override
+  String get chipMine => 'Mine';
+
+  @override
+  String get chipForeign => "Someone else's";
+
+  @override
+  String get visibleLabel => 'Visible';
+
+  @override
+  String get diagramTitle => 'My network';
+
+  @override
+  String diagramCount(int total, int visible) =>
+      "${total == 1 ? '1 device' : '$total devices'} · $visible visible";
+
+  @override
+  String thisDeviceCaption(String short) =>
+      short.isEmpty ? 'this device' : '$short · this device';
+
+  @override
+  String get chipPreparing => 'Preparing';
+
+  @override
+  String get chipWaiting => 'Waiting';
+
+  @override
+  String get chipInProgress => 'In progress';
+
+  @override
+  String get chipChecking => 'Checking';
+
+  @override
+  String get chipDelivered => 'Delivered';
+
+  @override
+  String get chipSaved => 'Saved';
+
+  @override
+  String get chipRejected => 'Rejected';
+
+  @override
+  String get chipCancelled => 'Cancelled';
+
+  @override
+  String get chipFailed => 'Failed';
+
+  @override
+  String get chipUnconfirmed => 'Unconfirmed';
+
+  @override
+  String foreignSenderNote(String short) =>
+      "It's someone else's device (fingerprint $short). Accept only if you "
+      'were expecting it.';
+
+  @override
+  String get incomingExpiresNote =>
+      "If you don't answer, this request expires after a minute.";
 }

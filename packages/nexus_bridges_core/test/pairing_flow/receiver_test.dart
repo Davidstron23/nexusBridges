@@ -99,6 +99,19 @@ void main() {
     expectState(await initiator.cancel(CancelReason.cancelled), 'cancelled');
   }
 
+  Future<void> finishWithOwnCancel(
+    ReceiverFixture fixture,
+    DeviceIdentity identity, {
+    InternetAddress? from,
+  }) async {
+    await fixture.initiator(identity, from: from).begin();
+    fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+    expect(fixture.view!.phase, PairingPhase.waitingPeer);
+    fixture.coordinator.cancelAsReceiver();
+    expect(fixture.view, isNull);
+    expect(fixture.coordinator.busy, isFalse);
+  }
+
   Future<void> completePairing(
     ReceiverFixture fixture,
     DeviceIdentity identity, {
@@ -1012,7 +1025,17 @@ void main() {
       expect(saved.certificatePem, a.certificate.pem);
       expect(saved.pairedAt, fixture.now);
       expect(fixture.pairedFile.readAsStringSync(), contains(a.fingerprint));
-      expect(fixture.view, isNull);
+      expect(
+        fixture.view,
+        PairingView(
+          role: PairingRole.receiver,
+          phase: PairingPhase.finished,
+          peerFingerprint: a.fingerprint,
+          peerName: saved.name,
+          outcome: PairingOutcome.paired,
+          isNew: true,
+        ),
+      );
       expect(fixture.coordinator.busy, isFalse);
       await eventually(() => fixture.events.isNotEmpty);
       final event = fixture.events.single as PairingCompleted;
@@ -1037,10 +1060,12 @@ void main() {
       await eventually(() => fixture.paired.isPaired(a.fingerprint));
 
       expectState(await initiator.wait(), 'paired');
-      expect(fixture.view, isNull);
+      expect(showsNewPairing(fixture.view, peer: a.fingerprint), isTrue);
       expect(fixture.coordinator.busy, isFalse);
       await eventually(() => fixture.events.isNotEmpty);
       expect((fixture.events.single as PairingCompleted).isNew, isTrue);
+      fixture.coordinator.dismissOutcome();
+      expect(fixture.view, isNull);
     });
 
     test('pair/confirm is idempotent and the record answers repeated '
@@ -1082,7 +1107,7 @@ void main() {
     });
 
     test('a second "matches" or a "mismatch" after "matches" change nothing '
-        '(D3)', () async {
+        '(RF-248: only cancelling does)', () async {
       final fixture = await receiver();
       final initiator = fixture.initiator(a);
       await initiator.begin();
@@ -1474,6 +1499,222 @@ void main() {
     });
   });
 
+  group('E277 RF-248 RF-104 RF-106b the receiver cancels while waiting', () {
+    bool savingHeld(ReceiverFixture fixture) =>
+        fixture.dataDir.existsSync() &&
+        fixture.dataDir.listSync().any((e) => e.path.endsWith('.tmp'));
+
+    test('the held pair/wait comes back at once with cancelled, the notice '
+        'closes with no result, nothing is saved and no attempt is '
+        'reported', () async {
+      final fixture = await receiver(pollHold: const Duration(seconds: 8));
+      final initiator = fixture.initiator(a);
+      await initiator.begin(name: 'Laptop');
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+      expect(fixture.view!.phase, PairingPhase.waitingPeer);
+      final stopwatch = Stopwatch()..start();
+      final held = initiator.wait();
+      await eventually(() => fixture.handledOn(ApiPaths.pairWait) == 1);
+      final changes = fixture.views.length;
+
+      fixture.coordinator.cancelAsReceiver();
+
+      expect(fixture.view, isNull);
+      expect(fixture.coordinator.busy, isFalse);
+      expectState(await held, 'cancelled');
+      expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
+      expectState(await initiator.confirm(), 'cancelled');
+      expectState(await initiator.wait(), 'cancelled');
+      expect(fixture.views.skip(changes), everyElement(isNull));
+      expect(fixture.views.skip(changes), isNotEmpty);
+      expect(fixture.paired.devices, isEmpty);
+      expect(fixture.pairedFile.existsSync(), isFalse);
+      await settle();
+      expect(fixture.events, isEmpty);
+      expect(fixture.view, isNull);
+    });
+
+    test('a second cancel, or a "matches" after the cancel, changes '
+        'nothing', () async {
+      final fixture = await receiver();
+      final initiator = fixture.initiator(a);
+      await initiator.begin();
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+      fixture.coordinator.cancelAsReceiver();
+      await settle();
+      final changes = fixture.views.length;
+
+      fixture.coordinator.cancelAsReceiver();
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+
+      expectState(await initiator.confirm(), 'cancelled');
+      await settle();
+      expect(fixture.views.length, changes);
+      expect(fixture.view, isNull);
+      expect(fixture.paired.devices, isEmpty);
+      expect(fixture.events, isEmpty);
+    });
+
+    test('before the reveal, while comparing and once finished, cancelling '
+        'does nothing', () async {
+      final fixture = await receiver();
+      fixture.coordinator.cancelAsReceiver();
+      expect(fixture.view, isNull);
+      expect(fixture.coordinator.busy, isFalse);
+
+      final initiator = fixture.initiator(a);
+      expect((await initiator.start())!.status, 200);
+      fixture.coordinator.cancelAsReceiver();
+      await settle();
+      expect(fixture.coordinator.busy, isTrue);
+      expect(fixture.view, isNull);
+      expect((await initiator.reveal())!.status, 200);
+      final comparing = fixture.view;
+      expect(comparing!.phase, PairingPhase.comparing);
+
+      fixture.coordinator.cancelAsReceiver();
+      expect(fixture.view, comparing);
+      expect(fixture.coordinator.busy, isTrue);
+      expectState(await initiator.confirm(), 'pending');
+      expectState(await initiator.wait(), 'pending');
+
+      expectState(await initiator.cancel(CancelReason.cancelled), 'cancelled');
+      final finished = fixture.view;
+      expect(finished!.outcome, PairingOutcome.cancelledByPeer);
+      fixture.coordinator.cancelAsReceiver();
+      expect(fixture.view, finished);
+      await settle();
+      expect(fixture.events.whereType<PairingAttemptRejected>(), hasLength(1));
+      expect(fixture.events.whereType<PairingPaused>(), isEmpty);
+    });
+
+    test('[SEG] while saving it does not cancel: a save that fails ends in '
+        'notSaved and not in a closed notice', () async {
+      final fixture = await receiver();
+      final initiator = fixture.initiator(a);
+      await initiator.begin();
+      lockFile(fixture.pairedFile);
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+      final confirming = initiator.confirm();
+      await eventually(() => fixture.handledOn(ApiPaths.pairConfirm) == 1);
+      await eventually(() => savingHeld(fixture), reason: 'saving held');
+      final saving = fixture.view;
+      expect(saving!.phase, PairingPhase.waitingPeer);
+
+      fixture.coordinator.cancelAsReceiver();
+
+      expect(fixture.view, saving);
+      expect(fixture.coordinator.busy, isTrue);
+      expectState(await confirming, 'cancelled');
+      expect(fixture.view!.outcome, PairingOutcome.notSaved);
+      await settle();
+      expect(fixture.events.whereType<PairingPaused>(), isEmpty);
+    });
+
+    test('[SEG] while saving it does not cancel: a save that goes through '
+        'completes the pairing', () async {
+      final fixture = await receiver();
+      final initiator = fixture.initiator(a);
+      await initiator.begin();
+      final lock = lockFile(fixture.pairedFile);
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+      final confirming = initiator.confirm();
+      await eventually(() => savingHeld(fixture), reason: 'saving held');
+      expect(fixture.view!.phase, PairingPhase.waitingPeer);
+
+      fixture.coordinator.cancelAsReceiver();
+      expect(fixture.view!.phase, PairingPhase.waitingPeer);
+      lock.release();
+
+      expectState(await confirming, 'paired');
+      expect(fixture.paired.isPaired(a.fingerprint), isTrue);
+      await eventually(() => fixture.events.isNotEmpty);
+      expect(fixture.events.single, isA<PairingCompleted>());
+      expectState(await initiator.wait(), 'paired');
+    });
+
+    test('three own cancels from one origin, 10 minutes apart so that the '
+        'global pause never starts, block that origin with the generic 403 '
+        'for 10 minutes after the third (RF-104)', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      for (var i = 0; i < 3; i++) {
+        fixture.now = first.add(Limits.pairingGlobalWindow * i);
+        await finishWithOwnCancel(fixture, a);
+      }
+
+      expectRejected(await fixture.initiator(a).start());
+      expectRejected(await fixture.initiator(b).start());
+      final elsewhere = fixture.initiator(c, from: otherLoopback);
+      expect((await elsewhere.start())!.status, 200);
+      expectState(await elsewhere.cancel(CancelReason.cancelled), 'cancelled');
+      fixture.now = first.add(
+        Limits.pairingGlobalWindow * 3 - const Duration(seconds: 1),
+      );
+      expectRejected(await fixture.initiator(a).start());
+      fixture.now = first.add(Limits.pairingGlobalWindow * 3);
+      expect((await fixture.initiator(a).start())!.status, 200);
+      await settle();
+      expect(fixture.events, isEmpty);
+    });
+
+    test('two "mismatch" and one own cancel from one origin also block it: '
+        'the cancel counts as a "mismatch" (RF-104)', () async {
+      final fixture = await receiver();
+      final first = fixture.now;
+      await finishWithMismatch(fixture, a);
+      fixture.now = first.add(Limits.pairingGlobalWindow);
+      await finishWithOwnCancel(fixture, a);
+      fixture.now = first.add(Limits.pairingGlobalWindow * 2);
+      await finishWithMismatch(fixture, a);
+
+      expectRejected(await fixture.initiator(a).start());
+      await settle();
+      expect(fixture.events, isEmpty);
+    });
+
+    test('cancelling and asking again from the same origin at once: the '
+        'third cancel pauses the receiver and the next pair/start gets the '
+        'paused reply, with one PairingPaused and no attempt '
+        'event', () async {
+      final fixture = await receiver();
+      for (var i = 0; i < 2; i++) {
+        await finishWithOwnCancel(fixture, a);
+      }
+      final third = fixture.initiator(a);
+      await third.begin();
+      fixture.coordinator.answerAsReceiver(ReceiverAnswer.matches);
+      fixture.coordinator.cancelAsReceiver();
+      expectState(await third.wait(), 'cancelled');
+
+      expectPaused(await fixture.initiator(a).start());
+      expectPaused(await fixture.initiator(b, from: otherLoopback).start());
+      await eventually(() => fixture.events.isNotEmpty);
+      await settle();
+      expect(
+        fixture.events.single,
+        isA<PairingPaused>().having(
+          (e) => e.until,
+          'until',
+          fixture.now.add(Limits.pairingGlobalWindow),
+        ),
+      );
+    });
+
+    test('own cancels are part of the streak that a completed pairing '
+        'resets (RF-106)', () async {
+      final fixture = await receiver();
+      await finishWithOwnCancel(fixture, b);
+      await finishWithOwnCancel(fixture, b);
+      await completePairing(fixture, b);
+      fixture.advance(Limits.pairingGlobalWindow);
+      await finishWithOwnCancel(fixture, b);
+      await finishWithOwnCancel(fixture, b);
+
+      expect((await fixture.initiator(b).start())!.status, 200);
+    });
+  });
+
   group('saving (RF-93, RF-94, C94)', () {
     test('a save that cannot write ends in notSaved, frees the receiver and '
         'gives no access', () async {
@@ -1670,7 +1911,7 @@ void main() {
       expectState(await initiator.wait(), 'paired');
       await eventually(() => fixture.events.isNotEmpty);
       expect((fixture.events.single as PairingCompleted).isNew, isTrue);
-      expect(fixture.view, isNull);
+      expect(showsNewPairing(fixture.view, peer: a.fingerprint), isTrue);
     });
   });
 

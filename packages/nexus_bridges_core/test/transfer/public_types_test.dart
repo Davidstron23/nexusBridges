@@ -210,6 +210,7 @@ void main() {
       expect(question.pickerOpen, isFalse);
       expect(question.inspecting, isFalse);
       expect(question.afterEnd, isNull);
+      expect(question.afterEndPath, isNull);
 
       FolderQuestionView copy({
         FolderQuestionKind kind = FolderQuestionKind.firstTime,
@@ -222,6 +223,7 @@ void main() {
         bool pickerOpen = false,
         bool inspecting = false,
         AfterEndResult? afterEnd,
+        String? afterEndPath,
       }) => FolderQuestionView(
         kind: kind,
         proposedPath: proposedPath,
@@ -233,6 +235,7 @@ void main() {
         pickerOpen: pickerOpen,
         inspecting: inspecting,
         afterEnd: afterEnd,
+        afterEndPath: afterEndPath,
       );
       expectSame(question, copy());
       expectDifferent({
@@ -246,7 +249,42 @@ void main() {
         'pickerOpen': copy(pickerOpen: true),
         'inspecting': copy(inspecting: true),
         'afterEnd': copy(afterEnd: AfterEndResult.remembered),
+        'afterEndPath': copy(afterEndPath: r'D:\Recibidos'),
       }, question);
+    });
+
+    test('E271 (f) RF-209: two ended views that differ only in afterEndPath '
+        'are different and hash differently', () {
+      const remembered = FolderQuestionView(
+        kind: FolderQuestionKind.firstTime,
+        proposedPath: r'C:\Users\u\Downloads\NexusBridges',
+        afterEnd: AfterEndResult.remembered,
+        afterEndPath: r'D:\Recibidos',
+      );
+      const other = FolderQuestionView(
+        kind: FolderQuestionKind.firstTime,
+        proposedPath: r'C:\Users\u\Downloads\NexusBridges',
+        afterEnd: AfterEndResult.remembered,
+        afterEndPath: r'E:\Otra',
+      );
+      const none = FolderQuestionView(
+        kind: FolderQuestionKind.firstTime,
+        proposedPath: r'C:\Users\u\Downloads\NexusBridges',
+        afterEnd: AfterEndResult.remembered,
+      );
+      expect(remembered, isNot(other));
+      expect(remembered.hashCode, isNot(other.hashCode));
+      expect(remembered, isNot(none));
+      expect(remembered.hashCode, isNot(none.hashCode));
+      expectSame(
+        remembered,
+        const FolderQuestionView(
+          kind: FolderQuestionKind.firstTime,
+          proposedPath: r'C:\Users\u\Downloads\NexusBridges',
+          afterEnd: AfterEndResult.remembered,
+          afterEndPath: r'D:\Recibidos',
+        ),
+      );
     });
 
     test('IncomingTransferView, with its defaults and the nested question', () {

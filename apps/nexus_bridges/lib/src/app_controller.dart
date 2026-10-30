@@ -96,6 +96,10 @@ class AppController extends ChangeNotifier {
     _node?.cancelPairing();
   }
 
+  void cancelRequest() {
+    _node?.cancelRequest();
+  }
+
   void answerRequest(ReceiverAnswer answer) {
     _node?.answerRequest(answer);
   }
@@ -115,6 +119,58 @@ class AppController extends ChangeNotifier {
 
   Future<void> setMine(String fingerprint, {required bool mine}) {
     return _node?.setMine(fingerprint, mine: mine) ?? Future<void>.value();
+  }
+
+  Future<SendFileResult> sendFile(String fingerprint) async {
+    final node = _node;
+    if (node == null) return SendFileResult.unavailable;
+    return node.sendFile(fingerprint);
+  }
+
+  void cancelSending() {
+    _node?.cancelSending();
+  }
+
+  void cancelReceiving(String sessionId) {
+    _node?.cancelReceiving(sessionId);
+  }
+
+  void answerIncoming(String sessionId, {required bool accept}) {
+    _node?.answerIncoming(sessionId, accept: accept);
+  }
+
+  Future<void> useProposedFolder(String sessionId) {
+    return _node?.useProposedFolder(sessionId) ?? Future<void>.value();
+  }
+
+  Future<void> chooseOtherFolder(String sessionId) {
+    return _node?.chooseOtherFolder(sessionId) ?? Future<void>.value();
+  }
+
+  void useFolderAnyway(String sessionId) {
+    _node?.useFolderAnyway(sessionId);
+  }
+
+  void cancelFolderQuestion(String sessionId) {
+    _node?.cancelFolderQuestion(sessionId);
+  }
+
+  Future<void> rememberFolderAfterEnd(
+    String sessionId, {
+    required bool remember,
+  }) {
+    return _node?.rememberFolderAfterEnd(sessionId, remember: remember) ??
+        Future<void>.value();
+  }
+
+  void dismissFolderPanel(String sessionId) {
+    _node?.dismissFolderPanel(sessionId);
+  }
+
+  Future<RevealResult> revealLastReceived() async {
+    final node = _node;
+    if (node == null) return RevealResult.unavailable;
+    return node.revealLastReceived();
   }
 
   Future<void> unpair(String fingerprint) {

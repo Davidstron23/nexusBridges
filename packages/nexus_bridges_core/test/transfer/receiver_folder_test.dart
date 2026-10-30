@@ -912,6 +912,375 @@ void main() {
     });
   });
 
+  group('E271 V1 the path after the end', () {
+    Future<({Future<void> run})> endWithPickerOpen(
+      ReceiverStack s,
+      String id,
+    ) async {
+      final run = s.coordinator.chooseOtherFolder(s.sid);
+      expect(await s.cancel(laptop, id), isNotNull);
+      expect(s.incoming?.stage, IncomingStage.ended);
+      expect(s.incoming?.folder?.pickerOpen, isTrue);
+      expect(s.incoming?.folder?.afterEndPath, isNull);
+      return (run: run);
+    }
+
+    test('(a) a valid folder chosen after the end is remembered and named, '
+        'and the proposal stays the Downloads one', () async {
+      final (s, picker) = await stack();
+      final fresh = '${s.base}\\nueva';
+      final id = await openQuestion(s, laptop);
+      final (:run) = await endWithPickerOpen(s, id);
+
+      picker.answer(fresh);
+      await run;
+
+      final view = s.incoming!;
+      expect(view.stage, IncomingStage.ended);
+      final folder = view.folder!;
+      expect(folder.afterEnd, AfterEndResult.remembered);
+      expect(s.store.saved.single.path, fresh);
+      expect(folder.afterEndPath, s.store.saved.single.path);
+      expect(folder.afterEndPath, fresh);
+      expect(folder.proposedPath, proposedOf(s));
+      expect(folder.problem, isNull);
+      expect(folder.problemPath, isNull);
+      expect(folder.cautionPath, isNull);
+      expect(folder.pickerOpen, isFalse);
+      expect(folder.inspecting, isFalse);
+    });
+
+    test('(b) a forbidden folder chosen in the question leaves no problem in '
+        'the remembered panel', () async {
+      final (s, picker) = await stack();
+      final forbidden = '${s.platform.system.startup}\\nueva';
+      final fresh = '${s.base}\\nueva';
+      final id = await openQuestion(s, laptop);
+      await choose(s, picker, forbidden);
+      expect(question(s).problem, FolderProblem.forbidden);
+      expect(question(s).problemPath, forbidden);
+      expect(question(s).afterEndPath, isNull);
+
+      final run = s.coordinator.chooseOtherFolder(s.sid);
+      expect(await s.cancel(laptop, id), isNotNull);
+      expect(s.incoming?.stage, IncomingStage.ended);
+      expect(s.incoming?.folder?.afterEndPath, isNull);
+      picker.answer(fresh);
+      await run;
+
+      final folder = s.incoming!.folder!;
+      expect(folder.afterEnd, AfterEndResult.remembered);
+      expect(folder.afterEndPath, fresh);
+      expect(s.store.saved.single.path, fresh);
+      expect(folder.proposedPath, proposedOf(s));
+      expect(folder.problem, isNull);
+      expect(folder.problemPath, isNull);
+      expect(folder.cautionPath, isNull);
+    });
+
+    test('(c) a forbidden folder chosen after the end is not usable and named, '
+        'and nothing is saved', () async {
+      final (s, picker) = await stack();
+      final forbidden = '${s.platform.system.startup}\\nueva';
+      final id = await openQuestion(s, laptop);
+      final (:run) = await endWithPickerOpen(s, id);
+
+      picker.answer(forbidden);
+      await run;
+
+      final folder = s.incoming!.folder!;
+      expect(s.incoming!.stage, IncomingStage.ended);
+      expect(folder.afterEnd, AfterEndResult.notUsable);
+      expect(folder.afterEndPath, forbidden);
+      expect(folder.problem, isNull);
+      expect(folder.problemPath, isNull);
+      expect(folder.cautionPath, isNull);
+      expect(folder.proposedPath, proposedOf(s));
+      expect(s.store.saved, isEmpty);
+      expect(Directory(forbidden).existsSync(), isFalse);
+    });
+
+    test('(c) a problem from the question does not survive into a not usable '
+        'panel: only the folder chosen after the end is named', () async {
+      final (s, picker) = await stack();
+      final startup = s.platform.system.startup!;
+      final forbidden = '${s.dataDir}\\recibidos';
+      final id = await openQuestion(s, laptop);
+      await choose(s, picker, startup);
+      expect(question(s).problemPath, startup);
+
+      final run = s.coordinator.chooseOtherFolder(s.sid);
+      await s.cancel(laptop, id);
+      picker.answer(forbidden);
+      await run;
+
+      final folder = s.incoming!.folder!;
+      expect(folder.afterEnd, AfterEndResult.notUsable);
+      expect(folder.afterEndPath, forbidden);
+      expect(folder.problem, isNull);
+      expect(folder.problemPath, isNull);
+      expect(s.store.saved, isEmpty);
+    });
+
+    test('(c) a folder that cannot be used after the end names the chosen '
+        'one', () async {
+      final (s, picker) = await stack();
+      final odd = folderIn(s, 'withfile');
+      File('$odd\\$tempFolderName').writeAsStringSync('keep');
+      final id = await openQuestion(s, laptop);
+      final (:run) = await endWithPickerOpen(s, id);
+
+      picker.answer(odd);
+      await run;
+
+      final folder = s.incoming!.folder!;
+      expect(folder.afterEnd, AfterEndResult.notUsable);
+      expect(folder.afterEndPath, odd);
+      expect(s.store.saved, isEmpty);
+    });
+
+    test('(d) a folder with a caution after the end has no path until it is '
+        'remembered; then it names the saved one and the caution is '
+        'gone', () async {
+      final (s, picker) = await stack();
+      final pendrive = '${s.base}\\pendrive';
+      final id = await openQuestion(s, laptop);
+      final (:run) = await endWithPickerOpen(s, id);
+      s.platform.noMarkSupport = true;
+
+      picker.answer(pendrive);
+      await run;
+
+      final before = s.incoming!.folder!;
+      expect(before.afterEnd, AfterEndResult.needsConfirmation);
+      expect(before.afterEndPath, isNull);
+      expect(before.cautionPath, pendrive);
+      expect(before.cautionNoMark, isTrue);
+      expect(s.store.saved, isEmpty);
+
+      await s.coordinator.rememberFolderAfterEnd(s.sid, remember: true);
+
+      final after = s.incoming!.folder!;
+      expect(s.incoming!.stage, IncomingStage.ended);
+      expect(after.afterEnd, AfterEndResult.remembered);
+      expect(s.store.saved.single.path, pendrive);
+      expect(after.afterEndPath, s.store.saved.single.path);
+      expect(after.cautionPath, isNull);
+      expect(after.cautionNoMark, isFalse);
+      expect(after.problem, isNull);
+      expect(after.problemPath, isNull);
+      expect(after.inspecting, isFalse);
+    });
+
+    test('(d) declining the caution after the end closes the panel without '
+        'naming anything', () async {
+      final (s, picker) = await stack();
+      final pendrive = '${s.base}\\pendrive';
+      final id = await openQuestion(s, laptop);
+      final (:run) = await endWithPickerOpen(s, id);
+      s.platform.noMarkSupport = true;
+      picker.answer(pendrive);
+      await run;
+      final changes = s.views.length;
+
+      await s.coordinator.rememberFolderAfterEnd(s.sid, remember: false);
+
+      expect(s.incoming, isNull);
+      expect(s.store.saved, isEmpty);
+      expect(
+        s.views
+            .skip(changes)
+            .whereType<IncomingTransferView>()
+            .where((v) => v.folder?.afterEndPath != null),
+        isEmpty,
+      );
+    });
+
+    test('(e) during the question there is never a path after the end: when '
+        'it opens, after a forbidden folder and after a caution', () async {
+      final (s, picker) = await stack();
+      final pendrive = folderIn(s, 'pendrive');
+      final id = await openQuestion(s, laptop);
+      expect(question(s).afterEnd, isNull);
+      expect(question(s).afterEndPath, isNull);
+
+      await choose(s, picker, s.platform.system.startup);
+      expect(question(s).problem, FolderProblem.forbidden);
+      expect(question(s).afterEndPath, isNull);
+
+      s.platform.noMarkSupport = true;
+      await choose(s, picker, pendrive);
+      expect(question(s).cautionPath, pendrive);
+      expect(question(s).afterEnd, isNull);
+      expect(question(s).afterEndPath, isNull);
+
+      s.coordinator.useFolderAnyway(s.sid);
+      await waitAccepted(s);
+      expectAccepted(await s.wait(laptop, id));
+      expect(
+        s.views.whereType<IncomingTransferView>().where(
+          (v) => v.folder?.afterEndPath != null,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('(e) "use this" that accepts never shows a path after the '
+        'end', () async {
+      final (s, _) = await stack();
+      final id = await openQuestion(s, laptop);
+      await s.coordinator.useProposedFolder(s.sid);
+      await waitAccepted(s);
+      expectAccepted(await s.wait(laptop, id));
+      expect(s.store.saved.single.path, proposedOf(s));
+      expect(
+        s.views.whereType<IncomingTransferView>().where(
+          (v) => v.folder?.afterEnd != null || v.folder?.afterEndPath != null,
+        ),
+        isEmpty,
+      );
+    });
+
+    test(
+      '(g) the sender cancels while the first time folder is being '
+      'remembered: the ended panel names it and does not keep the receiver '
+      'busy; after Close the next offer is accepted without asking',
+      () async {
+        final (s, _) = await stack();
+        final proposed = proposedOf(s);
+        final id = await openQuestion(s, laptop);
+        final sid = s.sid;
+        s.store.saveGate = Completer<void>();
+        addTearDown(() {
+          if (!s.store.saveGate!.isCompleted) s.store.saveGate!.complete();
+        });
+
+        final using = s.coordinator.useProposedFolder(sid);
+        await eventually(() => s.store.saved.isNotEmpty, reason: 'saving');
+        expect(await s.cancel(laptop, id), isNotNull);
+        await eventually(
+          () => s.incoming?.stage != IncomingStage.folderQuestion,
+          reason: 'question withdrawn',
+        );
+        s.store.saveGate!.complete();
+        await using;
+
+        final view = s.incoming!;
+        expect(view.sessionId, sid);
+        expect(view.stage, IncomingStage.ended);
+        expect(view.peerName, 'Laptop');
+        final folder = view.folder!;
+        expect(folder.kind, FolderQuestionKind.firstTime);
+        expect(folder.afterEnd, AfterEndResult.remembered);
+        expect(s.store.saved.single.path, proposed);
+        expect(folder.afterEndPath, s.store.saved.single.path);
+        expect(folder.proposedPath, proposed);
+        expect(folder.problem, isNull);
+        expect(folder.problemPath, isNull);
+        expect(folder.cautionPath, isNull);
+        expect(folder.pickerOpen, isFalse);
+        expect(folder.inspecting, isFalse);
+        expect(s.coordinator.busy, isFalse);
+        expect(s.coordinator.lastReceived, isNull);
+
+        s.coordinator.dismissFolderPanel(s.sid);
+        expect(s.incoming, isNull);
+        expectAccepted(await s.offer(laptop));
+        await waitAccepted(s);
+        expect(s.store.saved, hasLength(1));
+      },
+    );
+
+    test('(g) a forbidden folder before "use this" leaves no problem in the '
+        'panel kept after the cancel', () async {
+      final (s, picker) = await stack();
+      final id = await openQuestion(s, laptop);
+      await choose(s, picker, s.platform.system.startup);
+      expect(question(s).problem, FolderProblem.forbidden);
+      s.store.saveGate = Completer<void>();
+      addTearDown(() {
+        if (!s.store.saveGate!.isCompleted) s.store.saveGate!.complete();
+      });
+
+      final using = s.coordinator.useProposedFolder(s.sid);
+      await eventually(() => s.store.saved.isNotEmpty, reason: 'saving');
+      await s.cancel(laptop, id);
+      s.store.saveGate!.complete();
+      await using;
+
+      final folder = s.incoming!.folder!;
+      expect(s.incoming!.stage, IncomingStage.ended);
+      expect(folder.afterEnd, AfterEndResult.remembered);
+      expect(folder.afterEndPath, proposedOf(s));
+      expect(folder.problem, isNull);
+      expect(folder.problemPath, isNull);
+    });
+
+    test('(g) "use anyway" with the sender cancelling during the save keeps '
+        'the panel with the confirmed folder', () async {
+      final (s, picker) = await stack(configure: (p) => p.noMarkSupport = true);
+      final pendrive = folderIn(s, 'pendrive');
+      final id = await openQuestion(s, laptop);
+      await choose(s, picker, pendrive);
+      expect(question(s).cautionPath, pendrive);
+      s.store.saveGate = Completer<void>();
+      addTearDown(() {
+        if (!s.store.saveGate!.isCompleted) s.store.saveGate!.complete();
+      });
+
+      s.coordinator.useFolderAnyway(s.sid);
+      await eventually(() => s.store.saved.isNotEmpty, reason: 'saving');
+      await s.cancel(laptop, id);
+      s.store.saveGate!.complete();
+      await eventually(
+        () => s.incoming?.stage == IncomingStage.ended,
+        reason: 'panel kept',
+      );
+
+      final folder = s.incoming!.folder!;
+      expect(folder.afterEnd, AfterEndResult.remembered);
+      expect(folder.afterEndPath, pendrive);
+      expect(s.store.saved.single.path, pendrive);
+      expect(folder.cautionPath, isNull);
+      expect(s.coordinator.busy, isFalse);
+    });
+
+    test('(h) when another card is already on screen the remembered folder '
+        'leaves no panel behind it', () async {
+      final (s, _) = await stack();
+      final proposed = proposedOf(s);
+      final id = await openQuestion(s, laptop);
+      s.store.saveGate = Completer<void>();
+      addTearDown(() {
+        if (!s.store.saveGate!.isCompleted) s.store.saveGate!.complete();
+      });
+
+      final using = s.coordinator.useProposedFolder(s.sid);
+      await eventually(() => s.store.saved.isNotEmpty, reason: 'saving');
+      await s.cancel(laptop, id);
+      final other = newTransferId();
+      expectWaiting(await s.offer(portatil, transfer: other));
+      await eventually(
+        () => s.incoming?.stage == IncomingStage.warning,
+        reason: 'warning of the foreign device',
+      );
+      final warning = s.incoming!;
+      expect(warning.peerName, 'PORTATIL');
+
+      s.store.saveGate!.complete();
+      await using;
+      await settle();
+
+      expect(s.incoming, warning);
+      expect(s.store.saved.single.path, proposed);
+
+      s.coordinator.answerWarning(warning.sessionId, accept: false);
+      expect(s.incoming, isNull);
+      await settle();
+      expect(s.incoming, isNull);
+    });
+  });
+
   group('E78 RF-238 picker open and busy', () {
     test('another request gets 409 while the picker stays open after the end, '
         'and not after it closes', () async {

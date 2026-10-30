@@ -629,4 +629,239 @@ void main() {
       expect(_activeIds(plan), ['$_wifiId#192.168.50.21']);
     });
   });
+
+  group('E252: trusted networks in use (RF-247)', () {
+    ActiveInterface activeOn(String adapterId, String address) =>
+        ActiveInterface(
+          id: '$adapterId#$address',
+          adapterId: adapterId,
+          friendlyName: 'Loopback',
+          subnet: _subnet(address, 32),
+        );
+
+    test('a trusted network on two adapters, an undecided one, a paused one '
+        'and an adapter without networkId give a single entry', () {
+      final plan = _plan(
+        [
+          _adapter(id: _wifiId),
+          _adapter(
+            id: _ethernetId,
+            friendlyName: 'Ethernet',
+            address: '192.168.50.30',
+          ),
+          _adapter(
+            id: _dockId,
+            address: '10.0.0.5',
+            networkId: _work,
+            networkName: 'Oficina',
+          ),
+          _adapter(
+            id: '{CAFE-ADAPTER}',
+            address: '172.16.0.9',
+            networkId: _cafe,
+            networkName: 'Cafe',
+          ),
+          _adapter(
+            id: '{NO-NETWORK}',
+            address: '10.9.0.4',
+            networkId: null,
+            networkName: null,
+          ),
+        ],
+        decisions: {
+          _home: NetworkDecision.trusted,
+          _cafe: NetworkDecision.untrusted,
+        },
+      );
+
+      expect(plan.activeNetworks, [const NetworkPrompt(_home, 'Casa')]);
+      expect(_activeIds(plan), [
+        '$_wifiId#192.168.50.21',
+        '$_ethernetId#192.168.50.30',
+      ]);
+      expect(plan.prompts, [const NetworkPrompt(_work, 'Oficina')]);
+      expect(plan.pausedNetworks, [const NetworkPrompt(_cafe, 'Cafe')]);
+      expect(plan.paused, isFalse);
+    });
+
+    test('one adapter with two addresses on a trusted network gives one '
+        'entry', () {
+      final plan = _plan(
+        [
+          _adapter(
+            ipv4: [_subnet('192.168.50.21', 24), _subnet('192.168.50.22', 24)],
+          ),
+        ],
+        decisions: {_home: NetworkDecision.trusted},
+      );
+
+      expect(plan.active, hasLength(2));
+      expect(plan.activeNetworks, [const NetworkPrompt(_home, 'Casa')]);
+    });
+
+    test('two trusted networks give two entries in the order of the active '
+        'interfaces', () {
+      final adapters = [
+        _adapter(id: _wifiId, networkId: _home, networkName: 'Casa'),
+        _adapter(
+          id: _ethernetId,
+          address: '10.0.0.5',
+          networkId: _work,
+          networkName: 'Oficina',
+        ),
+      ];
+      final decisions = {
+        _home: NetworkDecision.trusted,
+        _work: NetworkDecision.trusted,
+      };
+
+      final natural = _plan(adapters, decisions: decisions);
+      final reversed = _plan(
+        adapters,
+        decisions: decisions,
+        activeOf: (states) => activeInterfaces(states).reversed.toList(),
+      );
+
+      expect(natural.activeNetworks, [
+        const NetworkPrompt(_home, 'Casa'),
+        const NetworkPrompt(_work, 'Oficina'),
+      ]);
+      expect(reversed.activeNetworks, [
+        const NetworkPrompt(_work, 'Oficina'),
+        const NetworkPrompt(_home, 'Casa'),
+      ]);
+    });
+
+    test('two adapters on the same trusted network take the name of the first '
+        'active interface', () {
+      final plan = _plan(
+        [
+          _adapter(id: _wifiId, networkName: 'Casa'),
+          _adapter(
+            id: _ethernetId,
+            address: '192.168.50.30',
+            networkName: 'Otra',
+          ),
+        ],
+        decisions: {_home: NetworkDecision.trusted},
+      );
+
+      expect(plan.activeNetworks, [const NetworkPrompt(_home, 'Casa')]);
+    });
+
+    test('the name is cleaned like in the prompts', () {
+      final decisions = {_home: NetworkDecision.trusted};
+
+      final bidi = _plan([
+        _adapter(networkName: 'Casa\u202Egnp.exe'),
+      ], decisions: decisions);
+      final invisible = _plan([
+        _adapter(networkName: '\u200BCasa\u0007\uFEFF'),
+      ], decisions: decisions);
+      final long = _plan([
+        _adapter(networkName: 'R' * 80),
+      ], decisions: decisions);
+
+      expect(bidi.activeNetworks, [const NetworkPrompt(_home, 'Casagnp.exe')]);
+      expect(
+        bidi.activeNetworks.single.networkName.runes,
+        isNot(contains(0x202E)),
+      );
+      expect(invisible.activeNetworks, [const NetworkPrompt(_home, 'Casa')]);
+      expect(long.activeNetworks, [NetworkPrompt(_home, 'R' * 64)]);
+    });
+
+    test('without a usable network name it falls back to the friendlyName and '
+        'then to the networkId', () {
+      final decisions = {_home: NetworkDecision.trusted};
+
+      final friendly = _plan([
+        _adapter(networkName: null, friendlyName: 'Wi-Fi\u202E 2'),
+      ], decisions: decisions);
+      final bare = _plan([
+        _adapter(networkName: '\u200B', friendlyName: '\u202E\u0000 '),
+      ], decisions: decisions);
+
+      expect(friendly.activeNetworks, [const NetworkPrompt(_home, 'Wi-Fi 2')]);
+      expect(bare.activeNetworks, [const NetworkPrompt(_home, _home)]);
+    });
+
+    test('active interfaces without a known adapter or whose adapter has no '
+        'networkId are left out', () {
+      final plan = _plan(
+        [
+          _adapter(id: _wifiId),
+          _adapter(
+            id: _dockId,
+            address: '10.9.0.4',
+            networkId: null,
+            networkName: 'Sin red',
+          ),
+        ],
+        decisions: {_home: NetworkDecision.trusted},
+        activeOf: (states) => [
+          activeOn('{GHOST-ADAPTER}', '127.0.0.3'),
+          activeOn(_dockId, '127.0.0.4'),
+          activeOn(_wifiId, '127.0.0.1'),
+        ],
+      );
+
+      expect(plan.active, hasLength(3));
+      expect(plan.activeNetworks, [const NetworkPrompt(_home, 'Casa')]);
+    });
+
+    test('only unknown interfaces give an empty list although nothing is '
+        'paused', () {
+      final plan = _plan(
+        [_adapter()],
+        decisions: {_home: NetworkDecision.trusted},
+        activeOf: (_) => [activeOn('{GHOST-ADAPTER}', '127.0.0.3')],
+      );
+
+      expect(plan.paused, isFalse);
+      expect(plan.activeNetworks, isEmpty);
+    });
+
+    test('paused, the list is empty', () {
+      final undecided = _plan([_adapter()]);
+      final untrusted = _plan(
+        [_adapter()],
+        decisions: {_home: NetworkDecision.untrusted},
+      );
+      final dismissed = _plan([_adapter()], dismissed: {_home});
+      final none = _plan(const []);
+      final blocked = _plan(
+        [_adapter()],
+        decisions: {_home: NetworkDecision.trusted},
+        activeOf: (_) => const [],
+      );
+
+      for (final plan in [undecided, untrusted, dismissed, none, blocked]) {
+        expect(plan.paused, isTrue);
+        expect(plan.activeNetworks, isEmpty);
+      }
+    });
+
+    test('an untrusted network in asking is not in use', () {
+      final plan = _plan(
+        [
+          _adapter(id: _wifiId),
+          _adapter(
+            id: _ethernetId,
+            address: '10.0.0.5',
+            networkId: _work,
+            networkName: 'Oficina',
+          ),
+        ],
+        decisions: {
+          _home: NetworkDecision.trusted,
+          _work: NetworkDecision.untrusted,
+        },
+        asking: {_work},
+      );
+
+      expect(plan.activeNetworks, [const NetworkPrompt(_home, 'Casa')]);
+      expect(plan.prompts, [const NetworkPrompt(_work, 'Oficina')]);
+    });
+  });
 }

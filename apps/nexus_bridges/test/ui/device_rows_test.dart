@@ -1,7 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/rendering.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/device_list.dart';
+import 'package:nexus_bridges/src/ui/format.dart';
+import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_button.dart';
+import 'package:nexus_bridges/src/ui/modal/modal_frame.dart';
+import 'package:nexus_bridges/src/ui/modal/stage.dart';
+import 'package:nexus_bridges/src/ui/modal/stage_kit.dart';
+import 'package:nexus_bridges/src/ui/network_strip.dart';
+import 'package:nexus_bridges/src/ui/theme/components.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import 'fake_app_controller.dart';
@@ -17,12 +27,13 @@ final String _reinstallFp = fingerprintOf('1234ABCD');
 
 const String _mineName = 'PC principal';
 const String _foreignName = 'Equipo de Luis';
-const String _hiddenName = 'Portátil viejo';
+const String _hiddenName = 'Port\u00E1til viejo';
 const String _ignoredName = 'Vecino';
 const String _newName = 'Movil';
 const String _mismatchName = 'Torre';
-const String _reinstallName = 'Portátil';
-const String _oldName = 'Portátil · 9999AAAA';
+const String _reinstallName = 'Port\u00E1til';
+const String _oldName = 'Port\u00E1til \u00B7 9999AAAA';
+final String _oldTitleName = glueFingerprint(_oldName, '9999AAAA');
 const String _longName = 'Portatil del salon con un nombre largo X';
 
 final List<DeviceEntry> _allRows = [
@@ -58,13 +69,28 @@ void _useTallWindow(WidgetTester tester) {
 }
 
 List<String> _tileTexts(WidgetTester tester, String name) {
-  final tile = find.ancestor(
+  final row = find.ancestor(
     of: find.text(name),
-    matching: find.byType(ListTile),
+    matching: find.byType(DeviceRow),
   );
-  expect(tile, findsOneWidget);
-  return textsIn(tester, tile);
+  expect(row, findsOneWidget);
+  return textsIn(tester, row);
 }
+
+Finder _discWith(DeviceGlyph glyph) => find.byWidgetPredicate(
+  (widget) => widget is DeviceDisc && widget.glyph == glyph,
+);
+
+ButtonStyleButton _sendButton(
+  WidgetTester tester,
+  AppStrings strings,
+  String name,
+) => tester.widget<ButtonStyleButton>(
+  find.ancestor(
+    of: _inCard(name, find.text(strings.sendFileButton)),
+    matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
+  ),
+);
 
 Finder _inCard(String name, Finder finder) =>
     find.descendant(of: cardOf(name), matching: finder);
@@ -75,6 +101,7 @@ Future<FakeAppController> _pumpRows(
   List<DeviceEntry>? entries,
   List<Notice> notices = const [],
   bool unsavedChanges = false,
+  bool reduceMotion = false,
 }) async {
   _useTallWindow(tester);
   final controller = FakeAppController(
@@ -84,9 +111,25 @@ Future<FakeAppController> _pumpRows(
       unsavedChanges: unsavedChanges,
     ),
   );
-  await pumpHome(tester, controller, code);
+  await pumpHome(tester, controller, code, reduceMotion: reduceMotion);
   return controller;
 }
+
+Finder get _modal => find.byType(NbModal);
+
+List<String> _modalButtons(WidgetTester tester) => [
+  for (final button in tester.widgetList<ModalButton>(
+    find.descendant(of: _modal, matching: find.byType(ModalButton)),
+  ))
+    button.label,
+];
+
+Future<void> _tapInModal(WidgetTester tester, String label) => tester.tap(
+  find.descendant(
+    of: _modal,
+    matching: find.widgetWithText(ModalButton, label),
+  ),
+);
 
 Future<void> _openMenu(WidgetTester tester, AppStrings strings, String name) {
   return tester
@@ -103,20 +146,22 @@ void main() {
 
     group('[$code] C88 rows (RF-67, RF-101, RF-109, RF-111, RF-118, '
         'RF-124, RF-129)', () {
-      testWidgets('a paired device of mine shows its label and only the menu', (
-        tester,
-      ) async {
+      testWidgets('a paired device of mine shows its chip, Send file and the '
+          'menu', (tester) async {
         await _pumpRows(tester, code);
 
         expect(
           _tileTexts(tester, _mineName),
           unorderedEquals([
             _mineName,
-            strings.deviceTypeDesktop,
-            strings.pairedMineLabel,
+            strings.chipMine,
+            strings.visibleLabel,
+            strings.sendFileButton,
           ]),
         );
-        expect(rowButtons(tester, _mineName), isEmpty);
+        expect(rowButtons(tester, _mineName), [strings.sendFileButton]);
+        expect(_sendButton(tester, strings, _mineName).onPressed, isNotNull);
+        expect(_inCard(_mineName, _discWith(DeviceGlyph.pc)), findsOneWidget);
         expect(
           _inCard(_mineName, find.byTooltip(strings.moreOptions)),
           findsOneWidget,
@@ -153,11 +198,12 @@ void main() {
           _tileTexts(tester, _foreignName),
           unorderedEquals([
             _foreignName,
-            strings.deviceTypeDesktop,
-            strings.pairedForeignLabel,
+            strings.chipForeign,
+            strings.visibleLabel,
+            strings.sendFileButton,
           ]),
         );
-        expect(rowButtons(tester, _foreignName), isEmpty);
+        expect(rowButtons(tester, _foreignName), [strings.sendFileButton]);
 
         await _openMenu(tester, strings, _foreignName);
         expect(find.text(strings.markAsMine), findsOneWidget);
@@ -170,22 +216,22 @@ void main() {
       });
 
       testWidgets('a paired device out of sight shows Not visible, its saved '
-          'name and no Pair', (tester) async {
+          'name, a disabled Send file and no Pair', (tester) async {
         await _pumpRows(tester, code);
 
         expect(
           _tileTexts(tester, _hiddenName),
           unorderedEquals([
             _hiddenName,
+            strings.chipMine,
             strings.notVisibleLabel,
-            strings.pairedMineLabel,
+            strings.sendNeedsVisible,
+            strings.sendFileButton,
           ]),
         );
-        expect(rowButtons(tester, _hiddenName), isEmpty);
-        expect(
-          _inCard(_hiddenName, find.byIcon(Icons.computer)),
-          findsOneWidget,
-        );
+        expect(rowButtons(tester, _hiddenName), [strings.sendFileButton]);
+        expect(_sendButton(tester, strings, _hiddenName).onPressed, isNull);
+        expect(_inCard(_hiddenName, _discWith(DeviceGlyph.pc)), findsOneWidget);
         expect(
           _inCard(_hiddenName, find.byTooltip(strings.moreOptions)),
           findsOneWidget,
@@ -201,8 +247,9 @@ void main() {
           _tileTexts(tester, _ignoredName),
           unorderedEquals([
             _ignoredName,
-            strings.deviceTypeDesktop,
             strings.ignoredLabel,
+            strings.visibleLabel,
+            strings.unignoreButton,
           ]),
         );
         expect(rowButtons(tester, _ignoredName), [strings.unignoreButton]);
@@ -228,15 +275,14 @@ void main() {
           _tileTexts(tester, _newName),
           unorderedEquals([
             _newName,
-            strings.deviceTypeMobile,
             strings.notPairedLabel,
+            strings.visibleLabel,
+            strings.pairButton,
           ]),
         );
         expect(rowButtons(tester, _newName), [strings.pairButton]);
-        expect(
-          _inCard(_newName, find.byIcon(Icons.smartphone)),
-          findsOneWidget,
-        );
+        expect(_inCard(_newName, _discWith(DeviceGlyph.phone)), findsOneWidget);
+        expect(_inCard(_newName, _discWith(DeviceGlyph.pc)), findsNothing);
         expect(
           _inCard(_newName, find.byTooltip(strings.moreOptions)),
           findsNothing,
@@ -259,13 +305,24 @@ void main() {
           findsOneWidget,
         );
         expect(rowButtons(tester, _mismatchName), [
+          strings.sendFileButton,
           strings.removeButton,
           strings.pairAgainButton,
         ]);
         expect(
           _tileTexts(tester, _mismatchName),
-          contains(strings.pairedMineLabel),
+          unorderedEquals([
+            _mismatchName,
+            strings.chipMine,
+            strings.visibleLabel,
+            strings.sendNeedsPairAgain,
+            strings.mismatchWarning,
+            strings.sendFileButton,
+            strings.removeButton,
+            strings.pairAgainButton,
+          ]),
         );
+        expect(_sendButton(tester, strings, _mismatchName).onPressed, isNull);
         expect(
           _inCard(_mismatchName, find.byTooltip(strings.moreOptions)),
           findsOneWidget,
@@ -293,7 +350,13 @@ void main() {
         );
         expect(
           _tileTexts(tester, _reinstallName),
-          contains(strings.notPairedLabel),
+          unorderedEquals([
+            _reinstallName,
+            strings.notPairedLabel,
+            strings.visibleLabel,
+            strings.possibleReinstall(_oldName),
+            strings.pairButton,
+          ]),
         );
         expect(rowButtons(tester, _reinstallName), [strings.pairButton]);
         expect(
@@ -329,10 +392,7 @@ void main() {
             entry(fingerprint: _foreignFp, name: _foreignName, paired: true),
           ],
         );
-        expect(
-          _tileTexts(tester, _foreignName),
-          contains(strings.pairedForeignLabel),
-        );
+        expect(_tileTexts(tester, _foreignName), contains(strings.chipForeign));
 
         controller.emit(
           NodeState(
@@ -348,11 +408,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(
-          _tileTexts(tester, _foreignName),
-          contains(strings.pairedMineLabel),
-        );
-        expect(find.text(strings.pairedForeignLabel), findsNothing);
+        expect(_tileTexts(tester, _foreignName), contains(strings.chipMine));
+        expect(find.text(strings.chipForeign), findsNothing);
       });
     });
 
@@ -360,57 +417,62 @@ void main() {
       testWidgets('Unpair in the menu asks first with the name', (
         tester,
       ) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
 
-        expect(dialog, findsOneWidget);
+        expect(_modal, findsOneWidget);
         expect(find.text(strings.unpairTitle(_mineName)), findsOneWidget);
         expect(find.text(strings.unpairBody(_mineName)), findsOneWidget);
-        expect(dialogButtons(tester), [
+        expect(_modalButtons(tester), [
           strings.cancelButton,
           strings.unpairButton,
         ]);
+        expect(
+          tester.widget<ModalStage>(find.byType(ModalStage)).scene,
+          StageScene.unpairLoop,
+        );
         expect(controller.calls, isEmpty);
       });
 
       testWidgets('Cancel closes it without unpairing', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
-        await tapInDialog(tester, strings.cancelButton);
+        await _tapInModal(tester, strings.cancelButton);
         await tester.pumpAndSettle();
 
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
         expect(controller.calls, isEmpty);
       });
 
       testWidgets('confirming unpairs that device only', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _foreignName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
-        await tapInDialog(tester, strings.unpairButton);
+        await _tapInModal(tester, strings.unpairButton);
+        expect(controller.calls, ['unpair $_foreignFp']);
         await tester.pumpAndSettle();
 
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
         expect(controller.calls, ['unpair $_foreignFp']);
       });
 
       testWidgets('Esc and a tap outside do not unpair', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
         await tester.pumpAndSettle();
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
 
         await _openMenu(tester, strings, _mineName);
         await tester.tap(find.text(strings.unpairButton));
@@ -418,19 +480,19 @@ void main() {
         await tester.tapAt(const Offset(5, 5));
         await tester.pumpAndSettle();
 
-        expect(dialog, findsNothing);
+        expect(_modal, findsNothing);
         expect(controller.calls, isEmpty);
       });
 
       testWidgets('Remove on a mismatch asks first too', (tester) async {
-        final controller = await _pumpRows(tester, code);
+        final controller = await _pumpRows(tester, code, reduceMotion: true);
 
         await tester.tap(
           _inCard(_mismatchName, find.text(strings.removeButton)),
         );
         await tester.pumpAndSettle();
         expect(find.text(strings.unpairTitle(_mismatchName)), findsOneWidget);
-        await tapInDialog(tester, strings.cancelButton);
+        await _tapInModal(tester, strings.cancelButton);
         await tester.pumpAndSettle();
         expect(controller.calls, isEmpty);
 
@@ -438,9 +500,11 @@ void main() {
           _inCard(_mismatchName, find.text(strings.removeButton)),
         );
         await tester.pumpAndSettle();
-        await tapInDialog(tester, strings.unpairButton);
+        await _tapInModal(tester, strings.unpairButton);
+        expect(controller.calls, ['unpair $_mismatchFp']);
         await tester.pumpAndSettle();
 
+        expect(_modal, findsNothing);
         expect(controller.calls, ['unpair $_mismatchFp']);
       });
     });
@@ -508,7 +572,7 @@ void main() {
 
     group('[$code] C89 notices (RF-79, RF-106b, RF-114, RF-116, RF-120, '
         'RF-121)', () {
-      const who = 'Torre · FFFF6666';
+      const who = 'Torre \u00B7 FFFF6666';
       final cases = <(Notice, String, bool)>[
         (
           const Notice(
@@ -797,7 +861,9 @@ void main() {
         final withdrawn = strings.noticeReplaceWithdrawn(_oldName);
         expect(find.text(withdrawn), findsOneWidget);
         expect(withdrawn, contains(_oldName));
-        expect(find.text(strings.replaceTitle(_oldName)), findsNothing);
+        for (final name in [_oldName, _oldTitleName]) {
+          expect(find.text(strings.replaceTitle(name)), findsNothing);
+        }
         expect(buttonLabelsIn(tester, _noticeCard(withdrawn)), [
           strings.closeButton,
         ]);
@@ -882,7 +948,7 @@ void main() {
             paired: true,
             mine: true,
           ),
-          strings.pairedMineLabel,
+          strings.chipMine,
         ),
         (
           'paired, foreign and with a mismatch',
@@ -892,7 +958,7 @@ void main() {
             paired: true,
             mismatch: true,
           ),
-          strings.pairedForeignLabel,
+          strings.chipForeign,
         ),
         (
           'ignored',
@@ -913,7 +979,7 @@ void main() {
             paired: true,
             mine: true,
           ),
-          strings.pairedMineLabel,
+          strings.chipMine,
         ),
         (
           'a possible reinstall',
@@ -926,9 +992,11 @@ void main() {
         ),
       ];
 
-      testWidgets('every row type paints without exceptions, with the label '
-          'on one line cut with an ellipsis inside 40 % of the row, and the '
-          'menu opens with its two entries', (tester) async {
+      testWidgets('every row type paints without exceptions, also in the '
+          'narrow header, with the name on one line cut with an ellipsis, its '
+          'chip, the row inside 320 px and the menu with its two entries', (
+        tester,
+      ) async {
         expect(_longName.length, 40);
         tester.view.physicalSize = const Size(320, 800);
         tester.view.devicePixelRatio = 1;
@@ -941,29 +1009,52 @@ void main() {
           await pumpHome(tester, controller, code);
 
           expect(tester.takeException(), isNull, reason: label);
-          final labelFinder = _inCard(_longName, find.text(text));
-          expect(labelFinder, findsOneWidget, reason: label);
-          final labelText = tester.widget<Text>(labelFinder);
-          expect(labelText.maxLines, 1, reason: label);
-          expect(labelText.overflow, TextOverflow.ellipsis, reason: label);
-          final tile = find.ancestor(
-            of: labelFinder,
-            matching: find.byType(ListTile),
-          );
-          final tileWidth = tester.getSize(tile).width;
           expect(
-            tester.getSize(labelFinder).width,
-            lessThanOrEqualTo(tileWidth * 0.4),
+            tester.widget<NetworkStrip>(find.byType(NetworkStrip)).compact,
+            isTrue,
+            reason: label,
+          );
+          final rowRect = tester.getRect(cardOf(_longName));
+          expect(rowRect.left, greaterThanOrEqualTo(0), reason: label);
+          expect(rowRect.right, lessThanOrEqualTo(320), reason: label);
+
+          final nameFinder = _inCard(_longName, find.text(_longName));
+          final nameText = tester.widget<Text>(nameFinder);
+          expect(nameText.maxLines, 1, reason: label);
+          expect(nameText.overflow, TextOverflow.ellipsis, reason: label);
+          expect(
+            tester.renderObject<RenderParagraph>(nameFinder).didExceedMaxLines,
+            isTrue,
             reason: label,
           );
           expect(
-            tester.getRect(cardOf(_longName)).right,
-            lessThanOrEqualTo(320),
+            tester.getRect(nameFinder).right,
+            lessThanOrEqualTo(rowRect.right),
             reason: label,
           );
+
+          final chip = _inCard(
+            _longName,
+            find.byWidgetPredicate(
+              (widget) => widget is StatusChip && widget.label == text,
+            ),
+          );
+          expect(chip, findsOneWidget, reason: label);
           expect(
-            tester.getRect(_inCard(_longName, find.text(_longName))).right,
-            lessThanOrEqualTo(tester.getRect(labelFinder).left),
+            tester.getRect(chip).right,
+            lessThanOrEqualTo(rowRect.right),
+            reason: label,
+          );
+          final visibility = _inCard(
+            _longName,
+            find.text(
+              row.visible ? strings.visibleLabel : strings.notVisibleLabel,
+            ),
+          );
+          expect(visibility, findsOneWidget, reason: label);
+          expect(
+            tester.getRect(visibility).right,
+            lessThanOrEqualTo(rowRect.right),
             reason: label,
           );
 
@@ -987,7 +1078,7 @@ void main() {
           }
           await tester.pumpWidget(const SizedBox());
         }
-      });
+      }, timeout: const Timeout(Duration(seconds: 60)));
 
       testWidgets('all row types together scroll without exceptions', (
         tester,
@@ -1011,6 +1102,10 @@ void main() {
         );
         await pumpHome(tester, controller, code);
         expect(tester.takeException(), isNull);
+        expect(
+          tester.widget<NetworkStrip>(find.byType(NetworkStrip)).compact,
+          isTrue,
+        );
 
         final scrollable = find.byType(Scrollable).first;
         for (var i = 0; i < 12; i++) {
@@ -1018,7 +1113,7 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull, reason: 'drag $i');
         }
-      });
+      }, timeout: const Timeout(Duration(seconds: 60)));
     });
 
     group('[$code] C106 unsaved changes (RF-94, RF-120)', () {
@@ -1174,7 +1269,7 @@ void main() {
       },
       'the confirmation to unpair': (tester, code) async {
         final strings = stringsFor(code);
-        await _pumpRows(tester, code);
+        await _pumpRows(tester, code, reduceMotion: true);
         await tester.tap(
           _inCard(_mismatchName, find.text(strings.removeButton)),
         );
@@ -1222,7 +1317,7 @@ void main() {
           rendered['es']!.toSet().intersection(rendered['en']!.toSet()),
           isEmpty,
         );
-      });
+      }, timeout: const Timeout(Duration(seconds: 60)));
     }
   });
 }

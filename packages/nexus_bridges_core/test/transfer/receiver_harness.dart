@@ -171,6 +171,7 @@ final class FakeFolderStore implements ReceiveFolderStore {
 
   ReceiveFolder? folder;
   Completer<void>? loadGate;
+  Completer<void>? saveGate;
   int loads = 0;
   final List<ReceiveFolder> saved = [];
 
@@ -185,6 +186,7 @@ final class FakeFolderStore implements ReceiveFolderStore {
   @override
   Future<bool> save(ReceiveFolder folder) async {
     saved.add(folder);
+    if (saveGate != null) await saveGate!.future;
     return true;
   }
 }

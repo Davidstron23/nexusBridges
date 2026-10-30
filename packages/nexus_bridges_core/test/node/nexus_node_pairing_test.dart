@@ -153,79 +153,125 @@ Future<(PairingNode, DeviceIdentity)> _nodeWithSpare() async {
 void main() {
   group('C79, RF-68, RF-72, RF-73, RF-83, RF-87, RF-88, RF-97, RF-98: end to '
       'end through the facade', () {
-    test('A pairs with B: B compares within 2 s with the same code, nothing is '
-        'saved until both confirm, then both are paired as foreign and both '
-        'get the "is it yours?" question', () async {
-      final (a, b) = await twoPairingNodes();
-      final row = a.entryOf(b.fingerprint)!;
-      expect(row.canPair, isTrue);
-      expect(row.paired, isFalse);
-      expect(a.state.pairing, isNull);
-      expect(b.state.pairing, isNull);
+    test(
+      'A pairs with B: B compares within 2 s with the same code, nothing is '
+      'saved until both confirm, then both are paired as foreign, both '
+      'show the new paired result and both get the "is it yours?" '
+      'question, which stays after the result is dismissed (point 247)',
+      () async {
+        final (a, b) = await twoPairingNodes();
+        final row = a.entryOf(b.fingerprint)!;
+        expect(row.canPair, isTrue);
+        expect(row.paired, isFalse);
+        expect(a.state.pairing, isNull);
+        expect(b.state.pairing, isNull);
 
-      final watch = Stopwatch()..start();
-      expect(await a.node.pair(b.fingerprint), PairRequestResult.started);
-      await b.until(
-        (s) => s.pairing?.phase == PairingPhase.comparing,
-        limit: const Duration(seconds: 2),
-        reason: 'B comparing within 2 s',
-      );
-      watch.stop();
-      await a.until((s) => s.pairing?.phase == PairingPhase.comparing);
+        final watch = Stopwatch()..start();
+        expect(await a.node.pair(b.fingerprint), PairRequestResult.started);
+        await b.until(
+          (s) => s.pairing?.phase == PairingPhase.comparing,
+          limit: const Duration(seconds: 2),
+          reason: 'B comparing within 2 s',
+        );
+        watch.stop();
+        await a.until((s) => s.pairing?.phase == PairingPhase.comparing);
 
-      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
-      final initiator = a.state.pairing!;
-      final receiver = b.state.pairing!;
-      expect(initiator.role, PairingRole.initiator);
-      expect(initiator.peerFingerprint, b.fingerprint);
-      expect(initiator.peerName, 'Node B');
-      expect(receiver.role, PairingRole.receiver);
-      expect(receiver.peerFingerprint, a.fingerprint);
-      expect(receiver.peerName, 'Node A');
-      expect(receiver.alreadyPaired, isFalse);
-      expect(initiator.code, matches(RegExp(r'^\d{6}$')));
-      expect(receiver.code, initiator.code);
+        expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+        final initiator = a.state.pairing!;
+        final receiver = b.state.pairing!;
+        expect(initiator.role, PairingRole.initiator);
+        expect(initiator.peerFingerprint, b.fingerprint);
+        expect(initiator.peerName, 'Node B');
+        expect(receiver.role, PairingRole.receiver);
+        expect(receiver.peerFingerprint, a.fingerprint);
+        expect(receiver.peerName, 'Node A');
+        expect(receiver.alreadyPaired, isFalse);
+        expect(initiator.code, matches(RegExp(r'^\d{6}$')));
+        expect(receiver.code, initiator.code);
 
-      a.node.answerCode(matches: true);
-      await a.until((s) => s.pairing?.phase == PairingPhase.waitingPeer);
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+        a.node.answerCode(matches: true);
+        await a.until((s) => s.pairing?.phase == PairingPhase.waitingPeer);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
 
-      expect(a.hasPaired(b), isFalse);
-      expect(b.hasPaired(a), isFalse);
-      expect(_savedFingerprints(a.pairedFile), isEmpty);
-      expect(_savedFingerprints(b.pairedFile), isEmpty);
-      expect(b.state.pairing?.phase, PairingPhase.comparing);
+        expect(a.hasPaired(b), isFalse);
+        expect(b.hasPaired(a), isFalse);
+        expect(_savedFingerprints(a.pairedFile), isEmpty);
+        expect(_savedFingerprints(b.pairedFile), isEmpty);
+        expect(b.state.pairing?.phase, PairingPhase.comparing);
 
-      b.node.answerRequest(ReceiverAnswer.matches);
-      await eventually(() => a.hasPaired(b) && b.hasPaired(a));
-      await eventually(
-        () => a.state.pairing == null && b.state.pairing == null,
-      );
+        b.node.answerRequest(ReceiverAnswer.matches);
+        await eventually(() => a.hasPaired(b) && b.hasPaired(a));
+        await eventually(() => showsPaired(a.state) && showsPaired(b.state));
+        expect(
+          a.state.pairing,
+          PairingView(
+            role: PairingRole.initiator,
+            phase: PairingPhase.finished,
+            peerFingerprint: b.fingerprint,
+            peerName: 'Node B',
+            outcome: PairingOutcome.paired,
+            isNew: true,
+          ),
+        );
+        expect(
+          b.state.pairing,
+          PairingView(
+            role: PairingRole.receiver,
+            phase: PairingPhase.finished,
+            peerFingerprint: a.fingerprint,
+            peerName: 'Node A',
+            outcome: PairingOutcome.paired,
+            isNew: true,
+          ),
+        );
 
-      final rowInA = a.entryOf(b.fingerprint)!;
-      expect(rowInA.paired, isTrue);
-      expect(rowInA.mine, isFalse);
-      expect(rowInA.visible, isTrue);
-      expect(b.entryOf(a.fingerprint)!.mine, isFalse);
-      expect(_savedDevice(a.pairedFile, b.fingerprint)['relation'], 'foreign');
-      expect(_savedDevice(b.pairedFile, a.fingerprint)['relation'], 'foreign');
-      await a.until((s) => s.questions.isNotEmpty);
-      await b.until((s) => s.questions.isNotEmpty);
-      expect(a.state.questions, [
-        MineQuestion(
-          fingerprint: b.fingerprint,
-          deviceName: labelOf('Node B', b.fingerprint),
-        ),
-      ]);
-      expect(b.state.questions, [
-        MineQuestion(
-          fingerprint: a.fingerprint,
-          deviceName: labelOf('Node A', a.fingerprint),
-        ),
-      ]);
-      expect(a.state.notices, isEmpty);
-      expect(b.state.notices, isEmpty);
-    }, timeout: _slow);
+        final rowInA = a.entryOf(b.fingerprint)!;
+        expect(rowInA.paired, isTrue);
+        expect(rowInA.mine, isFalse);
+        expect(rowInA.visible, isTrue);
+        expect(b.entryOf(a.fingerprint)!.mine, isFalse);
+        expect(
+          _savedDevice(a.pairedFile, b.fingerprint)['relation'],
+          'foreign',
+        );
+        expect(
+          _savedDevice(b.pairedFile, a.fingerprint)['relation'],
+          'foreign',
+        );
+        await a.until((s) => s.questions.isNotEmpty);
+        await b.until((s) => s.questions.isNotEmpty);
+        expect(a.state.questions, [
+          MineQuestion(
+            fingerprint: b.fingerprint,
+            deviceName: labelOf('Node B', b.fingerprint),
+          ),
+        ]);
+        expect(b.state.questions, [
+          MineQuestion(
+            fingerprint: a.fingerprint,
+            deviceName: labelOf('Node A', a.fingerprint),
+          ),
+        ]);
+        expect(showsPaired(a.state), isTrue);
+        expect(showsPaired(b.state), isTrue);
+        expect(a.state.notices, isEmpty);
+        expect(b.state.notices, isEmpty);
+
+        final questionOfA = a.state.questions.single;
+        final questionOfB = b.state.questions.single;
+        a.node.dismissPairing();
+        b.node.dismissPairing();
+        await eventually(
+          () => a.state.pairing == null && b.state.pairing == null,
+          reason: 'paired views dismissed',
+        );
+        expect(a.state.questions, [questionOfA]);
+        expect(b.state.questions, [questionOfB]);
+        expect(a.entryOf(b.fingerprint)!.mine, isFalse);
+        expect(b.entryOf(a.fingerprint)!.mine, isFalse);
+      },
+      timeout: _slow,
+    );
 
     test('the receiver may confirm first: the initiator still decides when '
         'it confirms', () async {
@@ -1210,6 +1256,7 @@ void main() {
         a.node.answerCode(matches: true);
         a.node.cancelPairing();
         a.node.answerRequest(ReceiverAnswer.matches);
+        a.node.cancelRequest();
         a.node.dismissPairing();
         a.node.dismissNotice(1);
         await a.node.answerMine(fingerprintOfB, mine: true);

@@ -82,6 +82,7 @@ final class PairingView {
     this.code,
     this.alreadyPaired = false,
     this.outcome,
+    this.isNew = false,
   });
 
   final PairingRole role;
@@ -98,6 +99,8 @@ final class PairingView {
 
   final PairingOutcome? outcome;
 
+  final bool isNew;
+
   @override
   bool operator ==(Object other) =>
       other is PairingView &&
@@ -107,7 +110,8 @@ final class PairingView {
       other.peerName == peerName &&
       other.code == code &&
       other.alreadyPaired == alreadyPaired &&
-      other.outcome == outcome;
+      other.outcome == outcome &&
+      other.isNew == isNew;
 
   @override
   int get hashCode => Object.hash(
@@ -118,6 +122,7 @@ final class PairingView {
     code,
     alreadyPaired,
     outcome,
+    isNew,
   );
 }
 
@@ -297,6 +302,8 @@ final class PairingCoordinator {
   void cancelAsInitiator() => _initiator.cancel();
 
   void answerAsReceiver(ReceiverAnswer answer) => _receiver.answer(answer);
+
+  void cancelAsReceiver() => _receiver.cancel();
 
   void dismissOutcome() {
     _receiver.dismissOutcome();
