@@ -78,7 +78,9 @@ final class TransferPlatform implements FileSystemPlatform {
   Future<void> Function(String method, String path)? hold;
   Future<bool> Function(String filePath)? mark;
   Future<FreeNameMove> Function(String from, String folder, String name)? move;
+  Future<Set<String>> Function(Set<String> extensions)? dangerousBatch;
   final List<String> dangerousAsked = [];
+  final List<Set<String>> dangerousBatches = [];
   final List<String> calls = [];
   int volumeCalls = 0;
   int freeCalls = 0;
@@ -179,6 +181,17 @@ final class TransferPlatform implements FileSystemPlatform {
   Future<bool> isDangerousType(String extension) {
     dangerousAsked.add(extension);
     return dangerous(extension);
+  }
+
+  @override
+  Future<Set<String>> dangerousExtensions(Set<String> extensions) async {
+    dangerousBatches.add(Set<String>.of(extensions));
+    final batch = dangerousBatch;
+    if (batch != null) return batch(extensions);
+    return {
+      for (final extension in extensions)
+        if (await dangerous(extension)) extension,
+    };
   }
 }
 
@@ -528,10 +541,11 @@ final class ReceiverStack {
     required Stream<List<int>> body,
     SecurityContext? context,
     Duration timeout = const Duration(seconds: 20),
+    String path = ApiPaths.transferUpload,
   }) => postStream(
     address: loopback,
     port: port,
-    path: ApiPaths.transferUpload,
+    path: path,
     headers: headers,
     contentLength: contentLength,
     body: body,

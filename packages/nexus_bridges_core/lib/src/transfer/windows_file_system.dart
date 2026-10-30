@@ -16,6 +16,7 @@ import 'names.dart'
 import 'platform.dart';
 import 'windows_folder_io.dart'
     show
+        dangerousExtensionsSync,
         deleteTreeNoFollowSync,
         extendedPath,
         isDangerousTypeSync,
@@ -147,6 +148,12 @@ final class WindowsFileSystemPlatform implements FileSystemPlatform {
   @override
   Future<bool> isDangerousType(String extension) =>
       _inIsolate<bool>(() => isDangerousTypeSync(extension), false);
+
+  @override
+  Future<Set<String>> dangerousExtensions(Set<String> extensions) {
+    final asked = Set<String>.of(extensions);
+    return _inIsolate<Set<String>>(() => dangerousExtensionsSync(asked), asked);
+  }
 }
 
 Future<T> _inIsolate<T>(T Function() work, T fallback) async {

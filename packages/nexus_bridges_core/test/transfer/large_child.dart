@@ -70,6 +70,10 @@ final class _Platform implements FileSystemPlatform {
   @override
   Future<bool> isDangerousType(String extension) =>
       _real.isDangerousType(extension);
+
+  @override
+  Future<Set<String>> dangerousExtensions(Set<String> extensions) =>
+      _real.dangerousExtensions(extensions);
 }
 
 final class _Folders implements ReceiveFolderStore {

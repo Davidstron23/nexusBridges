@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../protocol/protocol.dart' show Limits;
 import '../server/server.dart' show ApiUpload;
 import 'manifest.dart';
 import 'messages.dart' show FolderOfferRequest;
+import 'names.dart' show isProgram, windowsExtension;
+import 'platform.dart' show FileSystemPlatform;
 
 sealed class ManifestReadResult {
   const ManifestReadResult();
@@ -23,6 +26,30 @@ final class ManifestRefused extends ManifestReadResult {
 
 final class ManifestBroken extends ManifestReadResult {
   const ManifestBroken();
+}
+
+Future<bool> manifestHasPrograms(
+  FolderManifest manifest,
+  FileSystemPlatform fs, {
+  Duration timeout = Limits.transferTypeCheckTimeout,
+}) async {
+  final extensions = <String>{};
+  for (var i = 1; i <= manifest.length; i++) {
+    if (manifest.isFolder(i)) continue;
+    final name = manifest.nameOf(i);
+    if (isProgram(name)) return true;
+    final extension = windowsExtension(name);
+    if (extension == null) continue;
+    extensions.add(extension.toLowerCase());
+    if (extensions.length > Limits.maxDangerousExtensions) return true;
+  }
+  if (extensions.isEmpty) return false;
+  try {
+    final dangerous = await fs.dangerousExtensions(extensions).timeout(timeout);
+    return dangerous.isNotEmpty;
+  } catch (_) {
+    return true;
+  }
 }
 
 ({int status, String error}) manifestRefusalReply(ManifestRefusal refusal) =>

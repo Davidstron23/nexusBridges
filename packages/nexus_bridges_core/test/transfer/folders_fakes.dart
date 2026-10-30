@@ -169,4 +169,8 @@ final class FakePlatform implements FileSystemPlatform {
 
   @override
   Future<bool> isDangerousType(String extension) async => false;
+
+  @override
+  Future<Set<String>> dangerousExtensions(Set<String> extensions) async =>
+      <String>{};
 }

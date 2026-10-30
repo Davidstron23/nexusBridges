@@ -247,6 +247,24 @@ bool isDangerousTypeSync(String extension) {
   }
 }
 
+Set<String> dangerousExtensionsSync(Set<String> extensions) {
+  try {
+    final library = DynamicLibrary.open('shlwapi.dll');
+    final query = library
+        .lookupFunction<_AssocIsDangerousNative, _AssocIsDangerous>(
+          'AssocIsDangerous',
+        );
+    return using(
+      (arena) => {
+        for (final extension in extensions)
+          if (query(arena.pcwstr(extension)) != 0) extension,
+      },
+    );
+  } catch (_) {
+    return Set<String>.of(extensions);
+  }
+}
+
 final class RawEntry {
   const RawEntry({
     required this.name,

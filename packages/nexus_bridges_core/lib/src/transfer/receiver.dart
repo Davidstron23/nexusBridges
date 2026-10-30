@@ -140,6 +140,8 @@ final class _InSession {
 
   bool manifestPermitUsed = false;
 
+  bool manifestDone = false;
+
   Duration? manifestAskedAt;
 
   Duration? manifestStartedAt;
@@ -955,18 +957,19 @@ final class TransferReceiver {
 
   ApiReply? _limitReply(_InSession session, ReceiveTarget target) {
     final folderOffer = session.folderOffer;
+    final manifest = session.manifest;
     final tooLong = folderOffer == null
         ? _exceedsFinalPath(target.path, session.name)
         : !folderFitsIn(
             targetPath: target.path,
             folderName: session.name,
-            longest: folderOffer.longest,
+            longest: manifest?.longest ?? folderOffer.longest,
           );
     if (tooLong) {
       _end(session, TransferOutcome.pathTooLong);
       return _pathTooLong;
     }
-    if (!hasRoomFor(target.freeBytes, session.size)) {
+    if (!hasRoomFor(target.freeBytes, manifest?.totalBytes ?? session.size)) {
       final throttled = _recentNoSpace.blocks(session.fingerprint);
       if (throttled && !session.exposed) {
         _end(session, TransferOutcome.noSpace, register: false);
@@ -1303,13 +1306,8 @@ final class TransferReceiver {
     if (isBlockedType(name)) {
       return (refusal: _blockedType, session: null);
     }
-    if (folderRequest != null) {
-      if (folderRequest.exceedsLimits) {
-        return (refusal: _tooLarge, session: null);
-      }
-      if (device.relation != PeerRelation.mine) {
-        return (refusal: _incompatible, session: null);
-      }
+    if (folderRequest != null && folderRequest.exceedsLimits) {
+      return (refusal: _tooLarge, session: null);
     }
     if (!_hasRoomFor(
       fingerprint,
@@ -1362,10 +1360,6 @@ final class TransferReceiver {
       );
       if (inspection is FolderUsable) target = inspection.target;
       if (_gone(session)) return _cancelled;
-    }
-    if (isFolder && target == null) {
-      _end(session, TransferOutcome.cancelledByPeer, register: false);
-      return _incompatible;
     }
     var proposal = remembered?.path;
     var proposalLost = false;
@@ -1663,14 +1657,32 @@ final class TransferReceiver {
         );
         return ApiReply(reply.status, {'error': reply.error});
       case ManifestBroken():
+        _noteUnfinishedManifest(session);
         _end(session, TransferOutcome.cancelledByPeer, register: false);
         return _internal;
       case ManifestComplete(:final manifest):
         session
           ..manifest = manifest
+          ..manifestDone = true
           ..upload = null;
+        session.isProgram = await manifestHasPrograms(manifest, _fs);
+        if (_gone(session)) return _cancelled;
+        final target = session.target;
+        if (target != null) {
+          final refusal = _limitReply(session, target);
+          if (refusal != null) return refusal;
+        }
         return _decide(session, cut: false);
     }
+  }
+
+  void _noteUnfinishedManifest(_InSession session) {
+    if (session.manifestDone) return;
+    if (session.phase != _InPhase.awaitingManifest &&
+        session.phase != _InPhase.readingManifest) {
+      return;
+    }
+    _noteForeignRejection(session.fingerprint);
   }
 
   Future<ApiReply> _runUpload(_InSession session, ApiUpload upload) async {
@@ -2238,9 +2250,10 @@ final class TransferReceiver {
 
   void _withdrawByPeer(_InSession session) {
     switch (session.phase) {
-      case _InPhase.checking ||
-          _InPhase.awaitingManifest ||
-          _InPhase.readingManifest:
+      case _InPhase.checking:
+        _end(session, TransferOutcome.cancelledByPeer, register: false);
+      case _InPhase.awaitingManifest || _InPhase.readingManifest:
+        _noteUnfinishedManifest(session);
         _end(session, TransferOutcome.cancelledByPeer, register: false);
       case _InPhase.warning || _InPhase.folderQuestion || _InPhase.accepted:
         final wasExposed = session.exposed;
@@ -2263,10 +2276,12 @@ final class TransferReceiver {
   }
 
   void _tickManifest(_InSession session, Duration now) {
+    if (session.manifestDone) return;
     switch (session.phase) {
       case _InPhase.awaitingManifest:
         final askedAt = session.manifestAskedAt ?? session.arrivedAt;
         if (now - askedAt >= Limits.transferManifestStartTimeout) {
+          _noteUnfinishedManifest(session);
           _end(session, TransferOutcome.cancelledByPeer, register: false);
         }
       case _InPhase.readingManifest:
@@ -2283,6 +2298,7 @@ final class TransferReceiver {
             );
         if (now - lastDataAt >= Limits.manifestIdleTimeout ||
             now - startedAt >= cap) {
+          _noteUnfinishedManifest(session);
           _end(session, TransferOutcome.cancelledByPeer, register: false);
         }
       default:
@@ -2420,12 +2436,7 @@ final class TransferReceiver {
     switch (session.phase) {
       case _InPhase.checking || _InPhase.warning || _InPhase.folderQuestion:
         return RemoteState.waiting(picker: _pickers.isOpen);
-      case _InPhase.awaitingManifest:
-        final manifestPermit = session.manifestPermit;
-        return manifestPermit == null
-            ? const RemoteState.cancelled()
-            : RemoteState.manifest(permit: manifestPermit);
-      case _InPhase.readingManifest:
+      case _InPhase.awaitingManifest || _InPhase.readingManifest:
         return const RemoteState.waiting(picker: false);
       case _InPhase.accepted:
         final permit = session.permit;
