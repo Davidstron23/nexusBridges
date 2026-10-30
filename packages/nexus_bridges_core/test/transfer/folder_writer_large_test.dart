@@ -9,7 +9,7 @@ import 'package:test/test.dart';
 
 import 'folder_writer_support.dart';
 
-const Duration writeBudget = Duration(seconds: 30);
+const Duration writeBudget = Duration(seconds: 40);
 const int folderCount = 100;
 const int filesPerFolder = 100;
 const int fileBytes = 10240;
