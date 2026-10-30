@@ -158,6 +158,8 @@ final class _InSession {
 
   String? finalName;
 
+  bool moving = false;
+
   final String localId;
 
   final Duration arrivedAt;
@@ -419,6 +421,8 @@ final class TransferReceiver {
 
   final Set<Future<void>> _cleanups = {};
 
+  final Set<String> _discardingTemps = {};
+
   SystemFolders? _systemFolders;
 
   Future<SystemFolders>? _systemFoldersInFlight;
@@ -511,7 +515,7 @@ final class TransferReceiver {
           moreFirstLevel: manifest == null
               ? 0
               : manifest.firstLevelCount - firstLevel.length,
-          canCancel: session.phase != _InPhase.finishing,
+          canCancel: _canCancelNow(session),
         );
       }
     }
@@ -561,24 +565,51 @@ final class TransferReceiver {
     }
   }
 
+  bool _canCutFinishing(_InSession session) =>
+      session.phase == _InPhase.finishing &&
+      session.folderOffer != null &&
+      !session.moving;
+
+  bool _canCancelNow(_InSession session) =>
+      session.phase != _InPhase.finishing || _canCutFinishing(session);
+
+  bool _cutBeforeMove(_InSession session, TransferOutcome outcome) {
+    if (!_canCutFinishing(session)) return false;
+    _end(session, outcome, cut: false);
+    return true;
+  }
+
   void cancelIncoming(String sessionId) {
     final session = _active;
     if (_closed ||
         session == null ||
         session.localId != sessionId ||
-        !session.exposed ||
-        (session.phase != _InPhase.accepted &&
-            session.phase != _InPhase.uploading)) {
+        !session.exposed) {
       return;
     }
-    _end(session, TransferOutcome.cancelledHere);
+    switch (session.phase) {
+      case _InPhase.accepted || _InPhase.uploading:
+        _end(session, TransferOutcome.cancelledHere);
+      case _InPhase.finishing:
+        _cutBeforeMove(session, TransferOutcome.cancelledHere);
+      case _InPhase.checking ||
+          _InPhase.warning ||
+          _InPhase.folderQuestion ||
+          _InPhase.awaitingManifest ||
+          _InPhase.readingManifest ||
+          _InPhase.ended:
+        break;
+    }
   }
 
   void interfacesChanged(Set<String> activeInterfaceIds) {
     final session = _active;
     if (_closed || session == null) return;
-    if (session.phase == _InPhase.finishing) return;
     if (activeInterfaceIds.contains(session.via)) return;
+    if (session.phase == _InPhase.finishing) {
+      _cutBeforeMove(session, TransferOutcome.interfaceDown);
+      return;
+    }
     _end(session, TransferOutcome.interfaceDown);
   }
 
@@ -594,9 +625,8 @@ final class TransferReceiver {
     }
     final session = _active;
     if (session == null) return;
-    if (session.phase == _InPhase.finishing) return;
     if (_paired.deviceOf(session.fingerprint) != null) return;
-    _end(session, TransferOutcome.unpaired);
+    _endUnpaired(session);
   }
 
   void peerUnpaired(String fingerprint) {
@@ -604,8 +634,15 @@ final class TransferReceiver {
     _forgetRelation(fingerprint);
     final session = _active;
     if (session == null) return;
-    if (session.phase == _InPhase.finishing) return;
     if (session.fingerprint != fingerprint) return;
+    _endUnpaired(session);
+  }
+
+  void _endUnpaired(_InSession session) {
+    if (session.phase == _InPhase.finishing) {
+      _cutBeforeMove(session, TransferOutcome.unpaired);
+      return;
+    }
     _end(session, TransferOutcome.unpaired);
   }
 
@@ -638,7 +675,9 @@ final class TransferReceiver {
         case _InPhase.accepted || _InPhase.uploading:
           _end(session, TransferOutcome.cancelledHere);
         case _InPhase.finishing:
-          finishing = session;
+          if (!_cutBeforeMove(session, TransferOutcome.cancelledHere)) {
+            finishing = session;
+          }
         case _InPhase.ended:
           break;
       }
@@ -706,7 +745,7 @@ final class TransferReceiver {
 
   Set<String> _activeTemps() {
     final path = _active?.tempPath;
-    return path == null ? const {} : {path};
+    return {?path, ..._discardingTemps};
   }
 
   void pickersChanged(bool open, Duration since) {
@@ -1861,6 +1900,7 @@ final class TransferReceiver {
     _signal(session);
     _onChanged();
     Future<ApiReply> fail(TransferOutcome outcome, {int? entry}) async {
+      if (session.phase != _InPhase.finishing) return _uploadReply(session);
       session.folderWriter = null;
       session.problemEntry = entry;
       try {
@@ -1880,6 +1920,7 @@ final class TransferReceiver {
       _log('incoming folder finish failed: ${e.runtimeType}');
       written = const FolderWriteFailed(TransferOutcome.writeFailed);
     }
+    if (session.phase != _InPhase.finishing) return _uploadReply(session);
     if (written is FolderWriteFailed) {
       return fail(written.outcome, entry: written.entry);
     }
@@ -1889,6 +1930,8 @@ final class TransferReceiver {
       return fail(TransferOutcome.invalidName);
     }
     if (isBlockedType(session.name)) return fail(TransferOutcome.blockedType);
+    session.moving = true;
+    _onChanged();
     FreeNameMove moved;
     try {
       moved = await _fs.moveFolderToFreeName(
@@ -2073,6 +2116,13 @@ final class TransferReceiver {
       }
       return;
     }
+    if (previous == _InPhase.finishing) {
+      final target = session.target;
+      if (folderWriter != null && target != null) {
+        _discardFolder(folderWriter, target);
+      }
+      return;
+    }
     if (previous != _InPhase.uploading) return;
     if (cut && upload != null) {
       try {
@@ -2089,11 +2139,21 @@ final class TransferReceiver {
       });
     }
     if (folderWriter != null && target != null) {
-      _track(() async {
-        await folderWriter.discard();
-        await _releaseFolderTemp(target);
-      });
+      _discardFolder(folderWriter, target);
     }
+  }
+
+  void _discardFolder(FolderWriterHost host, ReceiveTarget target) {
+    final temp = host.tempRoot;
+    _discardingTemps.add(temp);
+    _track(() async {
+      try {
+        await host.discard();
+        await _releaseFolderTemp(target);
+      } finally {
+        _discardingTemps.remove(temp);
+      }
+    });
   }
 
   Future<void> _forgetJournal(ReceiveTarget target) async {
@@ -2202,36 +2262,38 @@ final class TransferReceiver {
         if (request.reason == CancelReason.noContact) {
           _withdrawByPeer(session);
         } else {
-          _end(
-            session,
-            request.reason == CancelReason.unreadable
-                ? TransferOutcome.unreadable
-                : TransferOutcome.cancelledByPeer,
-          );
+          _noteProblemEntry(session, request);
+          _end(session, _outcomeOfCancel(request));
         }
       case _InPhase.uploading:
-        final entry = request.entry;
-        final manifest = session.manifest;
-        if (request.reason == CancelReason.unreadable &&
-            entry != null &&
-            manifest != null &&
-            entry >= 1 &&
-            entry <= manifest.length &&
-            !manifest.isFolder(entry)) {
-          session.problemEntry = entry;
-        }
-        _end(
-          session,
-          request.reason == CancelReason.unreadable
-              ? TransferOutcome.unreadable
-              : TransferOutcome.cancelledByPeer,
-        );
+        _noteProblemEntry(session, request);
+        _end(session, _outcomeOfCancel(request));
       case _InPhase.finishing:
-        await session.finished.future;
+        if (!_cutBeforeMove(session, _outcomeOfCancel(request))) {
+          await session.finished.future;
+        }
       case _InPhase.ended:
         break;
     }
     return ApiReply(200, _stateOf(session).toJson());
+  }
+
+  TransferOutcome _outcomeOfCancel(CancelRequest request) =>
+      request.reason == CancelReason.unreadable
+      ? TransferOutcome.unreadable
+      : TransferOutcome.cancelledByPeer;
+
+  void _noteProblemEntry(_InSession session, CancelRequest request) {
+    final entry = request.entry;
+    final manifest = session.manifest;
+    if (request.reason == CancelReason.unreadable &&
+        entry != null &&
+        manifest != null &&
+        entry >= 1 &&
+        entry <= manifest.length &&
+        !manifest.isFolder(entry)) {
+      session.problemEntry = entry;
+    }
   }
 
   void _withdrawIfPending(_InSession session) {

@@ -78,6 +78,13 @@ final class TransferPlatform implements FileSystemPlatform {
   Future<void> Function(String method, String path)? hold;
   Future<bool> Function(String filePath)? mark;
   Future<FreeNameMove> Function(String from, String folder, String name)? move;
+  Future<FreeNameMove> Function(
+    String from,
+    String folder,
+    String name,
+    int maxNameUnits,
+  )?
+  moveFolder;
   Future<Set<String>> Function(Set<String> extensions)? dangerousBatch;
   final List<String> dangerousAsked = [];
   final List<Set<String>> dangerousBatches = [];
@@ -161,12 +168,17 @@ final class TransferPlatform implements FileSystemPlatform {
     String folder,
     String name, {
     required int maxNameUnits,
-  }) => realFs.moveFolderToFreeName(
-    from,
-    folder,
-    name,
-    maxNameUnits: maxNameUnits,
-  );
+  }) {
+    final fake = moveFolder;
+    return fake == null
+        ? realFs.moveFolderToFreeName(
+            from,
+            folder,
+            name,
+            maxNameUnits: maxNameUnits,
+          )
+        : fake(from, folder, name, maxNameUnits);
+  }
 
   @override
   Future<bool> markFromInternet(String filePath) {

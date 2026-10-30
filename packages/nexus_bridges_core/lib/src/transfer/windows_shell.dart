@@ -81,9 +81,9 @@ final RegExp _uncAbsolutePath = RegExp(r'^\\\\[^\\?.][^\\]*\\[^\\]+');
 bool _isAbsoluteWindowsPath(String path) =>
     _driveAbsolutePath.hasMatch(path) || _uncAbsolutePath.hasMatch(path);
 
-RevealResult revealPlanFor(bool fileExists, bool folderExists) {
-  if (fileExists) return RevealResult.shown;
-  if (folderExists) return RevealResult.folderOnly;
+RevealResult revealPlanFor(bool itemExists, bool parentExists) {
+  if (itemExists) return RevealResult.shown;
+  if (parentExists) return RevealResult.folderOnly;
   return RevealResult.unavailable;
 }
 
@@ -193,7 +193,7 @@ RevealResult _revealSync(String filePath) {
         );
     final folderPath = File(filePath).parent.path;
     final plan = revealPlanFor(
-      FileSystemEntity.typeSync(filePath) == FileSystemEntityType.file,
+      _isFileOrFolder(FileSystemEntity.typeSync(filePath)),
       FileSystemEntity.typeSync(folderPath) == FileSystemEntityType.directory,
     );
     switch (plan) {
@@ -226,6 +226,9 @@ RevealResult _revealSync(String filePath) {
     CoUninitialize();
   }
 }
+
+bool _isFileOrFolder(FileSystemEntityType type) =>
+    type == FileSystemEntityType.file || type == FileSystemEntityType.directory;
 
 bool _selectInFolder(
   String filePath,

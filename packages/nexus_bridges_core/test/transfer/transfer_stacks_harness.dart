@@ -274,6 +274,8 @@ final class TransferStack {
     WriteBytes? writeBytes,
     String Function(String base)? receiveChild,
     List<ActiveInterface> extraInterfaces = const [],
+    Future<void> Function(int entry)? beforeStreamEntry,
+    FolderRevealer? revealer,
   }) async {
     final root = await transferFolder('nexus_t11_');
     final base = (await realFs.realPath(root.path))!;
@@ -341,6 +343,8 @@ final class TransferStack {
       idleTimeout: idleTimeout,
       confirmTimeout: confirmTimeout,
       writeBytes: writeBytes ?? writeAllBytes,
+      beforeStreamEntry: beforeStreamEntry,
+      revealer: revealer,
       log: stack.logs.add,
     );
     stack.coordinator.changes.listen((_) {

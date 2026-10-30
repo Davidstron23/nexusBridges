@@ -308,6 +308,7 @@ final class _TreeWriter {
       return false;
     }
     for (var i = 1; i <= _manifest.length; i++) {
+      if (_stopping) return false;
       if (_manifest.isFolder(i) && !_created.contains(i)) {
         if (_ensureFolder(i, i) == null) return false;
       }
