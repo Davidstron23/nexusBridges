@@ -88,6 +88,8 @@ abstract interface class FileSystemPlatform {
 
   Future<bool> markFromInternet(String filePath);
 
+  Future<bool> deleteTree(String path);
+
   Future<bool> isDangerousType(String extension);
 }
 

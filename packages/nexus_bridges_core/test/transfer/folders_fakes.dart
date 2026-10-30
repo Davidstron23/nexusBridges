@@ -162,5 +162,11 @@ final class FakePlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<bool> deleteTree(String path) async {
+    await _record('deleteTree', path);
+    return windowsFs.deleteTree(path);
+  }
+
+  @override
   Future<bool> isDangerousType(String extension) async => false;
 }

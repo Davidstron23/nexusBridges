@@ -962,9 +962,14 @@ bool _deleteDirectory(Arena arena, String path, String extended) {
   return value;
 }
 
-bool verifyTree(String root, int expectedEntries) {
+bool verifyTree(
+  String root,
+  int expectedEntries, {
+  bool Function()? isCancelled,
+}) {
   var count = 0;
   bool walk(String folder) {
+    if (isCancelled != null && isCancelled()) return false;
     final List<RawEntry> entries;
     try {
       entries = listDirectorySync(folder);

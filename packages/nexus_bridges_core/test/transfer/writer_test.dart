@@ -202,6 +202,9 @@ final class FactsPlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<bool> deleteTree(String path) => windowsFs.deleteTree(path);
+
+  @override
   Future<bool> isDangerousType(String extension) =>
       windowsFs.isDangerousType(extension);
 }

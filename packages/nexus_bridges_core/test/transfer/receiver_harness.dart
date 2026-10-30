@@ -173,6 +173,9 @@ final class TransferPlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<bool> deleteTree(String path) => realFs.deleteTree(path);
+
+  @override
   Future<bool> isDangerousType(String extension) {
     dangerousAsked.add(extension);
     return dangerous(extension);

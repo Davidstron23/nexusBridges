@@ -66,6 +66,7 @@ final RegExp _absolutePath = RegExp(r'^(?:[A-Za-z]:\\|\\\\[^\\]+\\[^\\]+)');
 final RegExp _badPathChars = RegExp(r'[*?"<>|:\u0000-\u001F]');
 final RegExp _uncServerOnly = RegExp(r'^\\\\[^\\]*$');
 final RegExp _ownTempName = RegExp(r'^~nexusbridges-[0-9a-f]{32}\.partial$');
+final RegExp _ownFolderTempName = RegExp(r'^~nexusbridges-[0-9a-f]{12}$');
 final RegExp _deviceUncPrefix = RegExp(r'^\\\\\.\\UNC\\', caseSensitive: false);
 final RegExp _uncShare = RegExp(r'^\\\\([^\\]+)\\([^\\]+)(?:\\|$)');
 
@@ -355,6 +356,18 @@ Future<bool> _probeWrite(
 
 bool isOwnTempName(String fileName) => _ownTempName.hasMatch(fileName);
 
+bool isOwnFolderTempName(String folderName) =>
+    _ownFolderTempName.hasMatch(folderName);
+
+String newFolderTempName() {
+  final random = Random.secure();
+  final buffer = StringBuffer(tempPrefix);
+  for (var i = 0; i < 6; i++) {
+    buffer.write(random.nextInt(256).toRadixString(16).padLeft(2, '0'));
+  }
+  return buffer.toString();
+}
+
 Future<bool> sweepTemps(
   String folderRealPath,
   FileSystemPlatform fs, {
@@ -370,11 +383,26 @@ Future<bool> sweepTemps(
     if (realSub == null || !samePath(realSub, sub)) return false;
     final entries = await Directory(sub).list(followLinks: false).toList();
     for (final entry in entries) {
-      if (entry is! File) continue;
-      if (!isOwnTempName(baseName(entry.path))) continue;
+      final name = baseName(entry.path);
+      final ownFile = isOwnTempName(name);
+      final ownFolder = isOwnFolderTempName(name);
+      if (!ownFile && !ownFolder) continue;
       if (keep.any((active) => samePath(active, entry.path))) continue;
       try {
-        await entry.delete();
+        final kind = await FileSystemEntity.type(
+          entry.path,
+          followLinks: false,
+        );
+        switch (kind) {
+          case FileSystemEntityType.link:
+            await Link(entry.path).delete();
+          case FileSystemEntityType.directory:
+            if (ownFolder) await fs.deleteTree(entry.path);
+          case FileSystemEntityType.file:
+            if (ownFile) await File(entry.path).delete();
+          default:
+            break;
+        }
       } catch (_) {}
     }
     await _deleteIfEmpty(sub);

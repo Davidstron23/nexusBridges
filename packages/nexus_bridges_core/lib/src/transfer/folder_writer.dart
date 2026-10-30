@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -10,13 +9,24 @@ import 'package:win32/win32.dart' show HANDLE;
 
 import '../protocol/protocol.dart' show Limits;
 import 'folder_stream.dart';
-import 'folders.dart' show samePath, tempPrefix;
+import 'folders.dart' show newFolderTempName, samePath;
 import 'hashing.dart' show Sha256Stream, startSha256;
 import 'manifest.dart' show FolderManifest;
 import 'transfer.dart' show TransferOutcome;
 import 'windows_folder_io.dart';
 
 const int _bufferBytes = 1048576;
+const int _handleSlots = 132;
+const int _rootSlot = 0;
+const int _fileSlot = 1;
+const int _chainSlot = 2;
+const Duration _deleteBudget = Duration(seconds: 30);
+const List<Duration> _deleteWaits = [
+  Duration(milliseconds: 100),
+  Duration(milliseconds: 200),
+  Duration(milliseconds: 400),
+  Duration(milliseconds: 800),
+];
 
 sealed class FolderWriteResult {
   const FolderWriteResult();
@@ -40,6 +50,8 @@ final class _WriterStart {
     required this.manifest,
     required this.supportsMark,
     required this.flagAddress,
+    required this.bufferAddress,
+    required this.slotsAddress,
   });
 
   final SendPort events;
@@ -47,6 +59,8 @@ final class _WriterStart {
   final FolderManifest manifest;
   final bool supportsMark;
   final int flagAddress;
+  final int bufferAddress;
+  final int slotsAddress;
 }
 
 final class _OpenFolder {
@@ -56,19 +70,12 @@ final class _OpenFolder {
   final HANDLE handle;
 }
 
-String _randomHex12() {
-  final random = Random.secure();
-  final buffer = StringBuffer();
-  for (var i = 0; i < 6; i++) {
-    buffer.write(random.nextInt(256).toRadixString(16).padLeft(2, '0'));
-  }
-  return buffer.toString();
-}
-
 final class _TreeWriter {
   _TreeWriter(this._start)
     : _manifest = _start.manifest,
-      _flag = Pointer<Uint8>.fromAddress(_start.flagAddress) {
+      _flag = Pointer<Uint8>.fromAddress(_start.flagAddress),
+      _buffer = Pointer<Uint8>.fromAddress(_start.bufferAddress),
+      _slots = Pointer<IntPtr>.fromAddress(_start.slotsAddress) {
     _parser = FrameParser(
       manifest: _manifest,
       onStart: _startFile,
@@ -80,8 +87,9 @@ final class _TreeWriter {
   final _WriterStart _start;
   final FolderManifest _manifest;
   final Pointer<Uint8> _flag;
+  final Pointer<Uint8> _buffer;
+  final Pointer<IntPtr> _slots;
   late final FrameParser _parser;
-  final Pointer<Uint8> _buffer = calloc<Uint8>(_bufferBytes);
   final List<_OpenFolder> _chain = [];
   final Set<int> _created = {};
   String? rootPath;
@@ -93,18 +101,38 @@ final class _TreeWriter {
   int _used = 0;
   int _files = 0;
   int _dataBytes = 0;
+  int _currentEntry = 0;
   TransferOutcome? _failure;
   bool _finished = false;
 
   bool get failed => _failure != null;
 
+  bool get _stopping => _flag.value != 0;
+
+  void _setRoot(HANDLE? handle) {
+    _slots[_rootSlot] = handle?.address ?? 0;
+    _root = handle;
+  }
+
+  void _setFile(HANDLE? handle) {
+    _slots[_fileSlot] = handle?.address ?? 0;
+    _file = handle;
+  }
+
+  void _pushFolder(int index, HANDLE handle) {
+    _slots[_chainSlot + _chain.length] = handle.address;
+    _chain.add(_OpenFolder(index, handle));
+  }
+
+  void _popFolder() {
+    _slots[_chainSlot + _chain.length - 1] = 0;
+    _chain.removeLast().handle.close();
+  }
+
   bool open() {
     String? path;
     for (var attempt = 0; attempt < 3 && path == null; attempt++) {
-      final candidate = _join(
-        _start.tempFolder,
-        '$tempPrefix${_randomHex12()}',
-      );
+      final candidate = _join(_start.tempFolder, newFolderTempName());
       if (createFolderByPathSync(candidate)) path = candidate;
     }
     if (path == null) return false;
@@ -121,7 +149,7 @@ final class _TreeWriter {
       deleteTreeNoFollowSync(path);
       return false;
     }
-    _root = opened.handle;
+    _setRoot(opened.handle);
     _rootFinal = resolved;
     return true;
   }
@@ -148,7 +176,7 @@ final class _TreeWriter {
       common++;
     }
     while (_chain.length > common) {
-      _chain.removeLast().handle.close();
+      _popFolder();
     }
     for (var depth = common; depth < ordered.length; depth++) {
       final parent = depth == 0 ? _root! : _chain[depth - 1].handle;
@@ -162,7 +190,7 @@ final class _TreeWriter {
       switch (result) {
         case NodeCreated(:final handle):
           _created.add(index);
-          _chain.add(_OpenFolder(index, handle));
+          _pushFolder(index, handle);
         case NodeFailed(:final diskFull):
           _fail(
             diskFull ? TransferOutcome.diskFull : TransferOutcome.writeFailed,
@@ -175,7 +203,7 @@ final class _TreeWriter {
   }
 
   void _startFile(int index, int length) {
-    if (failed) return;
+    if (failed || _stopping) return;
     final parent = _ensureFolder(_manifest.parentOf(index), index);
     if (parent == null) return;
     final result = createFileExclusive(
@@ -185,7 +213,7 @@ final class _TreeWriter {
     );
     switch (result) {
       case NodeCreated(:final handle):
-        _file = handle;
+        _setFile(handle);
         _fileParent = parent;
         _digest = startSha256();
         _used = 0;
@@ -232,20 +260,19 @@ final class _TreeWriter {
     _dataBytes += bytes.length;
   }
 
-  int _currentEntry = 0;
-
   void _endFile(int index) {
     _currentEntry = index;
     final file = _file;
     final digest = _digest;
     final parent = _fileParent;
-    if (failed || file == null || digest == null || parent == null) return;
+    if (failed || _stopping) return;
+    if (file == null || digest == null || parent == null) return;
     if (!_flush(index)) return;
     final hex = digest.close();
     digest.dispose();
     _digest = null;
+    _setFile(null);
     file.close();
-    _file = null;
     if (hex == null || hex != _manifest.hashHexOf(index)) {
       _fail(TransferOutcome.damaged, index);
       return;
@@ -259,7 +286,7 @@ final class _TreeWriter {
   }
 
   void chunk(Uint8List bytes) {
-    if (failed || _finished || _flag.value != 0) return;
+    if (failed || _finished || _stopping) return;
     final length = bytes.length;
     final fault = _parser.add(bytes);
     if (fault != null) {
@@ -275,7 +302,7 @@ final class _TreeWriter {
   }
 
   bool finish() {
-    if (failed || _flag.value != 0) return false;
+    if (failed || _stopping) return false;
     if (!_parser.complete || _file != null) {
       _fail(TransferOutcome.unexpectedData);
       return false;
@@ -286,48 +313,54 @@ final class _TreeWriter {
       }
     }
     _closeFolders();
-    if (!verifyTree(rootPath!, _manifest.length)) {
+    if (!verifyTree(
+      rootPath!,
+      _manifest.length,
+      isCancelled: () => _stopping,
+    )) {
       _fail(TransferOutcome.writeFailed);
       return false;
     }
     final root = _root;
-    if (root != null) clearHiddenByHandleSync(root);
-    root?.close();
-    _root = null;
+    if (root != null) {
+      clearHiddenByHandleSync(root);
+      _setRoot(null);
+      root.close();
+    }
     _finished = true;
     return true;
   }
 
   void _closeFolders() {
     while (_chain.isNotEmpty) {
-      _chain.removeLast().handle.close();
+      _popFolder();
     }
   }
 
   void closeAll() {
     final file = _file;
     if (file != null) {
+      _setFile(null);
       file.close();
-      _file = null;
     }
     _digest?.dispose();
     _digest = null;
     _closeFolders();
     final root = _root;
     if (root != null) {
+      _setRoot(null);
       root.close();
-      _root = null;
     }
   }
 
-  void deleteAll() {
-    closeAll();
+  bool deleteAll() {
     final path = rootPath;
-    if (path != null) deleteTreeNoFollowSync(path);
-  }
-
-  void dispose() {
-    calloc.free(_buffer);
+    if (path == null) return true;
+    for (var attempt = 0; ; attempt++) {
+      if (deleteTreeNoFollowSync(path)) return true;
+      if (attempt >= _deleteWaits.length) return false;
+      sleep(_deleteWaits[attempt]);
+    }
   }
 
   void abort() => _fail(TransferOutcome.writeFailed);
@@ -340,7 +373,6 @@ void _writerMain(_WriterStart start) {
   try {
     writer = _TreeWriter(start);
     if (!writer.open()) {
-      writer.dispose();
       events.send(<Object>[0]);
       commands.close();
       return;
@@ -376,19 +408,40 @@ void _writerMain(_WriterStart start) {
         }
       case 'discard':
         try {
-          active.deleteAll();
+          active.closeAll();
         } catch (_) {}
-        active.dispose();
         events.send(<Object>[5]);
+        var deleted = false;
+        try {
+          deleted = active.deleteAll();
+        } catch (_) {}
+        events.send(<int>[6, deleted ? 1 : 0]);
         commands.close();
       case 'close':
         try {
           active.closeAll();
         } catch (_) {}
-        active.dispose();
         commands.close();
     }
   });
+}
+
+void _releaseNative(
+  Pointer<IntPtr> slots,
+  Pointer<Uint8> buffer,
+  Pointer<Uint8> flag,
+) {
+  for (var i = 0; i < _handleSlots; i++) {
+    final value = slots[i];
+    if (value == 0) continue;
+    slots[i] = 0;
+    try {
+      HANDLE(Pointer<Void>.fromAddress(value)).close();
+    } catch (_) {}
+  }
+  calloc.free(slots);
+  calloc.free(buffer);
+  calloc.free(flag);
 }
 
 final class FolderWriterHost {
@@ -400,6 +453,8 @@ final class FolderWriterHost {
     required this._isolate,
     required this._events,
     required this._flag,
+    required this._buffer,
+    required this._slots,
     required this._commands,
   });
 
@@ -410,16 +465,21 @@ final class FolderWriterHost {
   final Isolate _isolate;
   final ReceivePort _events;
   final Pointer<Uint8> _flag;
+  final Pointer<Uint8> _buffer;
+  final Pointer<IntPtr> _slots;
   final SendPort _commands;
   final Completer<FolderWriteResult> _finishing =
       Completer<FolderWriteResult>();
   final Completer<void> _stopped = Completer<void>();
+  final Completer<void> _deleteDone = Completer<void>();
   FolderWriteFailed? _failure;
+  Future<void>? _discarding;
   void Function()? _resume;
   int _pending = 0;
   bool _finishRequested = false;
   bool _closing = false;
   bool _exited = false;
+  bool _deletedByWriter = false;
 
   static Future<FolderWriterHost> start({
     required String tempFolder,
@@ -431,22 +491,35 @@ final class FolderWriterHost {
   }) async {
     final events = ReceivePort();
     final flag = calloc<Uint8>();
+    final buffer = calloc<Uint8>(_bufferBytes);
+    final slots = calloc<IntPtr>(_handleSlots);
     final first = Completer<List<Object?>>();
     late final StreamSubscription<Object?> subscription;
-    final isolate = await Isolate.spawn(
-      _writerMain,
-      _WriterStart(
-        events: events.sendPort,
-        tempFolder: tempFolder,
-        manifest: manifest,
-        supportsMark: supportsMark,
-        flagAddress: flag.address,
-      ),
-      onExit: events.sendPort,
-    );
+    var exited = false;
+    final Isolate isolate;
+    try {
+      isolate = await Isolate.spawn(
+        _writerMain,
+        _WriterStart(
+          events: events.sendPort,
+          tempFolder: tempFolder,
+          manifest: manifest,
+          supportsMark: supportsMark,
+          flagAddress: flag.address,
+          bufferAddress: buffer.address,
+          slotsAddress: slots.address,
+        ),
+        onExit: events.sendPort,
+      );
+    } catch (_) {
+      events.close();
+      _releaseNative(slots, buffer, flag);
+      rethrow;
+    }
     FolderWriterHost? host;
     subscription = events.listen((Object? message) {
       if (host == null) {
+        if (message == null) exited = true;
         if (message is List<Object?> && !first.isCompleted) {
           first.complete(message);
         } else if (message == null && !first.isCompleted) {
@@ -463,10 +536,18 @@ final class FolderWriterHost {
       hello = const <Object?>[0];
     }
     if (hello.isEmpty || hello[0] != 3) {
-      isolate.kill(priority: Isolate.immediate);
-      await subscription.cancel();
-      events.close();
-      calloc.free(flag);
+      if (exited) {
+        await subscription.cancel();
+        events.close();
+        _releaseNative(slots, buffer, flag);
+      } else {
+        subscription.onData((Object? message) {
+          if (message != null) return;
+          events.close();
+          _releaseNative(slots, buffer, flag);
+        });
+        isolate.kill(priority: Isolate.immediate);
+      }
       throw const FileSystemException('The folder writer did not start');
     }
     host = FolderWriterHost._(
@@ -477,6 +558,8 @@ final class FolderWriterHost {
       isolate: isolate,
       events: events,
       flag: flag,
+      buffer: buffer,
+      slots: slots,
       commands: hello[1] as SendPort,
     );
     return host;
@@ -491,9 +574,10 @@ final class FolderWriterHost {
         _finishing.complete(failure);
         if (!_finishRequested && !_closing) onFailure(failure);
       }
-      if (!_stopped.isCompleted) _stopped.complete();
       _events.close();
-      calloc.free(_flag);
+      _releaseNative(_slots, _buffer, _flag);
+      if (!_stopped.isCompleted) _stopped.complete();
+      if (!_deleteDone.isCompleted) _deleteDone.complete();
       return;
     }
     if (message is! List<Object?> || message.isEmpty) return;
@@ -507,7 +591,7 @@ final class FolderWriterHost {
         _failure ??= failure;
         if (_finishRequested) {
           if (!_finishing.isCompleted) _finishing.complete(failure);
-        } else {
+        } else if (!_closing) {
           onFailure(failure);
         }
       case 2:
@@ -523,6 +607,9 @@ final class FolderWriterHost {
         if (!_finishing.isCompleted) _finishing.complete(const FolderWritten());
       case 5:
         if (!_stopped.isCompleted) _stopped.complete();
+      case 6:
+        _deletedByWriter = message[1] == 1;
+        if (!_deleteDone.isCompleted) _deleteDone.complete();
     }
   }
 
@@ -566,18 +653,38 @@ final class FolderWriterHost {
     return _finishing.future;
   }
 
-  Future<void> discard() async {
+  Future<void> discard() => _discarding ??= _discard();
+
+  Future<void> _discard() async {
     _resume = null;
     _closing = true;
-    if (_exited) return;
-    _flag.value = 1;
-    try {
-      _commands.send('discard');
-    } catch (_) {}
-    try {
-      await _stopped.future.timeout(Limits.workerStopGrace);
-    } on TimeoutException {
-      _isolate.kill(priority: Isolate.immediate);
+    if (!_exited) {
+      _flag.value = 1;
+      try {
+        _commands.send('discard');
+      } catch (_) {}
+      try {
+        await _stopped.future.timeout(Limits.workerStopGrace);
+      } on TimeoutException {
+        _isolate.kill(priority: Isolate.immediate);
+      }
+      try {
+        await _deleteDone.future.timeout(_deleteBudget);
+      } on TimeoutException {
+        return;
+      }
+    }
+    if (!_deletedByWriter) await _deleteFromHere();
+  }
+
+  Future<void> _deleteFromHere() async {
+    final path = tempRoot;
+    for (var attempt = 0; ; attempt++) {
+      try {
+        if (await Isolate.run(() => deleteTreeNoFollowSync(path))) return;
+      } catch (_) {}
+      if (attempt >= _deleteWaits.length) return;
+      await Future<void>.delayed(_deleteWaits[attempt]);
     }
   }
 

@@ -65,6 +65,9 @@ final class _Platform implements FileSystemPlatform {
       _real.markFromInternet(filePath);
 
   @override
+  Future<bool> deleteTree(String path) => _real.deleteTree(path);
+
+  @override
   Future<bool> isDangerousType(String extension) =>
       _real.isDangerousType(extension);
 }
