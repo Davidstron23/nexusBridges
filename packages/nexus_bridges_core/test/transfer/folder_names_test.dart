@@ -87,4 +87,34 @@ void main() {
       expect(candidateFolderName(' ' * 300, 1), isNull);
     });
   });
+
+  group('isDriveRoot recognises whole drives and nothing else', () {
+    for (final path in [
+      'C:',
+      r'C:\',
+      'c:/',
+      r'\\?\C:',
+      r'\\?\C:\',
+      r'\\?\Volume{0a1b2c3d-0000-0000-0000-100000000000}\',
+      r'\\?\Volume{0a1b2c3d-0000-0000-0000-100000000000}',
+    ]) {
+      test('"$path" is a drive root', () {
+        expect(isDriveRoot(path), isTrue);
+      });
+    }
+
+    for (final path in [
+      'C:?',
+      r'C:\Users',
+      r'C:\\',
+      r'\\?\C:\Users',
+      r'\\server\share',
+      'proj',
+      '',
+    ]) {
+      test('"$path" is not a drive root', () {
+        expect(isDriveRoot(path), isFalse);
+      });
+    }
+  });
 }

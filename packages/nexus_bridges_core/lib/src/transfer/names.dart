@@ -277,7 +277,7 @@ String? candidateFolderName(String name, int n) {
 }
 
 final RegExp _driveRootPattern = RegExp(
-  r'^(?:[A-Za-z]:\?|\\\?\[A-Za-z]:\?|\\\?\Volume\{[0-9A-Fa-f-]+\}\?)$',
+  r'^(?:[A-Za-z]:\\?|\\\\\?\\[A-Za-z]:\\?|\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\?)$',
 );
 
 bool isDriveRoot(String path) =>
