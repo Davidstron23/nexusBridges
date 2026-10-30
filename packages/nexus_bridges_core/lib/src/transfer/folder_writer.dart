@@ -28,6 +28,10 @@ const List<Duration> _deleteWaits = [
   Duration(milliseconds: 800),
 ];
 
+typedef MarkFile = bool Function(HANDLE parent, String name);
+
+typedef ClearHidden = bool Function(HANDLE handle);
+
 sealed class FolderWriteResult {
   const FolderWriteResult();
 }
@@ -49,6 +53,8 @@ final class _WriterStart {
     required this.tempFolder,
     required this.manifest,
     required this.supportsMark,
+    required this.markFile,
+    required this.clearHidden,
     required this.flagAddress,
     required this.bufferAddress,
     required this.slotsAddress,
@@ -58,6 +64,8 @@ final class _WriterStart {
   final String tempFolder;
   final FolderManifest manifest;
   final bool supportsMark;
+  final MarkFile markFile;
+  final ClearHidden clearHidden;
   final int flagAddress;
   final int bufferAddress;
   final int slotsAddress;
@@ -278,7 +286,7 @@ final class _TreeWriter {
       return;
     }
     if (_start.supportsMark &&
-        !markFromInternetSync(parent, _manifest.nameOf(index))) {
+        !_start.markFile(parent, _manifest.nameOf(index))) {
       _fail(TransferOutcome.markFailed, index);
       return;
     }
@@ -324,7 +332,10 @@ final class _TreeWriter {
     }
     final root = _root;
     if (root != null) {
-      clearHiddenByHandleSync(root);
+      if (!_start.clearHidden(root)) {
+        _fail(TransferOutcome.writeFailed);
+        return false;
+      }
       _setRoot(null);
       root.close();
     }
@@ -489,6 +500,8 @@ final class FolderWriterHost {
     required void Function(int files, int bytes) onProgress,
     required void Function() onActivity,
     required void Function(FolderWriteFailed failure) onFailure,
+    MarkFile? markFile,
+    ClearHidden? clearHidden,
   }) async {
     final events = ReceivePort();
     final flag = calloc<Uint8>();
@@ -506,6 +519,8 @@ final class FolderWriterHost {
           tempFolder: tempFolder,
           manifest: manifest,
           supportsMark: supportsMark,
+          markFile: markFile ?? markFromInternetSync,
+          clearHidden: clearHidden ?? clearHiddenByHandleSync,
           flagAddress: flag.address,
           bufferAddress: buffer.address,
           slotsAddress: slots.address,

@@ -114,6 +114,7 @@ abstract class AppStrings {
   String sendingToTitle(String name);
   String fileLine(String file, String size);
   String get programLabel;
+  String get containsGitRepository;
   String preparingFile(String file);
   String contactingPeer(String name);
   String waitingAcceptance(String name);

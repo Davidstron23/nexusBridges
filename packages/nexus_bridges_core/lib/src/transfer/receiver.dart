@@ -15,7 +15,12 @@ import 'folders.dart';
 import 'manifest.dart';
 import 'messages.dart';
 import 'names.dart'
-    show isBlockedType, isProgram, isValidFileName, visibleFileName;
+    show
+        isAppReservedName,
+        isBlockedType,
+        isProgram,
+        isValidFileName,
+        visibleFileName;
 import 'pickers.dart';
 import 'platform.dart';
 import 'rate_limits.dart';
@@ -179,6 +184,8 @@ final class _InSession {
   final String sha256;
 
   bool isProgram;
+
+  bool containsGit = false;
 
   _InPhase phase = _InPhase.checking;
 
@@ -356,6 +363,8 @@ final class TransferReceiver {
     required this._log,
     this._writeBytes = writeAllBytes,
     this._idleTimeout = Limits.transferIdleTimeout,
+    this._markFile,
+    this._clearHidden,
   });
 
   final PairedDevicesStore _paired;
@@ -386,6 +395,10 @@ final class TransferReceiver {
   _writeBytes;
 
   final Duration _idleTimeout;
+
+  final MarkFile? _markFile;
+
+  final ClearHidden? _clearHidden;
 
   late final RecentRejections _recentRejections = RecentRejections(
     clock: _clock,
@@ -516,6 +529,7 @@ final class TransferReceiver {
               ? 0
               : manifest.firstLevelCount - firstLevel.length,
           canCancel: _canCancelNow(session),
+          containsGitRepository: session.containsGit,
         );
       }
     }
@@ -736,11 +750,35 @@ final class TransferReceiver {
 
   Future<void> _sweepFolder(String path, {String? journalPath}) async {
     try {
-      final clean = await sweepTemps(path, _fs, keep: _activeTemps());
+      final clean = await sweepTemps(
+        path,
+        _fs,
+        keep: _activeTemps(),
+        deferTree: (tree) => _deleteTreeLater(path, tree, journalPath),
+      );
       if (clean) await _journal.remove(journalPath ?? path);
     } catch (e) {
       _log('temp cleanup failed: ${e.runtimeType}');
     }
+  }
+
+  void _deleteTreeLater(String folder, String tree, String? journalPath) {
+    if (_closed) return;
+    _discardingTemps.add(tree);
+    _track(() async {
+      try {
+        await _fs.deleteTree(tree);
+      } finally {
+        _discardingTemps.remove(tree);
+      }
+      if (_closed || _active != null) return;
+      final sub = _joinPath(folder, tempFolderName);
+      await _removeIfEmpty(sub);
+      if (await FileSystemEntity.type(sub, followLinks: false) ==
+          FileSystemEntityType.notFound) {
+        await _journal.remove(journalPath ?? folder);
+      }
+    });
   }
 
   Set<String> _activeTemps() {
@@ -1339,7 +1377,8 @@ final class TransferReceiver {
     if (_recordOf(fingerprint, transferId)?.tombstone ?? false) {
       return (refusal: _cancelled, session: null);
     }
-    if (!isValidFileName(name)) {
+    if (!isValidFileName(name) ||
+        (folderRequest != null && isAppReservedName(name))) {
       return (refusal: _invalidName, session: null);
     }
     if (isBlockedType(name)) {
@@ -1704,6 +1743,10 @@ final class TransferReceiver {
           ..manifest = manifest
           ..manifestDone = true
           ..upload = null;
+        session.containsGit =
+            manifest.containsGitFolder &&
+            _paired.deviceOf(session.fingerprint)?.relation ==
+                PeerRelation.foreign;
         session.isProgram = await manifestHasPrograms(manifest, _fs);
         if (_gone(session)) return _cancelled;
         final target = session.target;
@@ -1849,6 +1892,8 @@ final class TransferReceiver {
           tempFolder: prepared.folder,
           manifest: manifest,
           supportsMark: target.supportsMark,
+          markFile: _markFile,
+          clearHidden: _clearHidden,
           onProgress: (files, bytes) => _folderProgress(session, files, bytes),
           onActivity: () => session.lastDataAt = _clock(),
           onFailure: (failure) => _folderFailure(session, failure),
@@ -1860,8 +1905,7 @@ final class TransferReceiver {
         return null;
       }
       if (session.phase != _InPhase.uploading) {
-        await host.discard();
-        await _releaseFolderTemp(target);
+        _discardFolder(host, target);
         return null;
       }
       return host;
@@ -1926,7 +1970,7 @@ final class TransferReceiver {
     }
     final declared = session.folderOffer;
     if (declared == null) return fail(TransferOutcome.writeFailed);
-    if (!isValidFileName(session.name)) {
+    if (!isValidFileName(session.name) || isAppReservedName(session.name)) {
       return fail(TransferOutcome.invalidName);
     }
     if (isBlockedType(session.name)) return fail(TransferOutcome.blockedType);
@@ -2269,6 +2313,7 @@ final class TransferReceiver {
         _noteProblemEntry(session, request);
         _end(session, _outcomeOfCancel(request));
       case _InPhase.finishing:
+        if (_canCutFinishing(session)) _noteProblemEntry(session, request);
         if (!_cutBeforeMove(session, _outcomeOfCancel(request))) {
           await session.finished.future;
         }
@@ -2456,6 +2501,7 @@ final class TransferReceiver {
         canReveal: finalPath != null,
         isFolder: folderOffer != null,
         fileCount: folderOffer?.files ?? 0,
+        containsGitRepository: session.containsGit,
         problemPath:
             manifest != null &&
                 problemEntry != null &&

@@ -5,6 +5,7 @@ import '../identity/identity.dart' show DeviceIdentity;
 import '../pairing/pairing.dart' show PairedDevicesStore;
 import '../protocol/protocol.dart' show Limits, monotonicClock;
 import '../server/server.dart' show ApiRoute, ApiUploadRoute;
+import 'folder_writer.dart' show ClearHidden, MarkFile;
 import 'journal.dart' show TempJournal;
 import 'pickers.dart' show PickerTracker;
 import 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
@@ -355,6 +356,7 @@ final class IncomingTransferView {
     this.firstLevel = const [],
     this.moreFirstLevel = 0,
     this.canCancel = true,
+    this.containsGitRepository = false,
   });
 
   final String sessionId;
@@ -373,6 +375,7 @@ final class IncomingTransferView {
   final List<FirstLevelItem> firstLevel;
   final int moreFirstLevel;
   final bool canCancel;
+  final bool containsGitRepository;
 
   @override
   bool operator ==(Object other) =>
@@ -392,7 +395,8 @@ final class IncomingTransferView {
       other.receivedFiles == receivedFiles &&
       _sameItems(other.firstLevel, firstLevel) &&
       other.moreFirstLevel == moreFirstLevel &&
-      other.canCancel == canCancel;
+      other.canCancel == canCancel &&
+      other.containsGitRepository == containsGitRepository;
 
   @override
   int get hashCode => Object.hash(
@@ -412,6 +416,7 @@ final class IncomingTransferView {
     Object.hashAll(firstLevel),
     moreFirstLevel,
     canCancel,
+    containsGitRepository,
   );
 }
 
@@ -428,6 +433,7 @@ final class TransferResultView {
     this.fileCount = 0,
     this.problemPath,
     this.size = 0,
+    this.containsGitRepository = false,
   });
 
   final TransferDirection direction;
@@ -441,6 +447,7 @@ final class TransferResultView {
   final int fileCount;
   final String? problemPath;
   final int size;
+  final bool containsGitRepository;
 
   @override
   bool operator ==(Object other) =>
@@ -455,7 +462,8 @@ final class TransferResultView {
       other.isFolder == isFolder &&
       other.fileCount == fileCount &&
       other.problemPath == problemPath &&
-      other.size == size;
+      other.size == size &&
+      other.containsGitRepository == containsGitRepository;
 
   @override
   int get hashCode => Object.hash(
@@ -470,6 +478,7 @@ final class TransferResultView {
     fileCount,
     problemPath,
     size,
+    containsGitRepository,
   );
 }
 
@@ -575,6 +584,8 @@ final class TransferCoordinator {
         writeAllBytes,
     ExclusionSource exclusions = const NoExclusionSource(),
     Future<void> Function(int entry)? beforeStreamEntry,
+    MarkFile? markFile,
+    ClearHidden? clearHidden,
     this._log = _noLog,
   }) : _revealer = revealer ?? const WindowsFolderRevealer() {
     _pickers = PickerTracker(
@@ -591,6 +602,8 @@ final class TransferCoordinator {
       pollHold: pollHold,
       writeBytes: writeBytes,
       idleTimeout: idleTimeout,
+      markFile: markFile,
+      clearHidden: clearHidden,
       picker: picker,
       pickers: _pickers,
       onChanged: _notify,

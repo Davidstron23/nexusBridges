@@ -86,6 +86,8 @@ final class TransferPlatform implements FileSystemPlatform {
   )?
   moveFolder;
   Future<Set<String>> Function(Set<String> extensions)? dangerousBatch;
+  Future<void> Function(String path)? deleteTreeHook;
+  final List<String> deletedTrees = [];
   final List<String> dangerousAsked = [];
   final List<Set<String>> dangerousBatches = [];
   final List<String> calls = [];
@@ -187,7 +189,12 @@ final class TransferPlatform implements FileSystemPlatform {
   }
 
   @override
-  Future<bool> deleteTree(String path) => realFs.deleteTree(path);
+  Future<bool> deleteTree(String path) async {
+    deletedTrees.add(path);
+    final wait = deleteTreeHook;
+    if (wait != null) await wait(path);
+    return realFs.deleteTree(path);
+  }
 
   @override
   Future<bool> isDangerousType(String extension) {

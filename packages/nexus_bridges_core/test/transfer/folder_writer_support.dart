@@ -8,8 +8,16 @@ import 'package:nexus_bridges_core/src/transfer/folder_writer.dart';
 import 'package:nexus_bridges_core/src/transfer/manifest.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_folder_io.dart';
 import 'package:test/test.dart';
+import 'package:win32/win32.dart' show HANDLE;
 
 import 'folders_fakes.dart' show windowsFs;
+
+bool failEveryMark(HANDLE parent, String name) => false;
+
+bool failMarkOfTwo(HANDLE parent, String name) =>
+    name == 'two.txt' ? false : markFromInternetSync(parent, name);
+
+bool failClearHidden(HANDLE handle) => false;
 
 const String zoneText = '[ZoneTransfer]\r\nZoneId=3\r\n';
 
@@ -114,12 +122,16 @@ Future<WriterRun> startRun(
   String tempFolder,
   WriterTree tree, {
   bool supportsMark = true,
+  MarkFile? markFile,
+  ClearHidden? clearHidden,
 }) async {
   final run = WriterRun(tempFolder);
   run.host = await FolderWriterHost.start(
     tempFolder: tempFolder,
     manifest: tree.manifest,
     supportsMark: supportsMark,
+    markFile: markFile,
+    clearHidden: clearHidden,
     onProgress: (files, bytes) => run.progress.add((files, bytes)),
     onActivity: () => run.activity++,
     onFailure: run.failures.add,

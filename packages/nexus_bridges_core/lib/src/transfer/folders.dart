@@ -372,6 +372,7 @@ Future<bool> sweepTemps(
   String folderRealPath,
   FileSystemPlatform fs, {
   Set<String> keep = const {},
+  void Function(String treePath)? deferTree,
 }) async {
   final sub = _join(folderRealPath, tempFolderName);
   try {
@@ -397,7 +398,13 @@ Future<bool> sweepTemps(
           case FileSystemEntityType.link:
             await Link(entry.path).delete();
           case FileSystemEntityType.directory:
-            if (ownFolder) await fs.deleteTree(entry.path);
+            if (ownFolder) {
+              if (deferTree != null) {
+                deferTree(entry.path);
+              } else {
+                await fs.deleteTree(entry.path);
+              }
+            }
           case FileSystemEntityType.file:
             if (ownFile) await File(entry.path).delete();
           default:

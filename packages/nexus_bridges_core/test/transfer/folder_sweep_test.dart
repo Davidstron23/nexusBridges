@@ -164,6 +164,47 @@ void main() {
       expect(clean, isFalse);
       expect(namesIn(sub), unorderedEquals([folderA, ownTemp(hexA)]));
     });
+
+    test(
+      'Q-1: with deferTree the folder temps are handed over and not '
+      'deleted, while files and links are still removed on the spot',
+      () async {
+        await fill(j(sub, folderA));
+        await fill(j(sub, folderB));
+        await fill(j(sub, folderC));
+        await File(j(sub, ownTemp(hexA))).writeAsString('partial');
+        final handed = <String>[];
+
+        final clean = await sweepTemps(
+          folder,
+          windowsFs,
+          keep: {j(sub, folderC)},
+          deferTree: handed.add,
+        );
+
+        expect(clean, isFalse);
+        expect(handed, unorderedEquals([j(sub, folderA), j(sub, folderB)]));
+        expect(namesIn(sub), unorderedEquals([folderA, folderB, folderC]));
+        expect(File(j(sub, folderA, 'one.txt')).existsSync(), isTrue);
+      },
+    );
+
+    test(
+      'Q-1: deferTree is not called when there is nothing to delete',
+      () async {
+        var calls = 0;
+
+        final clean = await sweepTemps(
+          folder,
+          windowsFs,
+          deferTree: (_) => calls++,
+        );
+
+        expect(clean, isTrue);
+        expect(calls, 0);
+        expect(Directory(sub).existsSync(), isFalse);
+      },
+    );
   });
 
   group('FileSystemPlatform.deleteTree', () {

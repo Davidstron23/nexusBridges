@@ -5,13 +5,16 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
+import 'package:nexus_bridges_core/src/transfer/folder_writer.dart'
+    show ClearHidden, MarkFile;
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_shell.dart'
     show revealPlanFor;
 import 'package:test/test.dart';
 import 'package:win32/win32.dart';
 
-import 'folder_writer_support.dart' show content;
+import 'folder_writer_support.dart'
+    show content, failClearHidden, failMarkOfTwo, readMark;
 import 'transfer_stacks_harness.dart';
 
 const Timeout long = Timeout(Duration(seconds: 90));
@@ -193,6 +196,102 @@ void main() {
       expect((await b.receivedResult()).outcome, TransferOutcome.cancelledHere);
       await cleanFolder(b);
       expect(snapshotOf(b.receiveDir), before);
+    }, timeout: long);
+  });
+
+  group('E467 [SEG], RF-277 and B-4: the mark and the visibility at the end '
+      'of a folder', () {
+    Future<Pair> stacksWith({
+      MarkFile? markFile,
+      ClearHidden? clearHidden,
+    }) async {
+      final a = await TransferStack.start(name: 'A', address: hostA);
+      final b = await TransferStack.start(
+        name: 'B',
+        address: hostB,
+        markFile: markFile,
+        clearHidden: clearHidden,
+      );
+      await link(a, b, senderName: 'PORTATIL', receiverName: 'SOBREMESA');
+      return (a, b, Gate<void>(null));
+    }
+
+    Future<String> threeFiles(TransferStack a) async {
+      final root = '${a.sourceDir}\\proy';
+      Directory('$root\\sub').createSync(recursive: true);
+      File('$root\\sub\\one.txt').writeAsBytesSync(content(1, 300));
+      File('$root\\two.txt').writeAsBytesSync(content(2, 200));
+      File('$root\\three.txt').writeAsBytesSync(content(3, 100));
+      return root;
+    }
+
+    test('a drive that cannot hold the mark: savedWithoutMark on both '
+        'sides and no file has a stream', () async {
+      final (a, b, _) = await stacksWith();
+      b.platform.noMarkSupport = true;
+      final root = await threeFiles(a);
+
+      final result = await startSend(
+        a,
+        b,
+        root,
+      ).timeout(const Duration(seconds: 40));
+
+      expect(result?.outcome, TransferOutcome.savedWithoutMark);
+      expect(result?.outcome.kind, TransferResultKind.saved);
+      final received = await b.receivedResult();
+      expect(received.outcome, TransferOutcome.savedWithoutMark);
+      final saved = '${b.receiveDir}\\proy';
+      for (final name in [r'sub\one.txt', 'two.txt', 'three.txt']) {
+        expect(File('$saved\\$name').existsSync(), isTrue, reason: name);
+        expect(readMark('$saved\\$name'), isEmpty, reason: name);
+      }
+      await cleanFolder(b);
+    }, timeout: long);
+
+    test('a mark that fails on one file: markFailed with that file, '
+        'nothing is saved and nothing stays', () async {
+      final (a, b, _) = await stacksWith(markFile: failMarkOfTwo);
+      File('${b.receiveDir}\\ya.txt').writeAsStringSync('already here');
+      final before = snapshotOf(b.receiveDir);
+      final root = await threeFiles(a);
+
+      final result = await startSend(
+        a,
+        b,
+        root,
+      ).timeout(const Duration(seconds: 40));
+
+      expect(result?.outcome, TransferOutcome.markFailed);
+      expect(result?.outcome.kind, TransferResultKind.failed);
+      final received = await b.receivedResult();
+      expect(received.outcome, TransferOutcome.markFailed);
+      expect(received.problemPath, 'two.txt');
+      expect(received.canReveal, isFalse);
+      await cleanFolder(b);
+      expect(snapshotOf(b.receiveDir), before);
+      expect(Directory('${b.receiveDir}\\proy').existsSync(), isFalse);
+    }, timeout: long);
+
+    test('B-4: a hidden flag that cannot be cleared is writeFailed on both '
+        'sides, never a hidden saved folder', () async {
+      final (a, b, _) = await stacksWith(clearHidden: failClearHidden);
+      final before = snapshotOf(b.receiveDir);
+      final root = await threeFiles(a);
+
+      final result = await startSend(
+        a,
+        b,
+        root,
+      ).timeout(const Duration(seconds: 40));
+
+      expect(result?.outcome, TransferOutcome.writeFailed);
+      final received = await b.receivedResult();
+      expect(received.outcome, TransferOutcome.writeFailed);
+      expect(received.canReveal, isFalse);
+      await cleanFolder(b);
+      expect(snapshotOf(b.receiveDir), before);
+      expect(Directory('${b.receiveDir}\\proy').existsSync(), isFalse);
     }, timeout: long);
   });
 

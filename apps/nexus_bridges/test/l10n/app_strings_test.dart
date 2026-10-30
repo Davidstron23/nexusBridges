@@ -109,6 +109,7 @@ final Map<String, _Text> _texts = {
   'sendingToTitle': (s) => s.sendingToTitle(_sampleName),
   'fileLine': (s) => s.fileLine(_sampleFile, _sampleSize),
   'programLabel': (s) => s.programLabel,
+  'containsGitRepository': (s) => s.containsGitRepository,
   'preparingFile': (s) => s.preparingFile(_sampleFile),
   'contactingPeer': (s) => s.contactingPeer(_sampleName),
   'waitingAcceptance': (s) => s.waitingAcceptance(_sampleName),
@@ -347,6 +348,10 @@ final Map<String, (String, String)> _expectedTransfer = {
     'Archivo: $_sampleFile ($_sampleSize)',
   ),
   'programLabel': ("It's a program", 'Es un programa'),
+  'containsGitRepository': (
+    'contains a Git repository, which can run code when opened',
+    'contiene un repositorio Git, que puede ejecutar código al abrirlo',
+  ),
   'preparingFile': (
     'Preparing $_sampleFile$_dots',
     'Preparando $_sampleFile$_dots',
@@ -1116,11 +1121,11 @@ void main() {
   final spanish = AppStringsEs();
 
   group('RF-62: every text exists in both languages', () {
-    test('the table covers the 176 texts of the plans of 001 to 005: the 84 '
-        'of 001, 002 and 003, the 54 of the transfer (E145), the 24 of the '
+    test('the table covers the 177 texts of the plans of 001 to 006: the 84 '
+        'of 001, 002 and 003, the 55 of the transfer (E145), the 24 of the '
         'design (E256) and the 14 of the pairing design (E281)', () {
-      expect(_texts.length, 176);
-      expect(_expectedTransfer.length, 54);
+      expect(_texts.length, 177);
+      expect(_expectedTransfer.length, 55);
       expect(_expectedDesign.length, 24);
       expect(_expectedPairingDesign.length, 14);
       expect(

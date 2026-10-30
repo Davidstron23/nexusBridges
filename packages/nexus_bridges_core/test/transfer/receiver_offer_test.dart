@@ -278,6 +278,10 @@ void main() {
         'a\u009Fb.txt',
         'factura\u202Efdp.exe',
         'a\u202Ab.txt',
+        'a\u200Eb.txt',
+        'a\u200Fb.txt',
+        '\u05E9\u05DC\u05D5\u05DD\u200F.txt',
+        'a\u061Cb.txt',
         'a\u2066b.txt',
         'a\u2069b.txt',
         'a\u200Bb.txt',
@@ -346,11 +350,10 @@ void main() {
         'informe.pdf',
         'familia \u{1F468}\u200D\u{1F469}\u200D\u{1F467}.jpg',
         'ne\u200Cmi.txt',
-        '\u05E9\u05DC\u05D5\u05DD\u200F.txt',
+        '\u05E9\u05DC\u05D5\u05DD.txt',
         '\u2764\uFE0F.png',
         'CONSOLE.txt',
         'COM10.txt',
-        'a\u061Cb.txt',
         '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}.txt',
       ]) {
         final reply = await s.offer(laptop, name: name);

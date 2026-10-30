@@ -250,8 +250,7 @@ void main() {
       );
     });
 
-    test('an excess caused by foreign requests inside the minute of the change '
-        'still gets no block, as the plan defines', () {
+    test('an excess made only of requests after the change does block', () {
       limiter.relationChanged(peerA, mine, foreign);
       expect(admitted(peerA, TransferRoute.upload, foreign, 12), 12);
       expect(
@@ -260,7 +259,79 @@ void main() {
       );
       expect(
         limiter.check(peerA, TransferRoute.upload, foreign),
+        RateVerdict.blocked,
+      );
+    });
+
+    test('Q-4: 30 offers after the change fill the foreign limit by '
+        'themselves, so the 31st blocks and the block outlives the minute', () {
+      limiter.relationChanged(peerA, mine, foreign);
+      for (var i = 0; i < 30; i++) {
+        clock.advance(const Duration(seconds: 1));
+        expect(
+          limiter.check(peerA, TransferRoute.offer, foreign),
+          RateVerdict.allowed,
+        );
+      }
+      clock.advance(const Duration(seconds: 1));
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
         RateVerdict.limited,
+      );
+      clock.advance(const Duration(seconds: 30));
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.blocked,
+      );
+      clock.advance(const Duration(seconds: 61));
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.allowed,
+      );
+    });
+
+    test('Q-4: marks admitted as mine before the change are forgiven while '
+        'the foreign ones after it stay under the limit', () {
+      expect(admitted(peerA, TransferRoute.offer, mine, 40), 40);
+      limiter.relationChanged(peerA, mine, foreign);
+      clock.advance(const Duration(seconds: 1));
+      for (var i = 0; i < 5; i++) {
+        expect(
+          limiter.check(peerA, TransferRoute.offer, foreign),
+          RateVerdict.limited,
+        );
+      }
+      expect(limiter.hasRoom(peerA, TransferRoute.offer, foreign), isFalse);
+      clock.advance(const Duration(seconds: 60));
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.allowed,
+      );
+    });
+
+    test('Q-4: foreign marks that fall into the window next to the forgiven '
+        'ones still count towards the limit on their own', () {
+      expect(admitted(peerA, TransferRoute.offer, mine, 25), 25);
+      limiter.relationChanged(peerA, mine, foreign);
+      clock.advance(const Duration(seconds: 1));
+      expect(admitted(peerA, TransferRoute.offer, foreign, 5), 5);
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.limited,
+      );
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.limited,
+      );
+      clock.advance(const Duration(seconds: 59));
+      expect(admitted(peerA, TransferRoute.offer, foreign, 25), 25);
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.limited,
+      );
+      expect(
+        limiter.check(peerA, TransferRoute.offer, foreign),
+        RateVerdict.blocked,
       );
     });
 

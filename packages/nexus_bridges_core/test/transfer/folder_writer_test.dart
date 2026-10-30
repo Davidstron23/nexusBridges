@@ -160,6 +160,116 @@ void main() {
     });
   });
 
+  group('Q-3 and B-4: failures of the mark and of the hidden flag', () {
+    int indexOfName(WriterTree tree, String name) {
+      for (var i = 1; i <= tree.manifest.length; i++) {
+        if (tree.manifest.nameOf(i) == name) return i;
+      }
+      fail('$name is not in the manifest');
+    }
+
+    test('a mark that fails on one file is markFailed with that file, and '
+        'the discard leaves nothing behind', () async {
+      final place = await layout();
+      final tree = buildTree([
+        ('a', null),
+        (r'a\one.txt', content(1, 100)),
+        ('two.txt', content(2, 50)),
+        ('three.txt', content(3, 10)),
+      ]);
+      final before = everything(place.base);
+
+      final run = await startRun(place.incoming, tree, markFile: failMarkOfTwo);
+      await run.feed(tree.stream);
+      await run.waitFor(() => run.failures.isNotEmpty);
+      await run.host.discard();
+
+      expect(run.failures.single.outcome, TransferOutcome.markFailed);
+      expect(run.failures.single.entry, indexOfName(tree, 'two.txt'));
+      expect(Directory(run.host.tempRoot).existsSync(), isFalse);
+      expect(everything(place.base), before);
+    });
+
+    test('a mark that always fails stops at the first file', () async {
+      final place = await layout();
+      final tree = buildTree([
+        ('one.txt', content(1, 10)),
+        ('two.txt', content(2, 10)),
+      ]);
+
+      final run = await startRun(place.incoming, tree, markFile: failEveryMark);
+      await run.feed(tree.stream);
+      await run.waitFor(() => run.failures.isNotEmpty);
+      final result = await run.host.finish();
+      await run.host.discard();
+
+      expect(run.failures.first.outcome, TransferOutcome.markFailed);
+      expect(run.failures.first.entry, indexOfName(tree, 'one.txt'));
+      expect(result, isA<FolderWriteFailed>());
+      expect(Directory(run.host.tempRoot).existsSync(), isFalse);
+    });
+
+    test('with no mark support the injected mark is never called', () async {
+      final place = await layout();
+      final tree = buildTree([('one.txt', content(1, 10))]);
+
+      final run = await startRun(
+        place.incoming,
+        tree,
+        supportsMark: false,
+        markFile: failEveryMark,
+      );
+      await run.feed(tree.stream);
+      final result = await run.host.finish();
+
+      expect(result, isA<FolderWritten>());
+      expect(run.failures, isEmpty);
+      run.host.close();
+    });
+
+    test('B-4: a hidden flag that cannot be cleared is writeFailed and the '
+        'discard deletes everything', () async {
+      final place = await layout();
+      final tree = buildTree([
+        ('a', null),
+        (r'a\one.txt', content(1, 100)),
+        ('two.txt', content(2, 50)),
+      ]);
+      final before = everything(place.base);
+
+      final run = await startRun(
+        place.incoming,
+        tree,
+        clearHidden: failClearHidden,
+      );
+      await run.feed(tree.stream);
+      final result = await run.host.finish();
+      await run.host.discard();
+
+      expect(result, isA<FolderWriteFailed>());
+      expect(
+        (result as FolderWriteFailed).outcome,
+        TransferOutcome.writeFailed,
+      );
+      expect(Directory(run.host.tempRoot).existsSync(), isFalse);
+      expect(everything(place.base), before);
+    });
+
+    test('B-4: with the default function the same folder is written and '
+        'visible', () async {
+      final place = await layout();
+      final tree = buildTree([('one.txt', content(1, 10))]);
+
+      final run = await startRun(place.incoming, tree);
+      await run.feed(tree.stream);
+      final result = await run.host.finish();
+
+      expect(result, isA<FolderWritten>());
+      expect(isHidden(run.host.tempRoot), isFalse);
+      run.host.close();
+    });
+  });
+
   group('E467, RF-277 and point 14: long paths and the mark', () {
     test('a file whose final path has 259 characters is written and marked, '
         'and its mark is read back', () async {
