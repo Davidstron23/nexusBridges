@@ -303,9 +303,15 @@ final class ManifestReader {
   ManifestRefusal? add(Uint8List chunk) {
     final failed = _refusal;
     if (failed != null) return failed;
-    if (_read + chunk.length > _declared.manifestBytes) {
-      return _fail(ManifestRefusal.incompatible);
+    final room = _declared.manifestBytes - _read;
+    if (chunk.length > room) {
+      final refusal = _consume(Uint8List.sublistView(chunk, 0, room));
+      return _fail(refusal ?? ManifestRefusal.incompatible);
     }
+    return _consume(chunk);
+  }
+
+  ManifestRefusal? _consume(Uint8List chunk) {
     _read += chunk.length;
     var start = 0;
     while (start < chunk.length) {
@@ -338,7 +344,10 @@ final class ManifestReader {
 
   ManifestRefusal? _processLine(Uint8List bytes) {
     if (_entries >= _declared.entries) return ManifestRefusal.incompatible;
-    if (bytes.isEmpty || bytes.contains(13)) {
+    if (_entries >= Limits.maxFolderEntries) return ManifestRefusal.tooLarge;
+    if (bytes.isEmpty ||
+        bytes.contains(13) ||
+        _startsWithByteOrderMark(bytes)) {
       return ManifestRefusal.incompatible;
     }
     final Object? decoded;
@@ -415,6 +424,12 @@ final class ManifestReader {
     return (manifest: manifest, refusal: null);
   }
 }
+
+bool _startsWithByteOrderMark(Uint8List bytes) =>
+    bytes.length >= 3 &&
+    bytes[0] == 0xEF &&
+    bytes[1] == 0xBB &&
+    bytes[2] == 0xBF;
 
 int _trimmedLength(String targetPath) =>
     targetPath.endsWith(r'\') ? targetPath.length - 1 : targetPath.length;
