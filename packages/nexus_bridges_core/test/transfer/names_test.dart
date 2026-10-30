@@ -33,9 +33,6 @@ final List<int> controlAndInvisible = [
   for (var c = 0x202A; c <= 0x202E; c++) c,
   for (var c = 0x2066; c <= 0x2069; c++) c,
   0x200B,
-  0x200E,
-  0x200F,
-  0x061C,
   0xFEFF,
   for (var c = 0x2060; c <= 0x2064; c++) c,
   0x180E,
@@ -112,14 +109,14 @@ void main() {
       0x0647,
       0x0645,
     ]);
-    final hebrew = chars([0x05E9, 0x05DC, 0x05D5, 0x05DD]);
+    final hebrew = chars([0x05E9, 0x05DC, 0x05D5, 0x05DD, 0x200F]);
     final heart = chars([0x2764, 0xFE0F]);
 
     final valid = <String, String>{
       'plain name': 'informe.pdf',
       'emoji joined with U+200D': '$family.png',
       'Persian word with U+200C': '$persian.txt',
-      'Hebrew name': '$hebrew.txt',
+      'Hebrew name with U+200F': '$hebrew.txt',
       'emoji with U+FE0F': '$heart.txt',
       '253 ASCII and one emoji (255 units)': '${'a' * 253}$emoji',
     };
@@ -132,15 +129,19 @@ void main() {
       expect(valid['253 ASCII and one emoji (255 units)']!.length, 255);
     });
 
-    test('every variation selector U+FE00 to U+FE0F is allowed', () {
-      for (var c = 0xFE00; c <= 0xFE0F; c++) {
-        expect(
-          isValidFileName('a${ch(c)}.txt'),
-          isTrue,
-          reason: c.toRadixString(16),
-        );
-      }
-    });
+    test(
+      'U+200E and every variation selector U+FE00 to U+FE0F are allowed',
+      () {
+        expect(isValidFileName('a${ch(0x200E)}b.txt'), isTrue);
+        for (var c = 0xFE00; c <= 0xFE0F; c++) {
+          expect(
+            isValidFileName('a${ch(c)}.txt'),
+            isTrue,
+            reason: c.toRadixString(16),
+          );
+        }
+      },
+    );
 
     test('characters just outside the forbidden ranges are allowed', () {
       for (final c in [
@@ -202,12 +203,6 @@ void main() {
       'U+2060': 'a${ch(0x2060)}b',
       'U+180E': 'a${ch(0x180E)}b',
       'U+206A': 'a${ch(0x206A)}b',
-      'U+200E (LRM)': 'a${ch(0x200E)}b',
-      'U+200F (RLM)': 'a${ch(0x200F)}b',
-      'U+061C (ALM)': 'a${ch(0x061C)}b',
-      'U+200F at the end of a Hebrew name':
-          '${chars([0x05E9, 0x05DC, 0x05D5, 0x05DD, 0x200F])}.txt',
-      'U+200E at the start': '${ch(0x200E)}informe.txt',
       'U+FFF9': 'a${ch(0xFFF9)}b',
       'U+115F': 'a${ch(0x115F)}b',
       'U+3164': 'a${ch(0x3164)}b',
@@ -539,11 +534,27 @@ void main() {
       for (final name in [
         '${chars([0x1F468, 0x200D, 0x1F469])}.png',
         '${chars([0x0645, 0x200C, 0x062E])}.txt',
-        '${chars([0x05E9, 0x05DC])}.txt',
         '${chars([0x2764, 0xFE0F])}.txt',
       ]) {
         expect(isValidFileName(name), isTrue);
         expect(visibleFileName(name), name);
+      }
+    });
+
+    test('B-3: LRM, RLM and ALM keep a name valid but are not displayed', () {
+      final hebrew = chars([0x05E9, 0x05DC, 0x05D5, 0x05DD]);
+      final cases = {
+        '$hebrew${ch(0x200F)}.txt': '$hebrew.txt',
+        'a${ch(0x200E)}b.txt': 'ab.txt',
+        'a${ch(0x061C)}b.txt': 'ab.txt',
+        '${ch(0x200F)}${ch(0x200E)}${ch(0x061C)}x': 'x',
+      };
+      for (final MapEntry(key: name, value: shown) in cases.entries) {
+        expect(isValidFileName(name), isTrue, reason: name);
+        expect(visibleFileName(name), shown, reason: name);
+        for (final mark in [0x200E, 0x200F, 0x061C]) {
+          expect(visibleFileName(name).contains(ch(mark)), isFalse);
+        }
       }
     });
 
@@ -665,6 +676,7 @@ void main() {
     };
 
     final valid = <String, String>{
+      'U+061C inside': 'a${ch(0x061C)}b.txt',
       'U+034F inside': 'a${ch(0x034F)}b.txt',
       'U+FFFC inside': 'a${ch(0xFFFC)}b.txt',
       'the Scotland flag': '$scotland.txt',
@@ -787,7 +799,8 @@ void main() {
     });
 
     test('the allowed characters stay the same in the visible name', () {
-      for (final name in valid.values) {
+      for (final MapEntry(key: label, value: name) in valid.entries) {
+        if (label == 'U+061C inside') continue;
         expect(visibleFileName(name), name);
       }
     });

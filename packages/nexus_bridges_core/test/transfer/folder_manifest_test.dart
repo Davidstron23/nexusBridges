@@ -871,7 +871,7 @@ void main() {
     });
   });
 
-  group('M-3: a .git folder at any level', () {
+  group('M-3: an entry named .git at any level', () {
     bool hasGit(List<String> lines) {
       final built = ManifestBuilder();
       final folders = <int>[0];
@@ -884,24 +884,25 @@ void main() {
           built.addFile(parent, parts[2], 1);
         }
       }
-      return built.build().containsGitFolder;
+      return built.build().containsGitEntry;
     }
 
     test('at the first level, deep inside and in any case', () {
       expect(hasGit(['0|d|.git']), isTrue);
       expect(hasGit(['0|d|src', '1|d|vendor', '2|d|.git']), isTrue);
       expect(hasGit(['0|d|.GIT']), isTrue);
+      expect(hasGit(['0|f|.git']), isTrue);
+      expect(hasGit(['0|d|a', '1|d|b', '2|f|.GIT']), isTrue);
       expect(hasGit(['0|d|.Git']), isTrue);
       expect(hasGit(['0|d|a', '1|d|.gIt', '2|f|HEAD']), isTrue);
     });
 
-    test('look alikes and a .git file are not a .git folder', () {
+    test('look alikes are not a .git entry', () {
       expect(hasGit(['0|d|.github']), isFalse);
       expect(hasGit(['0|d|x.git']), isFalse);
       expect(hasGit(['0|f|.gitignore']), isFalse);
       expect(hasGit(['0|d|.git2']), isFalse);
       expect(hasGit(['0|d|git']), isFalse);
-      expect(hasGit(['0|f|.git']), isFalse);
       expect(hasGit([]), isFalse);
     });
 
@@ -915,26 +916,8 @@ void main() {
       final result = readAll(encoded, declareFor(built, encoded));
 
       expect(result.refusal, isNull);
-      expect(result.manifest!.containsGitFolder, isTrue);
+      expect(result.manifest!.containsGitEntry, isTrue);
     });
-  });
-
-  group('B-3: LRM, RLM and ALM are not valid in any name of a manifest', () {
-    for (final code in [0x200E, 0x200F, 0x061C]) {
-      final mark = String.fromCharCode(code);
-      test('U+${code.toRadixString(16).toUpperCase()} in a folder or a file, '
-          'at any level', () {
-        final base = [folderLine(0, 'p'), folderLine(1, 'q')];
-
-        expect(addRefusal([folderLine(0, 'a${mark}b')]), invalidName);
-        expect(addRefusal([fileLine(0, 'a${mark}b.txt', 1)]), invalidName);
-        expect(addRefusal([...base, folderLine(2, 'a${mark}b')]), invalidName);
-        expect(
-          addRefusal([...base, fileLine(2, '${mark}x.txt', 1)]),
-          invalidName,
-        );
-      });
-    }
   });
 
   group('E594: names reserved by the app', () {

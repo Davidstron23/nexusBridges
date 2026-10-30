@@ -417,6 +417,117 @@ void main() {
       expect(s.incoming?.containsGitRepository, isFalse);
       s.coordinator.answerWarning(s.sid, accept: false);
     });
+
+    test(
+      'a .git file (gitdir) at any level from a "foreign" counts too',
+      () async {
+        final s = await stack();
+        await toWarning(
+          s,
+          folderJob([
+            ('sub', null),
+            (r'sub\module', null),
+            (r'sub\module\.git', smallFile),
+          ]),
+          portatil,
+        );
+
+        expect(s.incoming?.containsGitRepository, isTrue);
+        s.coordinator.answerWarning(s.sid, accept: false);
+        await endedQuietly(s);
+        expect(s.coordinator.lastReceived?.containsGitRepository, isTrue);
+      },
+    );
+
+    test('a folder whose own name is .git counts for a "foreign" and not '
+        'for a "mine"', () async {
+      final s = await stack();
+      await toWarning(
+        s,
+        folderJob([('config', smallFile)], name: '.GIT'),
+        portatil,
+      );
+      expect(s.incoming?.containsGitRepository, isTrue);
+      s.coordinator.answerWarning(s.sid, accept: false);
+      await endedQuietly(s);
+      expect(s.coordinator.lastReceived?.containsGitRepository, isTrue);
+
+      final mine = folderJob([('config', smallFile)], name: '.git');
+      final permit = await s.acceptedPermit(laptop, mine);
+      expect(s.incoming?.containsGitRepository, isFalse);
+      final saved = await s.sendFolder(laptop, mine, permit);
+      expect(saved.json['state'], 'saved', reason: saved.text);
+      await endedQuietly(s);
+      expect(s.coordinator.lastReceived?.containsGitRepository, isFalse);
+    });
+  });
+
+  group('B-3: direction marks stay valid and are saved, but not displayed', () {
+    const hebrew = 'שלום';
+    const marked = '$hebrew‏';
+
+    test('a folder and a file named with RLM are saved with their exact '
+        'name and shown without the mark', () async {
+      final s = await stack();
+      final job = folderJob([
+        ('$marked.txt', smallFile),
+        ('a‎b؜', null),
+      ], name: marked);
+      final permit = await s.acceptedPermit(laptop, job);
+      expect(s.incoming?.fileName, hebrew);
+      final saved = await s.sendFolder(laptop, job, permit);
+      expect(saved.json, {'state': 'saved', 'marked': true, 'name': marked});
+      await endedQuietly(s);
+
+      final names = Directory(s.receiveDir)
+          .listSync()
+          .map((e) => e.path.substring(e.path.lastIndexOf(r'\') + 1))
+          .toList();
+      expect(names, contains(marked));
+      expect(
+        File('${s.receiveDir}\\$marked\\$marked.txt').readAsBytesSync(),
+        smallFile,
+      );
+      expect(Directory('${s.receiveDir}\\$marked\\a‎b؜').existsSync(), isTrue);
+      expect(s.coordinator.lastReceived?.fileName, hebrew);
+    });
+
+    test('the first level of a "foreign" warning shows the names without '
+        'marks', () async {
+      final s = await stack();
+      final job = folderJob([
+        ('$marked.txt', smallFile),
+        ('a‎b', null),
+        ('c؜d.txt', smallFile),
+      ]);
+      final permit = await s.askManifest(portatil, job.declared);
+      final reply = await s.sendManifest(portatil, job, permit);
+      expect(reply.status, 202, reason: reply.text);
+      await eventually(
+        () => s.incoming?.stage == IncomingStage.warning,
+        reason: 'warning',
+      );
+
+      expect(s.incoming?.firstLevel.map((item) => item.name).toSet(), {
+        '$hebrew.txt',
+        'ab',
+        'cd.txt',
+      });
+      s.coordinator.answerWarning(s.sid, accept: false);
+    });
+
+    test(
+      'a file offer named with RLM is accepted and shown without it',
+      () async {
+        final s = await stack();
+
+        final reply = await s.offer(laptop, name: '$marked.txt');
+
+        expect(reply?.status, 200, reason: reply?.text);
+        expect(s.incoming?.fileName, '$hebrew.txt');
+        s.coordinator.cancelIncoming(s.sid);
+      },
+    );
   });
 }
 

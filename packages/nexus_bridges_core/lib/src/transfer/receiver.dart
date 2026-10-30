@@ -1744,7 +1744,8 @@ final class TransferReceiver {
           ..manifestDone = true
           ..upload = null;
         session.containsGit =
-            manifest.containsGitFolder &&
+            (manifest.containsGitEntry ||
+                session.name.toLowerCase() == '.git') &&
             _paired.deviceOf(session.fingerprint)?.relation ==
                 PeerRelation.foreign;
         session.isProgram = await manifestHasPrograms(manifest, _fs);

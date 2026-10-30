@@ -5,9 +5,9 @@ const String _replacement = '\uFFFD';
 final RegExp _forbiddenCharacters = RegExp(r'[\\/:*?"<>|]');
 
 final RegExp _invisibleCharacters = RegExp(
-  r'[\u0000-\u001F\u007F-\u009F\u061C\u180E\u200B\u200E\u200F'
-  r'\u2060-\u2064\u2066-\u206F\u202A-\u202E\uFEFF\uFFF9-\uFFFB'
-  r'\u115F\u1160\u3164\uFFA0\u00AD\u2028\u2029]',
+  r'[\u0000-\u001F\u007F-\u009F\u180E\u200B\u2060-\u2064'
+  r'\u2066-\u206F\u202A-\u202E\uFEFF\uFFF9-\uFFFB\u115F'
+  r'\u1160\u3164\uFFA0\u00AD\u2028\u2029]',
 );
 
 final RegExp _clsidSegment = RegExp(
@@ -197,6 +197,9 @@ bool isProgram(String name) {
   return _programSuffixes.any((suffix) => lower.endsWith(suffix));
 }
 
+bool _isDirectionMark(int unit) =>
+    unit == 0x200E || unit == 0x200F || unit == 0x061C;
+
 String visibleFileName(String name) {
   final units = name.codeUnits;
   final result = StringBuffer();
@@ -220,6 +223,8 @@ String visibleFileName(String name) {
       i++;
     } else if (_isHighSurrogate(unit) || _isLowSurrogate(unit)) {
       result.write(_replacement);
+    } else if (_isDirectionMark(unit)) {
+      continue;
     } else {
       final character = String.fromCharCode(unit);
       result.write(

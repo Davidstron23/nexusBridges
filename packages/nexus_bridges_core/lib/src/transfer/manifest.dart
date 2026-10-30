@@ -13,7 +13,7 @@ const int _tempFolderUnits = 26;
 const int _maxPathUnits = 259;
 const int _frameOverhead = 13;
 const int _headSize = 5;
-const String _gitFolderName = '.git';
+const String _gitName = '.git';
 
 final RegExp _sha256Hex = RegExp(r'^[0-9a-f]{64}$');
 
@@ -113,6 +113,10 @@ final class FolderManifest {
         topLevel++;
         _offerToHead(i);
       }
+      if (_c.names[i].length == _gitName.length &&
+          _c.names[i].toLowerCase() == _gitName) {
+        git = true;
+      }
       if (_c.isFile[i] == 1) {
         fileTotal++;
         sum += _c.size[i];
@@ -120,10 +124,6 @@ final class FolderManifest {
         if (relative > longestPath) longestPath = relative;
       } else {
         folderTotal++;
-        if (_c.names[i].length == _gitFolderName.length &&
-            _c.names[i].toLowerCase() == _gitFolderName) {
-          git = true;
-        }
         final reserved = relative + Limits.folderDirPathReserve;
         if (reserved > longestPath) longestPath = reserved;
       }
@@ -136,7 +136,7 @@ final class FolderManifest {
     longest = longestPath;
     fileIndexes = Int32List.fromList(indexes);
     firstLevelCount = topLevel;
-    containsGitFolder = git;
+    containsGitEntry = git;
   }
 
   final _Columns _c;
@@ -150,7 +150,7 @@ final class FolderManifest {
   ]);
 
   late final int firstLevelCount;
-  late final bool containsGitFolder;
+  late final bool containsGitEntry;
 
   late final int files;
   late final int folders;
