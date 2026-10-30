@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
-import 'folder_walk.dart' show FolderLister, ListedEntry;
+import 'folder_walk.dart' show FolderLister, ListedEntry, isLinkTag;
 import 'hashing.dart' show startSha256;
 
 const int _genericRead = 0x80000000;
@@ -14,6 +14,8 @@ const int _deleteAccess = 0x00010000;
 const int _synchronize = 0x00100000;
 const int _fileListDirectory = 0x0001;
 const int _fileTraverse = 0x0020;
+const int _fileAttributeTagInfo = 9;
+const int _noReparseTag = 0;
 const int _fileReadAttributes = 0x0080;
 const int _fileWriteAttributes = 0x0100;
 const int _shareRead = 1;
@@ -160,6 +162,33 @@ typedef _NtWriteFile = int Function(
   Pointer<Uint32>,
 );
 
+typedef _GetFileInformationByHandleExNative = Int32 Function(
+  Pointer<Void>,
+  Int32,
+  Pointer<Void>,
+  Uint32,
+);
+
+typedef _GetFileInformationByHandleEx = int Function(
+  Pointer<Void>,
+  int,
+  Pointer<Void>,
+  int,
+);
+
+_GetFileInformationByHandleEx? _getFileInformationByHandleEx;
+
+_GetFileInformationByHandleEx _loadGetFileInformationByHandleEx() {
+  final cached = _getFileInformationByHandleEx;
+  if (cached != null) return cached;
+  final library = DynamicLibrary.open('kernel32.dll');
+  return _getFileInformationByHandleEx = library
+      .lookupFunction<
+        _GetFileInformationByHandleExNative,
+        _GetFileInformationByHandleEx
+      >('GetFileInformationByHandleEx');
+}
+
 _NtQueryDirectoryFile? _ntQueryDirectoryFile;
 
 _NtQueryDirectoryFile _loadNtQueryDirectoryFile() {
@@ -234,7 +263,41 @@ final class RawEntry {
   bool get isDirectory => (attributes & _attributeDirectory) != 0;
 }
 
-List<RawEntry> listDirectorySync(String directoryPath) {
+int? _folderReparseTag(Arena arena, HANDLE handle) {
+  final info = arena<BY_HANDLE_FILE_INFORMATION>();
+  final Win32Result(value: informed) = GetFileInformationByHandle(handle, info);
+  if (!informed) return null;
+  if ((info.ref.dwFileAttributes & _attributeReparse) == 0) {
+    return _noReparseTag;
+  }
+  final tagInfo = arena<Uint32>(2);
+  final ok = _loadGetFileInformationByHandleEx()(
+    handle.cast<Void>(),
+    _fileAttributeTagInfo,
+    tagInfo.cast<Void>(),
+    8,
+  );
+  if (ok == 0) return null;
+  return tagInfo[1];
+}
+
+bool _sameFinalPath(String resolved, String expected) {
+  String trimmed(String path) {
+    var text = path.toUpperCase();
+    while (text.length > 3 && text.endsWith(r'\')) {
+      text = text.substring(0, text.length - 1);
+    }
+    return text;
+  }
+
+  return trimmed(resolved) == trimmed(expected);
+}
+
+List<RawEntry> listDirectorySync(
+  String directoryPath, {
+  bool allowNonLinkReparse = false,
+  bool verifyFinalPath = false,
+}) {
   return using((arena) {
     final Win32Result(value: handle) = CreateFile(
       arena.pcwstr(extendedPath(directoryPath)),
@@ -249,8 +312,23 @@ List<RawEntry> listDirectorySync(String directoryPath) {
       throw const FileSystemException('The folder could not be listed');
     }
     try {
-      if (_isReparse(arena, handle)) {
+      if (allowNonLinkReparse) {
+        final tag = _folderReparseTag(arena, handle);
+        if (tag == null || (tag != _noReparseTag && isLinkTag(tag))) {
+          throw const FileSystemException('The folder could not be listed');
+        }
+      } else if (_isReparse(arena, handle)) {
         throw const FileSystemException('The folder could not be listed');
+      }
+      if (verifyFinalPath) {
+        final resolved = _finalPath(arena, handle);
+        if (resolved == null ||
+            !_sameFinalPath(
+              resolved,
+              stripExtendedPrefix(extendedPath(directoryPath)),
+            )) {
+          throw const FileSystemException('The folder could not be listed');
+        }
       }
       final query = _loadNtQueryDirectoryFile();
       final buffer = arena<Uint8>(_listBufferBytes);
@@ -318,7 +396,11 @@ final class WindowsFolderLister implements FolderLister {
 
   @override
   List<ListedEntry> list(String directoryPath) => [
-    for (final entry in listDirectorySync(directoryPath))
+    for (final entry in listDirectorySync(
+      directoryPath,
+      allowNonLinkReparse: true,
+      verifyFinalPath: true,
+    ))
       ListedEntry(
         name: entry.name,
         isDirectory: entry.isDirectory,
@@ -382,10 +464,15 @@ final class FileHashCancelled extends FileHashResult {
   const FileHashCancelled();
 }
 
+final class FileHashSkipped extends FileHashResult {
+  const FileHashSkipped();
+}
+
 FileHashResult hashFileSync(
   String path, {
   required Pointer<Uint8> buffer,
   required bool Function() isCancelled,
+  bool Function(int volume, int index, int links)? isProtected,
 }) {
   return using((arena) {
     final Win32Result(value: handle) = CreateFile(
@@ -414,6 +501,14 @@ FileHashResult hashFileSync(
       if (!informed) return const FileHashFailed();
       if ((info.ref.dwFileAttributes & _attributeDirectory) != 0) {
         return const FileHashFailed();
+      }
+      if (isProtected != null &&
+          isProtected(
+            info.ref.dwVolumeSerialNumber,
+            (info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow,
+            info.ref.nNumberOfLinks,
+          )) {
+        return const FileHashSkipped();
       }
       final expected = arena<Int64>();
       final Win32Result(value: sized) = GetFileSizeEx(handle, expected);
@@ -447,6 +542,62 @@ FileHashResult hashFileSync(
       );
     } finally {
       digest.dispose();
+      handle.close();
+    }
+  });
+}
+
+Set<(int, int)> fileIdsUnder(String folderPath) {
+  final ids = <(int, int)>{};
+  void visit(String folder) {
+    final List<RawEntry> entries;
+    try {
+      entries = listDirectorySync(folder);
+    } catch (_) {
+      return;
+    }
+    for (final entry in entries) {
+      if ((entry.attributes & _attributeReparse) != 0) continue;
+      final child = folder.endsWith(r'\')
+          ? '$folder${entry.name}'
+          : '$folder\\${entry.name}';
+      if (entry.isDirectory) {
+        visit(child);
+      } else {
+        final id = _fileIdentity(child);
+        if (id != null) ids.add(id);
+      }
+    }
+  }
+
+  visit(folderPath);
+  return ids;
+}
+
+(int, int)? _fileIdentity(String path) {
+  return using((arena) {
+    final Win32Result(value: handle) = CreateFile(
+      arena.pcwstr(extendedPath(path)),
+      _fileReadAttributes,
+      FILE_SHARE_MODE(_shareAll),
+      null,
+      OPEN_EXISTING,
+      FILE_FLAG_OPEN_REPARSE_POINT,
+      null,
+    );
+    if (!handle.isValid) return null;
+    try {
+      final info = arena<BY_HANDLE_FILE_INFORMATION>();
+      final Win32Result(value: informed) = GetFileInformationByHandle(
+        handle,
+        info,
+      );
+      if (!informed) return null;
+      return (
+        info.ref.dwVolumeSerialNumber,
+        (info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow,
+      );
+    } finally {
       handle.close();
     }
   });

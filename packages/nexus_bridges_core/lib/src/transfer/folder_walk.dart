@@ -32,6 +32,7 @@ final class WalkResult {
   int protectedOmitted = 0;
   int blockedOmitted = 0;
   int excludedFolders = 0;
+  final List<String> excludedPaths = [];
   TransferOutcome? stopped;
   String? problemPath;
   bool cancelled = false;
@@ -92,7 +93,8 @@ WalkResult walkFolder({
       final relative = folder.relative.isEmpty
           ? entry.name
           : _join(folder.relative, entry.name);
-      if (entry.reparseTag != null) {
+      final tag = entry.reparseTag;
+      if (tag != null && isLinkTag(tag)) {
         result.linksOmitted++;
         continue;
       }
@@ -100,12 +102,14 @@ WalkResult walkFolder({
       if (entry.isDirectory) {
         final childPath = _join(folder.path, entry.name);
         if (isAppReservedName(entry.name) ||
-            isSameOrInside(childPath, dataDirRealPath)) {
+            (dataDirRealPath.isNotEmpty &&
+                isSameOrInside(childPath, dataDirRealPath))) {
           result.protectedOmitted++;
           continue;
         }
         if (exclusions.contains(entry.name.toUpperCase())) {
           result.excludedFolders++;
+          result.excludedPaths.add(childPath);
           continue;
         }
         if (!isValidFileName(entry.name)) {
@@ -127,6 +131,10 @@ WalkResult walkFolder({
         final index = builder.addFolder(folder.index, entry.name);
         subfolders.add(_Pending(index, childPath, relative, childDepth));
       } else {
+        if (isAppReservedName(entry.name)) {
+          result.protectedOmitted++;
+          continue;
+        }
         if (isBlockedType(entry.name)) {
           result.blockedOmitted++;
           continue;
@@ -154,4 +162,52 @@ WalkResult walkFolder({
     onProgress?.call(builder.length);
   }
   return result;
+}
+
+final class FolderMeasure {
+  const FolderMeasure({required this.bytes, required this.partial});
+
+  final int bytes;
+  final bool partial;
+}
+
+FolderMeasure measureFolders({
+  required FolderLister lister,
+  required List<String> roots,
+  required Duration Function() elapsed,
+  required bool Function() isCancelled,
+  int maxEntries = Limits.folderMeasureMaxEntries,
+  Duration cap = Limits.folderMeasureCap,
+}) {
+  final pending = List<String>.of(roots.reversed);
+  var bytes = 0;
+  var entries = 0;
+  var partial = false;
+  while (pending.isNotEmpty) {
+    if (isCancelled() || elapsed() >= cap) {
+      return FolderMeasure(bytes: bytes, partial: true);
+    }
+    final folder = pending.removeLast();
+    final List<ListedEntry> listed;
+    try {
+      listed = lister.list(folder);
+    } catch (_) {
+      partial = true;
+      continue;
+    }
+    for (final entry in listed) {
+      final tag = entry.reparseTag;
+      if (tag != null && isLinkTag(tag)) continue;
+      entries++;
+      if (entries > maxEntries) {
+        return FolderMeasure(bytes: bytes, partial: true);
+      }
+      if (entry.isDirectory) {
+        pending.add(_join(folder, entry.name));
+      } else {
+        bytes += entry.size;
+      }
+    }
+  }
+  return FolderMeasure(bytes: bytes, partial: partial);
 }
