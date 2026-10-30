@@ -620,6 +620,35 @@ final Map<TransferOutcome, (String, String)> _expectedSent = {
     'Se ha enviado todo, pero el otro equipo no lo ha confirmado: no se sabe '
         'si ha llegado.',
   ),
+  TransferOutcome.shortcut: (
+    'Shortcuts are not sent.',
+    'Los accesos directos no se envían.',
+  ),
+  TransferOutcome.wholeDrive: (
+    "Whole drives can't be sent, only folders inside them.",
+    'No se pueden enviar unidades enteras, solo carpetas de dentro.',
+  ),
+  TransferOutcome.protectedData: (
+    "This is NexusBridges' own data and is never sent.",
+    'Son datos de la propia app y nunca se envían.',
+  ),
+  TransferOutcome.notFound: ('It no longer exists.', 'Ya no existe.'),
+  TransferOutcome.tooManyEntries: (
+    'The folder has more than 100,000 items.',
+    'La carpeta tiene más de 100 000 elementos.',
+  ),
+  TransferOutcome.tooDeep: (
+    'The folder has more than 64 levels.',
+    'La carpeta tiene más de 64 niveles.',
+  ),
+  TransferOutcome.tooLargeForPeer: (
+    'The folder is too big for the other device.',
+    'La carpeta es demasiado grande para el otro equipo.',
+  ),
+  TransferOutcome.unexpectedData: (
+    "The other device sent data it hadn't announced.",
+    'El otro equipo mandó datos que no había anunciado.',
+  ),
 };
 
 final Map<TransferOutcome, (String, String)> _expectedReceived = {
@@ -734,6 +763,38 @@ final Map<TransferOutcome, (String, String)> _expectedReceived = {
   TransferOutcome.unconfirmed: (
     "Everything was sent, but it wasn't confirmed.",
     'Se ha enviado todo, pero no se ha confirmado.',
+  ),
+  TransferOutcome.shortcut: (
+    "It was rejected because shortcuts aren't accepted.",
+    'Se rechazó porque no se aceptan accesos directos.',
+  ),
+  TransferOutcome.wholeDrive: (
+    "It was rejected because whole drives aren't accepted.",
+    'Se rechazó porque no se aceptan unidades enteras.',
+  ),
+  TransferOutcome.protectedData: (
+    "It was rejected because NexusBridges' own data is never sent.",
+    'Se rechazó porque los datos de NexusBridges nunca se envían.',
+  ),
+  TransferOutcome.notFound: (
+    'It no longer existed on the other device.',
+    'Ya no existía en el otro equipo.',
+  ),
+  TransferOutcome.tooManyEntries: (
+    'It was rejected because the folder has more than 100,000 items.',
+    'Se rechazó porque la carpeta tiene más de 100 000 elementos.',
+  ),
+  TransferOutcome.tooDeep: (
+    'It was rejected because the folder has more than 64 levels.',
+    'Se rechazó porque la carpeta tiene más de 64 niveles.',
+  ),
+  TransferOutcome.tooLargeForPeer: (
+    'It was rejected because the folder is too big.',
+    'Se rechazó porque la carpeta es demasiado grande.',
+  ),
+  TransferOutcome.unexpectedData: (
+    "It was cut because data arrived that hadn't been announced.",
+    'Se cortó porque llegaron datos que no se habían anunciado.',
   ),
 };
 
@@ -1670,8 +1731,8 @@ void main() {
   });
 
   group('E145: sentOutcome and receivedOutcome', () {
-    test('the plan tables cover the 28 values of TransferOutcome', () {
-      expect(TransferOutcome.values, hasLength(28));
+    test('the plan tables cover the 36 values of TransferOutcome', () {
+      expect(TransferOutcome.values, hasLength(36));
       expect(_expectedSent.keys.toSet(), TransferOutcome.values.toSet());
       expect(_expectedReceived.keys.toSet(), TransferOutcome.values.toSet());
     });
@@ -1722,10 +1783,10 @@ void main() {
       for (final strings in [english, spanish]) {
         expect({
           for (final o in TransferOutcome.values) strings.sentOutcome(o),
-        }, hasLength(28));
+        }, hasLength(36));
         expect({
           for (final o in TransferOutcome.values) strings.receivedOutcome(o),
-        }, hasLength(28));
+        }, hasLength(36));
       }
     });
 
