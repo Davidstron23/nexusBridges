@@ -17,6 +17,8 @@ import 'platform.dart';
 import 'windows_folder_io.dart'
     show extendedPath, isDangerousTypeSync, stripExtendedPrefix;
 
+const int _moved = -2;
+const int _lostCode = -1;
 const int _errorAccessDenied = 5;
 const int _errorSharingViolation = 32;
 const int _errorFileExists = 80;
@@ -388,18 +390,22 @@ MoveOutcome _moveNoReplaceSync(
         arena.pcwstr(target),
         const MOVE_FILE_FLAGS(0),
       );
-      if (value) return 0;
-      if (lastError == _errorAccessDenied && _pathExists(arena, target)) {
+      if (value) return _moved;
+      final unknown = lastError == 0;
+      if ((unknown || lastError == _errorAccessDenied) &&
+          _pathExists(arena, target)) {
         return _errorAlreadyExists;
       }
-      return lastError;
+      return unknown ? _lostCode : lastError;
     });
-    if (code == 0) return MoveOutcome.moved;
+    if (code == _moved) return MoveOutcome.moved;
     if (code == _errorFileExists || code == _errorAlreadyExists) {
       return MoveOutcome.nameTaken;
     }
     final retryable =
-        code == _errorSharingViolation || code == _errorAccessDenied;
+        code == _errorSharingViolation ||
+        code == _errorAccessDenied ||
+        code == _lostCode;
     if (!retryable || retry >= waits.length) {
       return MoveOutcome.failed;
     }

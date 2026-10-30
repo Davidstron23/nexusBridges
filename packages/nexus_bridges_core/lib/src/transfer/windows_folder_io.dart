@@ -32,9 +32,12 @@ const int _attributeHidden = 0x02;
 const int _attributeDirectory = 0x10;
 const int _attributeReparse = 0x400;
 const int _statusDiskFull = 0xC000007F;
-const int _errorNoMoreFiles = 18;
-const int _errorDiskFull = 112;
-const int _errorHandleDiskFull = 39;
+const int _statusNoMoreFiles = 0x80000006;
+const int _statusNoSuchFile = 0xC000000F;
+const int _statusSuccess = 0;
+const int _listBufferBytes = 65536;
+const int _fullDirectoryInformation = 2;
+const int _nameOffset = 68;
 const int _finalPathChars = 32768;
 const int _readChunkBytes = 1048576;
 const String _zoneIdentifierText = '[ZoneTransfer]\r\nZoneId=3\r\n';
@@ -105,6 +108,80 @@ typedef _AssocIsDangerousNative = Int32 Function(Pointer<Utf16>);
 
 typedef _AssocIsDangerous = int Function(Pointer<Utf16>);
 
+typedef _NtQueryDirectoryFileNative = Int32 Function(
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<_IoStatusBlock>,
+  Pointer<Void>,
+  Uint32,
+  Int32,
+  Uint8,
+  Pointer<Void>,
+  Uint8,
+);
+
+typedef _NtQueryDirectoryFile = int Function(
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<_IoStatusBlock>,
+  Pointer<Void>,
+  int,
+  int,
+  int,
+  Pointer<Void>,
+  int,
+);
+
+typedef _NtWriteFileNative = Int32 Function(
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<_IoStatusBlock>,
+  Pointer<Void>,
+  Uint32,
+  Pointer<Int64>,
+  Pointer<Uint32>,
+);
+
+typedef _NtWriteFile = int Function(
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<Void>,
+  Pointer<_IoStatusBlock>,
+  Pointer<Void>,
+  int,
+  Pointer<Int64>,
+  Pointer<Uint32>,
+);
+
+_NtQueryDirectoryFile? _ntQueryDirectoryFile;
+
+_NtQueryDirectoryFile _loadNtQueryDirectoryFile() {
+  final cached = _ntQueryDirectoryFile;
+  if (cached != null) return cached;
+  final library = DynamicLibrary.open('ntdll.dll');
+  return _ntQueryDirectoryFile = library
+      .lookupFunction<_NtQueryDirectoryFileNative, _NtQueryDirectoryFile>(
+        'NtQueryDirectoryFile',
+      );
+}
+
+_NtWriteFile? _ntWriteFile;
+
+_NtWriteFile _loadNtWriteFile() {
+  final cached = _ntWriteFile;
+  if (cached != null) return cached;
+  final library = DynamicLibrary.open('ntdll.dll');
+  return _ntWriteFile = library
+      .lookupFunction<_NtWriteFileNative, _NtWriteFile>('NtWriteFile');
+}
+
 _NtCreateFile? _ntCreateFile;
 
 _NtCreateFile _loadNtCreateFile() {
@@ -158,50 +235,80 @@ final class RawEntry {
 }
 
 List<RawEntry> listDirectorySync(String directoryPath) {
-  final base = directoryPath.endsWith(r'\')
-      ? directoryPath
-      : '$directoryPath\\';
   return using((arena) {
-    final data = arena<WIN32_FIND_DATA>();
-    final Win32Result(value: handle) = FindFirstFileEx(
-      arena.pcwstr('${extendedPath(base)}*'),
-      FindExInfoBasic,
-      data,
-      FindExSearchNameMatch,
-      FIND_FIRST_EX_LARGE_FETCH,
+    final Win32Result(value: handle) = CreateFile(
+      arena.pcwstr(extendedPath(directoryPath)),
+      _fileListDirectory | _fileReadAttributes | _synchronize,
+      FILE_SHARE_MODE(_shareAll),
+      null,
+      OPEN_EXISTING,
+      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+      null,
     );
     if (!handle.isValid) {
       throw const FileSystemException('The folder could not be listed');
     }
     try {
+      if (_isReparse(arena, handle)) {
+        throw const FileSystemException('The folder could not be listed');
+      }
+      final query = _loadNtQueryDirectoryFile();
+      final buffer = arena<Uint8>(_listBufferBytes);
+      final status = arena<_IoStatusBlock>();
       final entries = <RawEntry>[];
+      var restart = 1;
       while (true) {
-        final name = data.ref.cFileName;
-        if (name != '.' && name != '..') {
-          final attributes = data.ref.dwFileAttributes;
-          entries.add(
-            RawEntry(
-              name: name,
-              attributes: attributes,
-              reparseTag: (attributes & _attributeReparse) != 0
-                  ? data.cast<Uint32>()[9]
-                  : null,
-              size: (data.ref.nFileSizeHigh << 32) | data.ref.nFileSizeLow,
-            ),
-          );
+        final code =
+            query(
+              handle.cast<Void>(),
+              nullptr,
+              nullptr,
+              nullptr,
+              status,
+              buffer.cast<Void>(),
+              _listBufferBytes,
+              _fullDirectoryInformation,
+              0,
+              nullptr,
+              restart,
+            ) &
+            0xFFFFFFFF;
+        if (code == _statusNoMoreFiles ||
+            (restart == 1 && code == _statusNoSuchFile)) {
+          return entries;
         }
-        final Win32Result(value: more, error: nextError) = FindNextFile(
-          handle,
-          data,
-        );
-        if (!more) {
-          if (nextError == _errorNoMoreFiles || nextError == 0) break;
+        if (code != _statusSuccess) {
           throw const FileSystemException('The folder could not be listed');
         }
+        restart = 0;
+        var offset = 0;
+        while (true) {
+          final record = buffer + offset;
+          final fields = record.cast<Uint32>();
+          final attributes = fields[14];
+          final nameBytes = fields[15];
+          final name = String.fromCharCodes(
+            (record + _nameOffset).cast<Uint16>().asTypedList(nameBytes ~/ 2),
+          );
+          if (name != '.' && name != '..') {
+            entries.add(
+              RawEntry(
+                name: name,
+                attributes: attributes,
+                reparseTag: (attributes & _attributeReparse) != 0
+                    ? fields[16]
+                    : null,
+                size: record.cast<Int64>()[5],
+              ),
+            );
+          }
+          final next = fields[0];
+          if (next == 0) break;
+          offset += next;
+        }
       }
-      return entries;
     } finally {
-      FindClose(handle);
+      handle.close();
     }
   });
 }
@@ -499,26 +606,33 @@ NodeResult createFileExclusive(
 
 int writeAllSync(HANDLE file, Pointer<Uint8> data, int length) {
   return using((arena) {
-    final written = arena<Uint32>();
+    final write = _loadNtWriteFile();
+    final status = arena<_IoStatusBlock>();
     var offset = 0;
     while (offset < length) {
-      final Win32Result(value: ok, :error) = WriteFile(
-        file,
-        data + offset,
-        length - offset,
-        written,
-        null,
-      );
-      if (!ok) return error == 0 ? 1 : error;
-      if (written.value == 0) return 1;
-      offset += written.value;
+      final code =
+          write(
+            file.cast<Void>(),
+            nullptr,
+            nullptr,
+            nullptr,
+            status,
+            (data + offset).cast<Void>(),
+            length - offset,
+            nullptr,
+            nullptr,
+          ) &
+          0xFFFFFFFF;
+      if (code != _statusSuccess) return code;
+      final written = status.ref.information;
+      if (written <= 0) return 1;
+      offset += written;
     }
     return 0;
   });
 }
 
-bool isDiskFullError(int error) =>
-    error == _errorDiskFull || error == _errorHandleDiskFull;
+bool isDiskFullError(int status) => status == _statusDiskFull;
 
 bool markFromInternetSync(HANDLE parent, String name) {
   final streamName = '$name:Zone.Identifier';
@@ -640,7 +754,10 @@ bool deleteTreeNoFollowSync(String path) {
     final Win32Result(value: attributes) = GetFileAttributes(
       arena.pcwstr(extended),
     );
-    if (attributes == 0xFFFFFFFF) return true;
+    if (attributes == 0xFFFFFFFF) {
+      return FileSystemEntity.typeSync(extended, followLinks: false) ==
+          FileSystemEntityType.notFound;
+    }
     if ((attributes & _attributeReparse) != 0) {
       return _removeLink(arena, extended, attributes);
     }
