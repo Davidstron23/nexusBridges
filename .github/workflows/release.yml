@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: apps/nexus_bridges/pubspec.yaml
+
+      - name: Check the tag matches the app version
+        shell: pwsh
+        run: |
+          $pubspec = Get-Content apps/nexus_bridges/pubspec.yaml -Raw
+          if ($pubspec -notmatch '(?m)^version:\s*(\d+\.\d+\.\d+)') { throw 'No version in pubspec.yaml' }
+          $expected = "v$($Matches[1])"
+          if ($env:GITHUB_REF_NAME -ne $expected) { throw "Tag $env:GITHUB_REF_NAME does not match $expected" }
+
+      - run: flutter pub get
+
+      - name: Test nexus_bridges_core
+        run: dart test
+        working-directory: packages/nexus_bridges_core
+
+      - name: Test the app
+        run: flutter test
+        working-directory: apps/nexus_bridges
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build the installer
+        run: ./tool/build-installer.ps1
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          Get-ChildItem installer/Output/*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Encoding ascii -Append installer/Output/SHA256SUMS.txt
+          }
+
+      - name: Release notes from the changelog
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $lines = Get-Content CHANGELOG.md
+          $start = ($lines | Select-String -Pattern "^## \[$([regex]::Escape($version))\]").LineNumber
+          if (-not $start) { throw "No changelog section for $version" }
+          $rest = $lines[$start..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^## \[|^\[').LineNumber | Select-Object -First 1
+          $notes = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          $notes | Out-File -Encoding utf8 release-notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release create $env:GITHUB_REF_NAME installer/Output/*.exe installer/Output/SHA256SUMS.txt --title "NexusBridges $env:GITHUB_REF_NAME" --notes-file release-notes.md

@@ -1,131 +1,85 @@
+![NexusBridges: a file passing through two portals, from one device to another](.github/assets/banner.png)
+
 # NexusBridges
 
-Send files and folders between your own devices on the same Wi-Fi. No cables, no USB sticks, no cloud, no accounts.
+Move a file from one of your computers to another without a USB stick, a cloud drive or an account. Peer to peer, over your local network, for Windows.
 
-> **Status: work in progress.** Nothing is released yet. The first target is Windows; Android and iPhone come later.
+[![CI](https://github.com/Davidstron23/nexusBridges/actions/workflows/ci.yml/badge.svg)](https://github.com/Davidstron23/nexusBridges/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Davidstron23/nexusBridges)](https://github.com/Davidstron23/nexusBridges/releases/latest)
 
-## What it is
+**Status:** early but usable. Version 0.1.0 sends single files between Windows PCs. Folders, multiple files and drag and drop are in progress. Licensed under Apache-2.0.
 
-NexusBridges is a peer-to-peer file transfer app for a local network. Every device runs the same app, finds the others on the network, and sends files straight to them. There is no central server in the middle.
+[Leer en castellano](README.es.md)
 
-The idea that drives it: you are working on a project on one computer and you need that folder on another one, including things you would never push to GitHub. You open NexusBridges, drag the folder in, pick the other device, pick the folder where it should land, and it goes there.
+## What it does
 
-## Planned for the first version (0.1.0, Windows)
+- Finds the other NexusBridges devices on your network on its own, with a manual search as a fallback.
+- Pairs two devices once, with a 6-digit code that you compare on both screens. Devices you never paired cannot send you anything.
+- Sends a file straight to the other device, encrypted, and checks it with SHA-256 before keeping it.
+- Lets files from your own devices arrive without asking, while a device you marked as someone else's needs your confirmation every time.
+- Only works on the networks you approve.
+- Never opens or runs what it receives, never overwrites a file, and marks every received file as downloaded from another computer, as Windows does for browser downloads.
 
-- Automatic discovery of other devices on the network.
-- One-time pairing between two devices with a 6-digit code. Devices that were never paired are ignored.
-- Encrypted transfers with mutual authentication, and a SHA-256 check on every file.
-- Send single files or whole folders by drag and drop. Heavy folders such as `node_modules` are skipped.
-- Choose the destination folder on the receiving computer, instead of a fixed downloads folder.
-- Nothing received is ever opened automatically, and nothing is overwritten without asking.
+## Why not something else
 
-## Not in the first version
+- **A cloud drive or emailing yourself** sends the file to the internet and back and needs an account. NexusBridges goes from one device to the other inside your network, and nothing leaves it.
+- **[LocalSend](https://github.com/localsend/localsend)** is mature, works on phones, macOS and Linux, and lets you send to anyone nearby. If you need any of that today, use LocalSend. NexusBridges is Windows only for now and is built around your own devices: a one-time pairing, unpaired devices ignored, and stricter handling of what arrives.
 
-- Android and iPhone (Android is next, then iPhone through a web page served by the desktop app).
-- Controlling a transfer between two other devices from a third one.
-- Browsing the full contents of another device.
-- Linux and macOS.
-- Resuming interrupted transfers.
-- Transfers over the internet.
+## Install
 
-## Privacy
+You need Windows 10 or 11 (64-bit) on both computers, connected to the same network.
 
-No accounts and no analytics. Nothing leaves your local network. The app has no secrets to configure, so there is no `.env` file.
+1. Download `NexusBridges-Setup-<version>.exe` from the [latest release](https://github.com/Davidstron23/nexusBridges/releases/latest). To check it, compare its hash with `SHA256SUMS.txt` from the same release:
+
+   ```powershell
+   Get-FileHash .\NexusBridges-Setup-0.1.0.exe -Algorithm SHA256
+   ```
+
+2. Run it. It asks for administrator rights once, to install into `C:\Program Files\NexusBridges` and to add two Windows Firewall rules (TCP and UDP port 53530, only from your local subnet). Uninstalling removes them.
+3. The installer is not code-signed yet, so SmartScreen may show "Windows protected your PC". Choose **More info**, then **Run anyway**.
+
+Repeat on the second computer, open the app on both, approve your network when asked, pair the two devices and send a file. The first time something arrives, the app asks where to save it, with `Downloads\NexusBridges` suggested.
+
+## Security
+
+Each device creates its own certificate (an EC P-256 key protected with Windows DPAPI) the first time it runs, and the key never leaves the device. All traffic uses TLS with mutual authentication and pinned fingerprints, and the app only listens on the networks you approved. Received files are written to a hidden temporary folder, verified, and only then moved to their destination.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Build from source
 
-You need Windows, Git, Flutter (the exact version pinned in `apps/nexus_bridges/pubspec.yaml`) and Visual Studio Build Tools 2022 with the "Desktop development with C++" workload. To build the installer you also need [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+You need Git, Flutter (the exact version pinned in `apps/nexus_bridges/pubspec.yaml`) and Visual Studio Build Tools 2022 with the "Desktop development with C++" workload. Building the installer also needs [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
 ```powershell
 git clone https://github.com/Davidstron23/nexusBridges.git
 cd nexusBridges
 powershell -File tool/bootstrap.ps1
-```
-
-`bootstrap.ps1` checks the Flutter version, installs the dependencies and enables the git hooks. Then:
-
-```powershell
 cd apps/nexus_bridges
 flutter run -d windows
 ```
 
-To run the tests: `dart test` inside `packages/nexus_bridges_core` and `flutter test` inside `apps/nexus_bridges`.
+`bootstrap.ps1` checks the Flutter version, gets the dependencies and enables the git hooks. To run the tests, use `dart test` in `packages/nexus_bridges_core` and `flutter test` in `apps/nexus_bridges`. To build the installer, run `powershell -File tool/build-installer.ps1`; it leaves the setup file in `installer/Output/`.
 
-To build the installer, run `powershell -File tool/build-installer.ps1`. It leaves `NexusBridges-Setup-<version>.exe` in `installer/Output/`.
+## How it is built
 
-The installer is not code-signed, so Windows SmartScreen may show a "Windows protected your PC" warning the first time you run it. Choose "More info" and then "Run anyway".
+- The core (`packages/nexus_bridges_core`) is plain Dart with no Flutter dependency: discovery, pairing, the HTTPS server and the transfers live there, and the app only calls it. A test keeps the module boundaries from turning into cycles.
+- Network code is tested with real sockets on `127.0.0.1`, not with a mocked network layer, including the security cases: unknown fingerprints, paths with `../` and files whose hash does not match.
+- Every change goes through a pull request. CI checks formatting, static analysis and both test suites, and scans the whole history for leaked secrets with gitleaks.
+- It is developed with AI assistance. Claude writes much of the code and is listed as a co-author on the commits with the most complex work; the specs, the design decisions, the review and every merge are mine.
 
-## Inspiration
+## Roadmap
 
-[LocalSend](https://github.com/localsend/localsend) is a mature open source app that solves the same problem. NexusBridges is a separate project written from scratch in Dart, built to learn how this kind of protocol works.
+- **In progress:** sending whole folders and several files at once, drag and drop from the Explorer, send queues and a "To send" tray.
+- **Next:** choosing the destination folder on the other device, per-device shared folders, a settings screen and the system tray.
+- **Later:** Android, then iPhone.
+- **Not planned for now:** transfers over the internet and resuming interrupted transfers.
+
+See the [changelog](CHANGELOG.md) for what each release contains.
 
 ## License
 
-MIT, see `LICENSE`.
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
----
+## Acknowledgements
 
-# NexusBridges (castellano)
-
-Envía archivos y carpetas entre tus propios dispositivos conectados a la misma Wi-Fi. Sin cables, sin pendrives, sin nube y sin cuentas.
-
-> **Estado: en desarrollo.** Todavía no hay ninguna versión publicada. Empieza por Windows; Android e iPhone llegarán después.
-
-## Qué es
-
-NexusBridges es una app de transferencia de archivos entre dispositivos de una red local, de igual a igual. Todos los dispositivos ejecutan la misma app, se encuentran en la red y se envían los archivos directamente. No hay un servidor central en medio.
-
-La idea que lo mueve: estás trabajando en un proyecto en un ordenador y necesitas esa carpeta en otro, incluso con cosas que nunca subirías a GitHub. Abres NexusBridges, arrastras la carpeta, eliges el otro dispositivo, eliges la carpeta donde debe quedar y se envía.
-
-## Previsto para la primera versión (0.1.0, Windows)
-
-- Descubrimiento automático de los otros dispositivos de la red.
-- Vinculación única entre dos dispositivos con un código de 6 dígitos. Los dispositivos que nunca se han vinculado se ignoran.
-- Transferencias cifradas con autenticación en ambos sentidos, y comprobación SHA-256 de cada archivo.
-- Envío de archivos sueltos o carpetas enteras arrastrando. Las carpetas pesadas como `node_modules` no se envían.
-- Elegir la carpeta destino en el ordenador que recibe, en vez de una carpeta de descargas fija.
-- Nada de lo recibido se abre automáticamente y nada se sobrescribe sin preguntar.
-
-## Fuera de la primera versión
-
-- Android e iPhone (primero Android, después iPhone mediante una página web servida por la app de escritorio).
-- Ordenar un envío entre otros dos dispositivos desde un tercero.
-- Explorar todo el contenido de otro dispositivo.
-- Linux y macOS.
-- Reanudar transferencias interrumpidas.
-- Transferencias por internet.
-
-## Privacidad
-
-Sin cuentas y sin analíticas. Nada sale de tu red local. La app no tiene secretos que configurar, así que no hay archivo `.env`.
-
-## Compilar desde el código
-
-Necesitas Windows, Git, Flutter (la versión exacta que fija `apps/nexus_bridges/pubspec.yaml`) y Visual Studio Build Tools 2022 con la carga de trabajo "Desarrollo para el escritorio con C++". Para generar el instalador también hace falta [Inno Setup 6](https://jrsoftware.org/isinfo.php).
-
-```powershell
-git clone https://github.com/Davidstron23/nexusBridges.git
-cd nexusBridges
-powershell -File tool/bootstrap.ps1
-```
-
-`bootstrap.ps1` comprueba la versión de Flutter, instala las dependencias y activa los hooks de git. Después:
-
-```powershell
-cd apps/nexus_bridges
-flutter run -d windows
-```
-
-Para ejecutar los tests: `dart test` dentro de `packages/nexus_bridges_core` y `flutter test` dentro de `apps/nexus_bridges`.
-
-Para generar el instalador, ejecuta `powershell -File tool/build-installer.ps1`. Deja `NexusBridges-Setup-<versión>.exe` en `installer/Output/`.
-
-El instalador no está firmado, así que Windows SmartScreen puede mostrar el aviso "Windows protegió su PC" la primera vez. Elige "Más información" y después "Ejecutar de todas formas".
-
-## Inspiración
-
-[LocalSend](https://github.com/localsend/localsend) es una app de código abierto madura que resuelve el mismo problema. NexusBridges es un proyecto aparte, escrito desde cero en Dart, para aprender cómo funciona este tipo de protocolo.
-
-## Licencia
-
-MIT, ver `LICENSE`.
+[LocalSend](https://github.com/localsend/localsend) showed that this kind of app can be simple and open. NexusBridges is a separate project, written from scratch in Dart, with its own protocol.
