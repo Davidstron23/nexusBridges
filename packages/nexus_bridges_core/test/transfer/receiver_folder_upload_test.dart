@@ -940,7 +940,10 @@ void main() {
 
       await s.coordinator.cleanupAtStart();
 
-      expect(Directory(orphan).existsSync(), isFalse);
+      await eventually(
+        () => !Directory(orphan).existsSync(),
+        reason: 'orphan temporary folder removed',
+      );
       expect(Directory(active).existsSync(), isTrue);
       expect(File('$active\\a.bin').readAsBytesSync(), content(95, 90 * kib));
       run.held.send(job.tree.frames[1]);
