@@ -7,6 +7,8 @@ import 'package:nexus_bridges_core/src/transfer/folder_walk.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_folder_io.dart';
 import 'package:test/test.dart';
 
+import 'receiver_harness.dart' show realFs;
+
 Future<Directory> scratch() async {
   final dir = await Directory.systemTemp.createTemp('nexus_list_');
   addTearDown(() async {
@@ -19,7 +21,7 @@ Future<Directory> scratch() async {
       }
     }
   });
-  return dir;
+  return Directory((await realFs.realPath(dir.path))!);
 }
 
 List<String> namesOf(List<RawEntry> entries) =>
