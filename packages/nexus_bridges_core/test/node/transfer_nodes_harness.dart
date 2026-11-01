@@ -78,6 +78,12 @@ final class NodePicker implements FilePicker {
     folderCalls++;
     return nextFolder;
   }
+
+  @override
+  Future<List<String>> pickFiles() async => const [];
+
+  @override
+  Future<List<String>> pickFolders() async => const [];
 }
 
 final class FakeRevealer implements FolderRevealer {

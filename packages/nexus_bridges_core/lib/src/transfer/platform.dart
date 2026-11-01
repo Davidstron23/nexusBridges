@@ -114,6 +114,10 @@ abstract interface class FilePicker {
   Future<String?> pickFile();
 
   Future<String?> pickFolder({String? startIn});
+
+  Future<List<String>> pickFiles();
+
+  Future<List<String>> pickFolders();
 }
 
 abstract interface class FolderRevealer {

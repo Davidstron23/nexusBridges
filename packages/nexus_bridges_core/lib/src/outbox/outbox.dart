@@ -9,3 +9,4 @@ export 'selection.dart'
         QueueItemView,
         SelectionResult,
         SendQueuesView;
+export 'tray.dart' show SendTray, TrayAddResult, TrayItemView;

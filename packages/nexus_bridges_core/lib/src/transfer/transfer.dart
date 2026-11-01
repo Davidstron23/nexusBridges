@@ -587,7 +587,8 @@ final class TransferCoordinator {
     MarkFile? markFile,
     ClearHidden? clearHidden,
     this._log = _noLog,
-  }) : _revealer = revealer ?? const WindowsFolderRevealer() {
+  }) : _picker = picker,
+       _revealer = revealer ?? const WindowsFolderRevealer() {
     _pickers = PickerTracker(
       clock: clock,
       onChanged: (open, since) => _receiver.pickersChanged(open, since),
@@ -634,6 +635,10 @@ final class TransferCoordinator {
 
   final FolderRevealer _revealer;
 
+  final FilePicker _picker;
+
+  bool _multiPickerOpen = false;
+
   late final TransferReceiver _receiver;
 
   late final PickerTracker _pickers;
@@ -669,7 +674,7 @@ final class TransferCoordinator {
 
   TransferResultView? get lastReceived => _receiver.lastReceived;
 
-  bool get busy => _receiver.busy || _sender.sending;
+  bool get busy => _receiver.busy || sending;
 
   bool get pickerOpen => _pickers.isOpen;
 
@@ -770,7 +775,30 @@ final class TransferCoordinator {
 
   TransferResultView? get lastSent => _sender.lastSent;
 
-  bool get sending => _sender.sending;
+  bool get sending => _sender.sending || _multiPickerOpen;
+
+  Future<List<String>> pickFilesToSend() => _pickMany(_picker.pickFiles);
+
+  Future<List<String>> pickFoldersToSend() => _pickMany(_picker.pickFolders);
+
+  Future<List<String>> _pickMany(Future<List<String>> Function() pick) async {
+    if (_closed || _closing != null || _pickers.isOpen) return const [];
+    _multiPickerOpen = true;
+    _pickers.open();
+    _notify();
+    List<String> chosen = const [];
+    try {
+      chosen = await pick();
+    } catch (e) {
+      _log('multiple picker failed: ${e.runtimeType}');
+    } finally {
+      _multiPickerOpen = false;
+      _pickers.close();
+      _notify();
+    }
+    if (_closed || _closing != null) return const [];
+    return chosen;
+  }
 
   Future<SendStart> sendFile(
     SendTarget target, {
