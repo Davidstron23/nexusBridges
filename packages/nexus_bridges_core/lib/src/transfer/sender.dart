@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -31,6 +32,7 @@ import 'names.dart'
         visibleFileName;
 import 'platform.dart';
 import 'transfer.dart';
+import 'windows_folder_io.dart' show fileIsLinkedUnder;
 
 const Duration _pollMargin = Duration(seconds: 3);
 
@@ -48,6 +50,9 @@ Stream<List<int>> _slices(Uint8List data) async* {
     );
   }
 }
+
+Future<bool> _linkedToData(String filePath, String dataPath) =>
+    Isolate.run(() => fileIsLinkedUnder(filePath, dataPath));
 
 String _randomHex32() {
   final random = Random.secure();
@@ -77,6 +82,8 @@ final class _OutSession {
 
   final Completer<TransferResultView?> completion =
       Completer<TransferResultView?>();
+
+  final Set<Future<Object?>> cancels = {};
 
   FolderPlanJob? planJob;
 
@@ -509,8 +516,12 @@ final class TransferSender {
       record(TransferOutcome.protectedData);
       return null;
     }
-    if (_closed) return null;
     final isFolder = kind == FileSystemEntityType.directory;
+    if (!isFolder && dataReal != null && await _linkedToData(real, dataReal)) {
+      record(TransferOutcome.protectedData);
+      return null;
+    }
+    if (_closed) return null;
     if (!isValidFileName(name)) {
       record(TransferOutcome.invalidName, problemPath: isFolder ? name : null);
       return null;
@@ -608,7 +619,6 @@ final class TransferSender {
     );
     session.planJob = job;
     final result = await job.result;
-    session.planJob = null;
     if (session.done) return;
     switch (result) {
       case PlanCancelled():
@@ -617,7 +627,34 @@ final class TransferSender {
         session.problemPath = problemPath;
         _finish(session, outcome);
       case PlanReady(:final plan):
+        unawaited(_trackExcludedBytes(session, job));
         await _requestFolder(session, plan);
+    }
+  }
+
+  Future<void> _trackExcludedBytes(
+    _OutSession session,
+    FolderPlanJob job,
+  ) async {
+    try {
+      final measured = await job.excluded;
+      final summary = session.summary;
+      if (session.done || summary == null) return;
+      session.summary = FolderSummaryView(
+        files: summary.files,
+        folders: summary.folders,
+        totalBytes: summary.totalBytes,
+        excludedFolders: summary.excludedFolders,
+        excludedBytes: measured.bytes,
+        excludedBytesPartial: measured.partial,
+        linksOmitted: summary.linksOmitted,
+        protectedOmitted: summary.protectedOmitted,
+        blockedOmitted: summary.blockedOmitted,
+        containsPrograms: summary.containsPrograms,
+      );
+      _onChanged();
+    } catch (e) {
+      _log('excluded size failed: ${e.runtimeType}');
     }
   }
 
@@ -1210,7 +1247,13 @@ final class TransferSender {
       timeout: timeout,
     );
     _cancels.add(pending);
-    unawaited(pending.whenComplete(() => _cancels.remove(pending)));
+    session.cancels.add(pending);
+    unawaited(
+      pending.whenComplete(() {
+        _cancels.remove(pending);
+        session.cancels.remove(pending);
+      }),
+    );
     return pending;
   }
 
@@ -1243,7 +1286,24 @@ final class TransferSender {
     );
     _lastSent = result;
     _onChanged();
-    if (!session.completion.isCompleted) session.completion.complete(result);
+    _completeAfterCancels(session, result);
+  }
+
+  void _completeAfterCancels(_OutSession session, TransferResultView result) {
+    void complete() {
+      if (!session.completion.isCompleted) session.completion.complete(result);
+    }
+
+    if (session.cancels.isEmpty) {
+      complete();
+      return;
+    }
+    unawaited(
+      Future.wait<Object?>(session.cancels.toList())
+          .then<void>((_) {}, onError: (Object _) {})
+          .timeout(Limits.transferCancelTimeout, onTimeout: () {})
+          .whenComplete(complete),
+    );
   }
 
   Future<void> _keepGap(_OutSession session, Duration sentAt) {

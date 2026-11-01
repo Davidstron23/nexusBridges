@@ -593,6 +593,11 @@ Set<(int, int)> fileIdsUnder(String folderPath) {
 }
 
 (int, int)? _fileIdentity(String path) {
+  final full = _fileIdentityWithLinks(path);
+  return full == null ? null : (full.$1, full.$2);
+}
+
+(int, int, int)? _fileIdentityWithLinks(String path) {
   return using((arena) {
     final Win32Result(value: handle) = CreateFile(
       arena.pcwstr(extendedPath(path)),
@@ -614,9 +619,129 @@ Set<(int, int)> fileIdsUnder(String folderPath) {
       return (
         info.ref.dwVolumeSerialNumber,
         (info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow,
+        info.ref.nNumberOfLinks,
       );
     } finally {
       handle.close();
+    }
+  });
+}
+
+bool fileIsLinkedUnder(String filePath, String folderPath) {
+  final identity = _fileIdentityWithLinks(filePath);
+  if (identity == null) return true;
+  if (identity.$3 <= 1) return false;
+  return fileIdsUnder(folderPath).contains((identity.$1, identity.$2));
+}
+
+final class SendFileReader {
+  SendFileReader._(this._handle, this.size) : _count = calloc<Uint32>();
+
+  final HANDLE _handle;
+  final Pointer<Uint32> _count;
+  final int size;
+  bool _closed = false;
+
+  int read(Pointer<Uint8> buffer, int length) {
+    if (_closed) return -1;
+    final Win32Result(value: ok) = ReadFile(
+      _handle,
+      buffer,
+      length,
+      _count,
+      null,
+    );
+    return ok ? _count.value : -1;
+  }
+
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _handle.close();
+    calloc.free(_count);
+  }
+}
+
+HANDLE? _openForSend(Arena arena, String path, {required bool reparse}) {
+  final Win32Result(value: handle) = CreateFile(
+    arena.pcwstr(extendedPath(path)),
+    _genericRead,
+    FILE_SHARE_MODE(_shareAll),
+    null,
+    OPEN_EXISTING,
+    reparse
+        ? FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_REPARSE_POINT
+        : FILE_FLAG_SEQUENTIAL_SCAN,
+    null,
+  );
+  return handle.isValid ? handle : null;
+}
+
+bool _isTheFileFromPlan(
+  Arena arena,
+  HANDLE handle, {
+  required String path,
+  required int volume,
+  required int index,
+  required int size,
+}) {
+  final resolved = _finalPath(arena, handle);
+  if (resolved == null ||
+      resolved.toUpperCase() !=
+          stripExtendedPrefix(extendedPath(path)).toUpperCase()) {
+    return false;
+  }
+  final info = arena<BY_HANDLE_FILE_INFORMATION>();
+  final Win32Result(value: informed) = GetFileInformationByHandle(handle, info);
+  if (!informed) return false;
+  if ((info.ref.dwFileAttributes & _attributeDirectory) != 0) return false;
+  if (info.ref.dwVolumeSerialNumber != volume ||
+      ((info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow) != index) {
+    return false;
+  }
+  final length = arena<Int64>();
+  final Win32Result(value: sized) = GetFileSizeEx(handle, length);
+  return sized && length.value == size;
+}
+
+SendFileReader? openFileForSend({
+  required String path,
+  required int volume,
+  required int index,
+  required int size,
+}) {
+  return using((arena) {
+    var handle = _openForSend(arena, path, reparse: true);
+    if (handle == null) return null;
+    var keep = false;
+    try {
+      final info = arena<BY_HANDLE_FILE_INFORMATION>();
+      final Win32Result(value: informed) = GetFileInformationByHandle(
+        handle,
+        info,
+      );
+      if (!informed) return null;
+      if ((info.ref.dwFileAttributes & _attributeReparse) != 0) {
+        final tag = _folderReparseTag(arena, handle);
+        if (tag == null || isLinkTag(tag)) return null;
+        handle.close();
+        handle = _openForSend(arena, path, reparse: false);
+        if (handle == null) return null;
+      }
+      if (!_isTheFileFromPlan(
+        arena,
+        handle,
+        path: path,
+        volume: volume,
+        index: index,
+        size: size,
+      )) {
+        return null;
+      }
+      keep = true;
+      return SendFileReader._(handle, size);
+    } finally {
+      if (!keep && handle != null) handle.close();
     }
   });
 }
