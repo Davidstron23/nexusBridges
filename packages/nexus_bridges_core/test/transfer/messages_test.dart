@@ -475,6 +475,13 @@ void main() {
         TransferOutcome.incompatible,
         TransferOutcome.noContact,
         TransferOutcome.unconfirmed,
+        TransferOutcome.shortcut,
+        TransferOutcome.wholeDrive,
+        TransferOutcome.protectedData,
+        TransferOutcome.notFound,
+        TransferOutcome.tooManyEntries,
+        TransferOutcome.tooDeep,
+        TransferOutcome.tooLargeForPeer,
       });
     });
 

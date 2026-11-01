@@ -589,6 +589,19 @@ final class AppStringsEs implements AppStrings {
     TransferOutcome.unconfirmed =>
       'Se ha enviado todo, pero el otro equipo no lo ha confirmado: no se '
           'sabe si ha llegado.',
+    TransferOutcome.shortcut => 'Los accesos directos no se envían.',
+    TransferOutcome.wholeDrive =>
+      'No se pueden enviar unidades enteras, solo carpetas de dentro.',
+    TransferOutcome.protectedData =>
+      'Son datos de la propia app y nunca se envían.',
+    TransferOutcome.notFound => 'Ya no existe.',
+    TransferOutcome.tooManyEntries =>
+      'La carpeta tiene más de 100 000 elementos.',
+    TransferOutcome.tooDeep => 'La carpeta tiene más de 64 niveles.',
+    TransferOutcome.tooLargeForPeer =>
+      'La carpeta es demasiado grande para el otro equipo.',
+    TransferOutcome.unexpectedData =>
+      'El otro equipo mandó datos que no había anunciado.',
   };
 
   @override
@@ -647,6 +660,21 @@ final class AppStringsEs implements AppStrings {
       'Se ha cortado porque ha cambiado la conexión de red.',
     TransferOutcome.unconfirmed =>
       'Se ha enviado todo, pero no se ha confirmado.',
+    TransferOutcome.shortcut =>
+      'Se rechazó porque no se aceptan accesos directos.',
+    TransferOutcome.wholeDrive =>
+      'Se rechazó porque no se aceptan unidades enteras.',
+    TransferOutcome.protectedData =>
+      'Se rechazó porque los datos de NexusBridges nunca se envían.',
+    TransferOutcome.notFound => 'Ya no existía en el otro equipo.',
+    TransferOutcome.tooManyEntries =>
+      'Se rechazó porque la carpeta tiene más de 100 000 elementos.',
+    TransferOutcome.tooDeep =>
+      'Se rechazó porque la carpeta tiene más de 64 niveles.',
+    TransferOutcome.tooLargeForPeer =>
+      'Se rechazó porque la carpeta es demasiado grande.',
+    TransferOutcome.unexpectedData =>
+      'Se cortó porque llegaron datos que no se habían anunciado.',
   };
 
   @override

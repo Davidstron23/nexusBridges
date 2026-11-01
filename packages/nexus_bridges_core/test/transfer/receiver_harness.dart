@@ -154,6 +154,19 @@ final class TransferPlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<FreeNameMove> moveFolderToFreeName(
+    String from,
+    String folder,
+    String name, {
+    required int maxNameUnits,
+  }) => realFs.moveFolderToFreeName(
+    from,
+    folder,
+    name,
+    maxNameUnits: maxNameUnits,
+  );
+
+  @override
   Future<bool> markFromInternet(String filePath) {
     final fake = mark;
     return fake == null ? realFs.markFromInternet(filePath) : fake(filePath);

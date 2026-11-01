@@ -70,6 +70,36 @@ bool _isDiskFull(FileSystemException error) {
   return code == _errorDiskFull || code == _errorHandleDiskFull;
 }
 
+Future<({String folder, bool created})> ensureTempFolder(
+  ReceiveTarget target,
+  FileSystemPlatform fs,
+) async {
+  final folder = _join(target.path, tempFolderName);
+  var created = false;
+  try {
+    final kind = await FileSystemEntity.type(folder, followLinks: false);
+    if (kind == FileSystemEntityType.notFound) {
+      await Directory(folder).create();
+      created = true;
+    } else if (kind != FileSystemEntityType.directory) {
+      throw const FileSystemException('The temporary folder is not a folder');
+    }
+    final realFolder = await fs.realPath(folder);
+    if (realFolder == null || !samePath(realFolder, folder)) {
+      throw const FileSystemException(
+        'The temporary folder is not inside the receive folder',
+      );
+    }
+    try {
+      await fs.setHidden(folder);
+    } catch (_) {}
+    return (folder: folder, created: created);
+  } catch (_) {
+    if (created) await _deleteIfEmpty(folder);
+    rethrow;
+  }
+}
+
 final class IncomingFileWriter {
   IncomingFileWriter._(
     this._target,
@@ -111,25 +141,10 @@ final class IncomingFileWriter {
         writeAllBytes,
     Sha256Stream Function() startDigest = startSha256,
   }) async {
-    final folder = _join(target.path, tempFolderName);
-    var createdFolder = false;
+    final prepared = await ensureTempFolder(target, fs);
+    final folder = prepared.folder;
+    final createdFolder = prepared.created;
     try {
-      final kind = await FileSystemEntity.type(folder, followLinks: false);
-      if (kind == FileSystemEntityType.notFound) {
-        await Directory(folder).create();
-        createdFolder = true;
-      } else if (kind != FileSystemEntityType.directory) {
-        throw const FileSystemException('The temporary folder is not a folder');
-      }
-      final realFolder = await fs.realPath(folder);
-      if (realFolder == null || !samePath(realFolder, folder)) {
-        throw const FileSystemException(
-          'The temporary folder is not inside the receive folder',
-        );
-      }
-      try {
-        await fs.setHidden(folder);
-      } catch (_) {}
       final tempPath = _join(folder, '$tempPrefix${_randomHex32()}$tempSuffix');
       final file = await File(tempPath).open(mode: FileMode.writeOnly);
       return IncomingFileWriter._(
@@ -263,7 +278,7 @@ final class IncomingFileWriter {
             finalPath: _join(_target.path, finalName),
             marked: marked,
           );
-        case MoveFailed():
+        case MoveFailed() || NameTooLong():
           return await _fail(TransferOutcome.moveFailed);
         case NoFreeName():
           return await _fail(TransferOutcome.noFreeName);

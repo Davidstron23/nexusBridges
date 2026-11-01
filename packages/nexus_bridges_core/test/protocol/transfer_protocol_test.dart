@@ -98,8 +98,8 @@ void main() {
       expect(Limits.maxTransferBodyBytes, lessThan(Limits.maxBodyBytes));
     });
 
-    test('the protocol version stays at 1.0', () {
-      expect(protocolVersion, '1.0');
+    test('the protocol version is 1.1', () {
+      expect(protocolVersion, '1.1');
     });
   });
 

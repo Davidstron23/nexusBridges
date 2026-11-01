@@ -58,6 +58,10 @@ final class MoveFailed extends FreeNameMove {
   const MoveFailed();
 }
 
+final class NameTooLong extends FreeNameMove {
+  const NameTooLong();
+}
+
 abstract interface class FileSystemPlatform {
   Future<String?> realPath(String path);
 
@@ -74,6 +78,13 @@ abstract interface class FileSystemPlatform {
   Future<MoveOutcome> moveNoReplace(String from, String to);
 
   Future<FreeNameMove> moveToFreeName(String from, String folder, String name);
+
+  Future<FreeNameMove> moveFolderToFreeName(
+    String from,
+    String folder,
+    String name, {
+    required int maxNameUnits,
+  });
 
   Future<bool> markFromInternet(String filePath);
 

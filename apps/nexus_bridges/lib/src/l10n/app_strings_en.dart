@@ -576,6 +576,18 @@ final class AppStringsEn implements AppStrings {
     TransferOutcome.unconfirmed =>
       "Everything was sent, but the other device didn't confirm it: it's not "
           'known whether it arrived.',
+    TransferOutcome.shortcut => 'Shortcuts are not sent.',
+    TransferOutcome.wholeDrive =>
+      "Whole drives can't be sent, only folders inside them.",
+    TransferOutcome.protectedData =>
+      "This is NexusBridges' own data and is never sent.",
+    TransferOutcome.notFound => 'It no longer exists.',
+    TransferOutcome.tooManyEntries => 'The folder has more than 100,000 items.',
+    TransferOutcome.tooDeep => 'The folder has more than 64 levels.',
+    TransferOutcome.tooLargeForPeer =>
+      'The folder is too big for the other device.',
+    TransferOutcome.unexpectedData =>
+      "The other device sent data it hadn't announced.",
   };
 
   @override
@@ -633,6 +645,21 @@ final class AppStringsEn implements AppStrings {
       'It was cut because the network connection changed.',
     TransferOutcome.unconfirmed =>
       "Everything was sent, but it wasn't confirmed.",
+    TransferOutcome.shortcut =>
+      "It was rejected because shortcuts aren't accepted.",
+    TransferOutcome.wholeDrive =>
+      "It was rejected because whole drives aren't accepted.",
+    TransferOutcome.protectedData =>
+      "It was rejected because NexusBridges' own data is never sent.",
+    TransferOutcome.notFound => 'It no longer existed on the other device.',
+    TransferOutcome.tooManyEntries =>
+      'It was rejected because the folder has more than 100,000 items.',
+    TransferOutcome.tooDeep =>
+      'It was rejected because the folder has more than 64 levels.',
+    TransferOutcome.tooLargeForPeer =>
+      'It was rejected because the folder is too big.',
+    TransferOutcome.unexpectedData =>
+      "It was cut because data arrived that hadn't been announced.",
   };
 
   @override

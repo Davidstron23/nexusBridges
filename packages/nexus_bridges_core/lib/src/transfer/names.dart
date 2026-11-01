@@ -256,3 +256,37 @@ String baseName(String windowsPath) {
   final cut = windowsPath.lastIndexOf(RegExp(r'[\\/]'));
   return cut < 0 ? windowsPath : windowsPath.substring(cut + 1);
 }
+
+String? candidateFolderName(String name, int n) {
+  if (n == 0) return name;
+  final suffix = ' ($n)';
+  final room = Limits.maxFileNameUnits - suffix.length;
+  if (room < 1) return null;
+  if (name.length <= room) return '$name$suffix';
+  final kept = StringBuffer();
+  var units = 0;
+  for (final rune in name.runes) {
+    final width = rune > 0xFFFF ? 2 : 1;
+    if (units + width > room) break;
+    kept.writeCharCode(rune);
+    units += width;
+  }
+  final trimmed = kept.toString().replaceFirst(_trailingDotsAndSpaces, '');
+  if (trimmed.isEmpty) return null;
+  return '$trimmed$suffix';
+}
+
+final RegExp _driveRootPattern = RegExp(
+  r'^(?:[A-Za-z]:\\?|\\\\\?\\[A-Za-z]:\\?|\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\?)$',
+);
+
+bool isDriveRoot(String path) =>
+    _driveRootPattern.hasMatch(path.replaceAll('/', r'\'));
+
+bool isShortcutName(String name) => name.toLowerCase().endsWith('.lnk');
+
+bool isAppReservedName(String name) {
+  final upper = name.toUpperCase();
+  return upper == '.NEXUSBRIDGES-INCOMING' ||
+      upper.startsWith('~NEXUSBRIDGES-');
+}

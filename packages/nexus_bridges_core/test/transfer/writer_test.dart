@@ -182,6 +182,19 @@ final class FactsPlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<FreeNameMove> moveFolderToFreeName(
+    String from,
+    String folder,
+    String name, {
+    required int maxNameUnits,
+  }) => windowsFs.moveFolderToFreeName(
+    from,
+    folder,
+    name,
+    maxNameUnits: maxNameUnits,
+  );
+
+  @override
   Future<bool> markFromInternet(String filePath) {
     markCalls.add(filePath);
     final fact = markFact;

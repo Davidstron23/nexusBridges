@@ -48,6 +48,19 @@ final class _Platform implements FileSystemPlatform {
   ) => _real.moveToFreeName(from, folder, name);
 
   @override
+  Future<FreeNameMove> moveFolderToFreeName(
+    String from,
+    String folder,
+    String name, {
+    required int maxNameUnits,
+  }) => _real.moveFolderToFreeName(
+    from,
+    folder,
+    name,
+    maxNameUnits: maxNameUnits,
+  );
+
+  @override
   Future<bool> markFromInternet(String filePath) =>
       _real.markFromInternet(filePath);
 
