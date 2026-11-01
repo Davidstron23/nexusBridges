@@ -8,9 +8,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  checks:
+  core:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v7
 
@@ -24,23 +32,12 @@ jobs:
 
       # One pub get at the root resolves the whole workspace.
       - run: flutter pub get
-      - run: dart format --output=none --set-exit-if-changed .
-      - run: flutter analyze
 
       - name: Test nexus_bridges_core
-        run: dart test
+        run: dart test --total-shards 4 --shard-index ${{ matrix.shard }}
         working-directory: packages/nexus_bridges_core
 
-      - name: Test the app
-        run: flutter test
-        working-directory: apps/nexus_bridges
-
-      - name: Build the Windows app
-        run: flutter build windows --release
-        working-directory: apps/nexus_bridges
-
-  installer:
-    needs: checks
+  app:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -49,7 +46,33 @@ jobs:
         with:
           channel: stable
           flutter-version-file: apps/nexus_bridges/pubspec.yaml
-          # No cache: restoring it took longer than installing Flutter (measured on 2026-10-20).
+
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze
+
+      - name: Test the app
+        run: flutter test
+        working-directory: apps/nexus_bridges
+
+  checks:
+    needs: [core, app]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every test job passed
+        run: |
+          [ "${{ needs.core.result }}" = "success" ] && [ "${{ needs.app.result }}" = "success" ]
+
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version-file: apps/nexus_bridges/pubspec.yaml
 
       - name: Install Inno Setup
         run: choco install innosetup -y
