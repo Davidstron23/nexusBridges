@@ -747,6 +747,29 @@ void main() {
       expect(await isProgramHere('x.chm', fs), isTrue);
       expect(await isProgramHere('x.txt', fs), isFalse);
     });
+
+    test('dangerousExtensions answers the dangerous ones of a set in one '
+        'call', () async {
+      expect(
+        await fs.dangerousExtensions({'.exe', '.txt', '.pif', '.pdf', '.hta'}),
+        {'.exe', '.pif', '.hta'},
+      );
+      expect(await fs.dangerousExtensions(<String>{}), isEmpty);
+      expect(await fs.dangerousExtensions({'.txt', '.png'}), isEmpty);
+    });
+
+    test('dangerousExtensions agrees with isDangerousType for odd '
+        'extensions and never throws', () async {
+      final odd = {'', '.', '.${'x' * 249}', '.${'y' * 40000}'};
+      final batch = await fs.dangerousExtensions(odd);
+      for (final extension in odd) {
+        expect(
+          batch.contains(extension),
+          await fs.isDangerousType(extension),
+          reason: extension.length.toString(),
+        );
+      }
+    });
   });
 
   group('E192, RF-145, RF-214: moveToFreeName checks the name again', () {

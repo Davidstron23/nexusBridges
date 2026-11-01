@@ -12,6 +12,8 @@ import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
 import 'package:nexus_bridges_core/src/transfer/folders.dart'
     show tempFolderName;
+import 'package:nexus_bridges_core/src/transfer/folder_writer.dart'
+    show ClearHidden, MarkFile;
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:test/test.dart';
@@ -274,6 +276,10 @@ final class TransferStack {
     WriteBytes? writeBytes,
     String Function(String base)? receiveChild,
     List<ActiveInterface> extraInterfaces = const [],
+    Future<void> Function(int entry)? beforeStreamEntry,
+    FolderRevealer? revealer,
+    MarkFile? markFile,
+    ClearHidden? clearHidden,
   }) async {
     final root = await transferFolder('nexus_t11_');
     final base = (await realFs.realPath(root.path))!;
@@ -341,6 +347,10 @@ final class TransferStack {
       idleTimeout: idleTimeout,
       confirmTimeout: confirmTimeout,
       writeBytes: writeBytes ?? writeAllBytes,
+      beforeStreamEntry: beforeStreamEntry,
+      revealer: revealer,
+      markFile: markFile,
+      clearHidden: clearHidden,
       log: stack.logs.add,
     );
     stack.coordinator.changes.listen((_) {

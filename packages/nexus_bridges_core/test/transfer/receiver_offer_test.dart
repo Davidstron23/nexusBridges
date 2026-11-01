@@ -81,17 +81,11 @@ void main() {
           ApiPaths.transferWait,
           ApiPaths.transferCancel,
         });
-        final expected = {
-          ApiPaths.transferOffer: 30,
-          ApiPaths.transferWait: 120,
-          ApiPaths.transferCancel: 30,
-        };
-        for (final entry in expected.entries) {
-          final route = byPath[entry.key]!;
+        for (final route in byPath.values) {
           expect(route.access, RouteAccess.paired);
           expect(route.maxBodyBytes, 8192);
           expect(route.limit, isNotNull);
-          expect(route.limit!.maxPerWindow, entry.value);
+          expect(route.limit!.maxPerWindow, 300);
           expect(route.limit!.window, const Duration(minutes: 1));
           expect(route.limit!.block, const Duration(minutes: 1));
         }
@@ -633,6 +627,7 @@ void main() {
         final permit = expectAccepted(await s.offer(laptop));
         permits.add(permit);
         s.coordinator.cancelIncoming(s.sid);
+        s.clock.advance(const Duration(seconds: 1));
       }
       expect(permits, hasLength(1000));
       for (final permit in permits) {

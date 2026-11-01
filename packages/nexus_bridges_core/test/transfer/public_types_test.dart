@@ -395,6 +395,55 @@ void main() {
       }, result);
     });
 
+    test('M-3: containsGitRepository is false by default and takes part in '
+        'the equality of both views', () {
+      const incomingPlain = IncomingTransferView(
+        sessionId: 'S1',
+        peerFingerprint: 'F1',
+        peerName: null,
+        fileName: 'a',
+        size: 1,
+        isProgram: false,
+        stage: IncomingStage.warning,
+      );
+      const incomingGit = IncomingTransferView(
+        sessionId: 'S1',
+        peerFingerprint: 'F1',
+        peerName: null,
+        fileName: 'a',
+        size: 1,
+        isProgram: false,
+        stage: IncomingStage.warning,
+        containsGitRepository: true,
+      );
+      const resultPlain = TransferResultView(
+        direction: TransferDirection.incoming,
+        peerFingerprint: 'F1',
+        peerName: null,
+        fileName: 'a',
+        isProgram: false,
+        outcome: TransferOutcome.saved,
+        canReveal: true,
+      );
+      const resultGit = TransferResultView(
+        direction: TransferDirection.incoming,
+        peerFingerprint: 'F1',
+        peerName: null,
+        fileName: 'a',
+        isProgram: false,
+        outcome: TransferOutcome.saved,
+        canReveal: true,
+        containsGitRepository: true,
+      );
+
+      expect(incomingPlain.containsGitRepository, isFalse);
+      expect(resultPlain.containsGitRepository, isFalse);
+      expect(incomingGit, isNot(incomingPlain));
+      expect(incomingGit.hashCode, isNot(incomingPlain.hashCode));
+      expect(resultGit, isNot(resultPlain));
+      expect(resultGit.hashCode, isNot(resultPlain.hashCode));
+    });
+
     test('SendTarget, comparing the addresses by value', () {
       expectSame(target(), target());
       expectDifferent({

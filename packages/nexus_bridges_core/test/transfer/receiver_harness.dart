@@ -78,7 +78,18 @@ final class TransferPlatform implements FileSystemPlatform {
   Future<void> Function(String method, String path)? hold;
   Future<bool> Function(String filePath)? mark;
   Future<FreeNameMove> Function(String from, String folder, String name)? move;
+  Future<FreeNameMove> Function(
+    String from,
+    String folder,
+    String name,
+    int maxNameUnits,
+  )?
+  moveFolder;
+  Future<Set<String>> Function(Set<String> extensions)? dangerousBatch;
+  Future<void> Function(String path)? deleteTreeHook;
+  final List<String> deletedTrees = [];
   final List<String> dangerousAsked = [];
+  final List<Set<String>> dangerousBatches = [];
   final List<String> calls = [];
   int volumeCalls = 0;
   int freeCalls = 0;
@@ -159,12 +170,17 @@ final class TransferPlatform implements FileSystemPlatform {
     String folder,
     String name, {
     required int maxNameUnits,
-  }) => realFs.moveFolderToFreeName(
-    from,
-    folder,
-    name,
-    maxNameUnits: maxNameUnits,
-  );
+  }) {
+    final fake = moveFolder;
+    return fake == null
+        ? realFs.moveFolderToFreeName(
+            from,
+            folder,
+            name,
+            maxNameUnits: maxNameUnits,
+          )
+        : fake(from, folder, name, maxNameUnits);
+  }
 
   @override
   Future<bool> markFromInternet(String filePath) {
@@ -173,9 +189,28 @@ final class TransferPlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<bool> deleteTree(String path) async {
+    deletedTrees.add(path);
+    final wait = deleteTreeHook;
+    if (wait != null) await wait(path);
+    return realFs.deleteTree(path);
+  }
+
+  @override
   Future<bool> isDangerousType(String extension) {
     dangerousAsked.add(extension);
     return dangerous(extension);
+  }
+
+  @override
+  Future<Set<String>> dangerousExtensions(Set<String> extensions) async {
+    dangerousBatches.add(Set<String>.of(extensions));
+    final batch = dangerousBatch;
+    if (batch != null) return batch(extensions);
+    return {
+      for (final extension in extensions)
+        if (await dangerous(extension)) extension,
+    };
   }
 }
 
@@ -525,10 +560,11 @@ final class ReceiverStack {
     required Stream<List<int>> body,
     SecurityContext? context,
     Duration timeout = const Duration(seconds: 20),
+    String path = ApiPaths.transferUpload,
   }) => postStream(
     address: loopback,
     port: port,
-    path: ApiPaths.transferUpload,
+    path: path,
     headers: headers,
     contentLength: contentLength,
     body: body,

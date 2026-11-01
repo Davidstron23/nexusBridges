@@ -379,6 +379,10 @@ final class AppStringsEs implements AppStrings {
   String get programLabel => 'Es un programa';
 
   @override
+  String get containsGitRepository =>
+      'contiene un repositorio Git, que puede ejecutar código al abrirlo';
+
+  @override
   String preparingFile(String file) => 'Preparando $file…';
 
   @override

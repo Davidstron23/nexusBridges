@@ -534,12 +534,27 @@ void main() {
       for (final name in [
         '${chars([0x1F468, 0x200D, 0x1F469])}.png',
         '${chars([0x0645, 0x200C, 0x062E])}.txt',
-        '${chars([0x05E9, 0x200F])}.txt',
         '${chars([0x2764, 0xFE0F])}.txt',
-        'a${ch(0x200E)}b.txt',
       ]) {
         expect(isValidFileName(name), isTrue);
         expect(visibleFileName(name), name);
+      }
+    });
+
+    test('B-3: LRM, RLM and ALM keep a name valid but are not displayed', () {
+      final hebrew = chars([0x05E9, 0x05DC, 0x05D5, 0x05DD]);
+      final cases = {
+        '$hebrew${ch(0x200F)}.txt': '$hebrew.txt',
+        'a${ch(0x200E)}b.txt': 'ab.txt',
+        'a${ch(0x061C)}b.txt': 'ab.txt',
+        '${ch(0x200F)}${ch(0x200E)}${ch(0x061C)}x': 'x',
+      };
+      for (final MapEntry(key: name, value: shown) in cases.entries) {
+        expect(isValidFileName(name), isTrue, reason: name);
+        expect(visibleFileName(name), shown, reason: name);
+        for (final mark in [0x200E, 0x200F, 0x061C]) {
+          expect(visibleFileName(name).contains(ch(mark)), isFalse);
+        }
       }
     });
 
@@ -784,7 +799,8 @@ void main() {
     });
 
     test('the allowed characters stay the same in the visible name', () {
-      for (final name in valid.values) {
+      for (final MapEntry(key: label, value: name) in valid.entries) {
+        if (label == 'U+061C inside') continue;
         expect(visibleFileName(name), name);
       }
     });

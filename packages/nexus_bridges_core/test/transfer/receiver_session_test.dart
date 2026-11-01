@@ -704,7 +704,7 @@ void main() {
         final ids = [for (var i = 0; i < 300; i++) newTransferId()];
         for (var i = 0; i < ids.length; i += 6) {
           final replies = await Future.wait([
-            for (final id in ids.skip(i).take(6)) s.cancel(portatil, id),
+            for (final id in ids.skip(i).take(6)) s.cancel(laptop, id),
           ]);
           for (final reply in replies) {
             expectState(reply, cancelled);
@@ -717,7 +717,7 @@ void main() {
         var kept = 0;
         for (final id in ids) {
           final reply = await wait.handle(
-            callFrom(portatil, ApiPaths.transferWait, {'transfer': id}),
+            callFrom(laptop, ApiPaths.transferWait, {'transfer': id}),
           );
           if (reply.status == 200) {
             kept++;

@@ -15,14 +15,16 @@ import 'names.dart'
         isValidFileName;
 import 'platform.dart';
 import 'windows_folder_io.dart'
-    show extendedPath, isDangerousTypeSync, stripExtendedPrefix;
+    show
+        dangerousExtensionsSync,
+        deleteTreeNoFollowSync,
+        extendedPath,
+        isDangerousTypeSync,
+        stripExtendedPrefix;
 
-const int _moved = -2;
-const int _lostCode = -1;
-const int _errorAccessDenied = 5;
-const int _errorSharingViolation = 32;
-const int _errorFileExists = 80;
-const int _errorAlreadyExists = 183;
+const int _stepMoved = 0;
+const int _stepTaken = 1;
+const int _stepAgain = 2;
 const int _hresultMoreData = 0x800700EA;
 const int _invalidFileAttributes = 0xFFFFFFFF;
 const int _finalPathChars = 32768;
@@ -140,8 +142,18 @@ final class WindowsFileSystemPlatform implements FileSystemPlatform {
   }
 
   @override
+  Future<bool> deleteTree(String path) =>
+      _inIsolate<bool>(() => deleteTreeNoFollowSync(path), false);
+
+  @override
   Future<bool> isDangerousType(String extension) =>
       _inIsolate<bool>(() => isDangerousTypeSync(extension), false);
+
+  @override
+  Future<Set<String>> dangerousExtensions(Set<String> extensions) {
+    final asked = Set<String>.of(extensions);
+    return _inIsolate<Set<String>>(() => dangerousExtensionsSync(asked), asked);
+  }
 }
 
 Future<T> _inIsolate<T>(T Function() work, T fallback) async {
@@ -384,29 +396,18 @@ MoveOutcome _moveNoReplaceSync(
   final target = extendedPath(to);
   var retry = 0;
   while (true) {
-    final int code = using((arena) {
-      final Win32Result(:value, error: lastError) = MoveFileEx(
+    final int step = using((arena) {
+      final Win32Result(:value) = MoveFileEx(
         arena.pcwstr(source),
         arena.pcwstr(target),
         const MOVE_FILE_FLAGS(0),
       );
-      if (value) return _moved;
-      final unknown = lastError == 0;
-      if ((unknown || lastError == _errorAccessDenied) &&
-          _pathExists(arena, target)) {
-        return _errorAlreadyExists;
-      }
-      return unknown ? _lostCode : lastError;
+      if (value) return _stepMoved;
+      return _pathExists(arena, target) ? _stepTaken : _stepAgain;
     });
-    if (code == _moved) return MoveOutcome.moved;
-    if (code == _errorFileExists || code == _errorAlreadyExists) {
-      return MoveOutcome.nameTaken;
-    }
-    final retryable =
-        code == _errorSharingViolation ||
-        code == _errorAccessDenied ||
-        code == _lostCode;
-    if (!retryable || retry >= waits.length) {
+    if (step == _stepMoved) return MoveOutcome.moved;
+    if (step == _stepTaken) return MoveOutcome.nameTaken;
+    if (retry >= waits.length) {
       return MoveOutcome.failed;
     }
     sleep(waits[retry]);

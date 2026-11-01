@@ -247,6 +247,24 @@ bool isDangerousTypeSync(String extension) {
   }
 }
 
+Set<String> dangerousExtensionsSync(Set<String> extensions) {
+  try {
+    final library = DynamicLibrary.open('shlwapi.dll');
+    final query = library
+        .lookupFunction<_AssocIsDangerousNative, _AssocIsDangerous>(
+          'AssocIsDangerous',
+        );
+    return using(
+      (arena) => {
+        for (final extension in extensions)
+          if (query(arena.pcwstr(extension)) != 0) extension,
+      },
+    );
+  } catch (_) {
+    return Set<String>.of(extensions);
+  }
+}
+
 final class RawEntry {
   const RawEntry({
     required this.name,
@@ -962,9 +980,14 @@ bool _deleteDirectory(Arena arena, String path, String extended) {
   return value;
 }
 
-bool verifyTree(String root, int expectedEntries) {
+bool verifyTree(
+  String root,
+  int expectedEntries, {
+  bool Function()? isCancelled,
+}) {
   var count = 0;
   bool walk(String folder) {
+    if (isCancelled != null && isCancelled()) return false;
     final List<RawEntry> entries;
     try {
       entries = listDirectorySync(folder);

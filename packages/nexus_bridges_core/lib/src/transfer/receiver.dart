@@ -15,9 +15,15 @@ import 'folders.dart';
 import 'manifest.dart';
 import 'messages.dart';
 import 'names.dart'
-    show isBlockedType, isProgram, isValidFileName, visibleFileName;
+    show
+        isAppReservedName,
+        isBlockedType,
+        isProgram,
+        isValidFileName,
+        visibleFileName;
 import 'pickers.dart';
 import 'platform.dart';
+import 'rate_limits.dart';
 import 'recent_rejections.dart';
 import 'transfer.dart';
 import 'writer.dart';
@@ -54,31 +60,9 @@ const ApiReply _uploadForbidden = ApiReply(403, {'error': 'forbidden'});
 
 const ApiReply _tooLarge = ApiReply(413, {'error': 'too_large'});
 
-const RouteLimit _offerLimit = RouteLimit(
-  maxPerWindow: Limits.transferOffersPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
+const ApiReply _rateLimited = ApiReply(429, {'error': 'rate_limited'});
 
-const RouteLimit _waitLimit = RouteLimit(
-  maxPerWindow: Limits.transferPollsPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
-
-const RouteLimit _cancelLimit = RouteLimit(
-  maxPerWindow: Limits.transferCancelsPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
-
-const RouteLimit _uploadLimit = RouteLimit(
-  maxPerWindow: Limits.transferUploadsPerMinute,
-  window: Duration(minutes: 1),
-  block: Limits.routeBlock,
-);
-
-const RouteLimit _manifestLimit = RouteLimit(
+const RouteLimit _transferRouteLimit = RouteLimit(
   maxPerWindow: Limits.mineTransferRequestsPerMinute,
   window: Duration(minutes: 1),
   block: Limits.routeBlock,
@@ -161,6 +145,8 @@ final class _InSession {
 
   bool manifestPermitUsed = false;
 
+  bool manifestDone = false;
+
   Duration? manifestAskedAt;
 
   Duration? manifestStartedAt;
@@ -176,6 +162,8 @@ final class _InSession {
   int? problemEntry;
 
   String? finalName;
+
+  bool moving = false;
 
   final String localId;
 
@@ -196,6 +184,8 @@ final class _InSession {
   final String sha256;
 
   bool isProgram;
+
+  bool containsGit = false;
 
   _InPhase phase = _InPhase.checking;
 
@@ -236,6 +226,8 @@ final class _InSession {
   Duration? lastPollAt;
 
   bool permitUsed = false;
+
+  bool uploadReserved = false;
 
   Duration? lastDataAt;
 
@@ -371,6 +363,8 @@ final class TransferReceiver {
     required this._log,
     this._writeBytes = writeAllBytes,
     this._idleTimeout = Limits.transferIdleTimeout,
+    this._markFile,
+    this._clearHidden,
   });
 
   final PairedDevicesStore _paired;
@@ -402,11 +396,19 @@ final class TransferReceiver {
 
   final Duration _idleTimeout;
 
+  final MarkFile? _markFile;
+
+  final ClearHidden? _clearHidden;
+
   late final RecentRejections _recentRejections = RecentRejections(
     clock: _clock,
   );
 
   late final RecentRejections _recentNoSpace = RecentRejections(clock: _clock);
+
+  late final TransferRateLimiter _limiter = TransferRateLimiter(clock: _clock);
+
+  final Map<String, PeerRelation> _seenRelations = {};
 
   final Map<(String, String), _Record> _records = {};
 
@@ -432,6 +434,8 @@ final class TransferReceiver {
 
   final Set<Future<void>> _cleanups = {};
 
+  final Set<String> _discardingTemps = {};
+
   SystemFolders? _systemFolders;
 
   Future<SystemFolders>? _systemFoldersInFlight;
@@ -450,21 +454,21 @@ final class TransferReceiver {
       access: RouteAccess.paired,
       handle: _handleOffer,
       maxBodyBytes: Limits.maxTransferBodyBytes,
-      limit: _offerLimit,
+      limit: _transferRouteLimit,
     ),
     ApiRoute(
       path: ApiPaths.transferWait,
       access: RouteAccess.paired,
       handle: _handleWait,
       maxBodyBytes: Limits.maxTransferBodyBytes,
-      limit: _waitLimit,
+      limit: _transferRouteLimit,
     ),
     ApiRoute(
       path: ApiPaths.transferCancel,
       access: RouteAccess.paired,
       handle: _handleCancel,
       maxBodyBytes: Limits.maxTransferBodyBytes,
-      limit: _cancelLimit,
+      limit: _transferRouteLimit,
     ),
   ]);
 
@@ -472,12 +476,12 @@ final class TransferReceiver {
     ApiUploadRoute(
       path: ApiPaths.transferUpload,
       handle: _handleUpload,
-      limit: _uploadLimit,
+      limit: _transferRouteLimit,
     ),
     ApiUploadRoute(
       path: ApiPaths.transferManifest,
       handle: _handleManifest,
-      limit: _manifestLimit,
+      limit: _transferRouteLimit,
     ),
   ]);
 
@@ -524,7 +528,8 @@ final class TransferReceiver {
           moreFirstLevel: manifest == null
               ? 0
               : manifest.firstLevelCount - firstLevel.length,
-          canCancel: session.phase != _InPhase.finishing,
+          canCancel: _canCancelNow(session),
+          containsGitRepository: session.containsGit,
         );
       }
     }
@@ -574,40 +579,84 @@ final class TransferReceiver {
     }
   }
 
+  bool _canCutFinishing(_InSession session) =>
+      session.phase == _InPhase.finishing &&
+      session.folderOffer != null &&
+      !session.moving;
+
+  bool _canCancelNow(_InSession session) =>
+      session.phase != _InPhase.finishing || _canCutFinishing(session);
+
+  bool _cutBeforeMove(_InSession session, TransferOutcome outcome) {
+    if (!_canCutFinishing(session)) return false;
+    _end(session, outcome, cut: false);
+    return true;
+  }
+
   void cancelIncoming(String sessionId) {
     final session = _active;
     if (_closed ||
         session == null ||
         session.localId != sessionId ||
-        !session.exposed ||
-        (session.phase != _InPhase.accepted &&
-            session.phase != _InPhase.uploading)) {
+        !session.exposed) {
       return;
     }
-    _end(session, TransferOutcome.cancelledHere);
+    switch (session.phase) {
+      case _InPhase.accepted || _InPhase.uploading:
+        _end(session, TransferOutcome.cancelledHere);
+      case _InPhase.finishing:
+        _cutBeforeMove(session, TransferOutcome.cancelledHere);
+      case _InPhase.checking ||
+          _InPhase.warning ||
+          _InPhase.folderQuestion ||
+          _InPhase.awaitingManifest ||
+          _InPhase.readingManifest ||
+          _InPhase.ended:
+        break;
+    }
   }
 
   void interfacesChanged(Set<String> activeInterfaceIds) {
     final session = _active;
     if (_closed || session == null) return;
-    if (session.phase == _InPhase.finishing) return;
     if (activeInterfaceIds.contains(session.via)) return;
+    if (session.phase == _InPhase.finishing) {
+      _cutBeforeMove(session, TransferOutcome.interfaceDown);
+      return;
+    }
     _end(session, TransferOutcome.interfaceDown);
   }
 
   void pairedChanged() {
+    if (_closed) return;
+    for (final fingerprint in List<String>.of(_seenRelations.keys)) {
+      final device = _paired.deviceOf(fingerprint);
+      if (device == null) {
+        _forgetRelation(fingerprint);
+      } else {
+        _noteRelation(fingerprint, device.relation);
+      }
+    }
     final session = _active;
-    if (_closed || session == null) return;
-    if (session.phase == _InPhase.finishing) return;
+    if (session == null) return;
     if (_paired.deviceOf(session.fingerprint) != null) return;
-    _end(session, TransferOutcome.unpaired);
+    _endUnpaired(session);
   }
 
   void peerUnpaired(String fingerprint) {
+    if (_closed) return;
+    _forgetRelation(fingerprint);
     final session = _active;
-    if (_closed || session == null) return;
-    if (session.phase == _InPhase.finishing) return;
+    if (session == null) return;
     if (session.fingerprint != fingerprint) return;
+    _endUnpaired(session);
+  }
+
+  void _endUnpaired(_InSession session) {
+    if (session.phase == _InPhase.finishing) {
+      _cutBeforeMove(session, TransferOutcome.unpaired);
+      return;
+    }
     _end(session, TransferOutcome.unpaired);
   }
 
@@ -640,7 +689,9 @@ final class TransferReceiver {
         case _InPhase.accepted || _InPhase.uploading:
           _end(session, TransferOutcome.cancelledHere);
         case _InPhase.finishing:
-          finishing = session;
+          if (!_cutBeforeMove(session, TransferOutcome.cancelledHere)) {
+            finishing = session;
+          }
         case _InPhase.ended:
           break;
       }
@@ -699,16 +750,40 @@ final class TransferReceiver {
 
   Future<void> _sweepFolder(String path, {String? journalPath}) async {
     try {
-      final clean = await sweepTemps(path, _fs, keep: _activeTemps());
+      final clean = await sweepTemps(
+        path,
+        _fs,
+        keep: _activeTemps(),
+        deferTree: (tree) => _deleteTreeLater(path, tree, journalPath),
+      );
       if (clean) await _journal.remove(journalPath ?? path);
     } catch (e) {
       _log('temp cleanup failed: ${e.runtimeType}');
     }
   }
 
+  void _deleteTreeLater(String folder, String tree, String? journalPath) {
+    if (_closed) return;
+    _discardingTemps.add(tree);
+    _track(() async {
+      try {
+        await _fs.deleteTree(tree);
+      } finally {
+        _discardingTemps.remove(tree);
+      }
+      if (_closed || _active != null) return;
+      final sub = _joinPath(folder, tempFolderName);
+      await _removeIfEmpty(sub);
+      if (await FileSystemEntity.type(sub, followLinks: false) ==
+          FileSystemEntityType.notFound) {
+        await _journal.remove(journalPath ?? folder);
+      }
+    });
+  }
+
   Set<String> _activeTemps() {
     final path = _active?.tempPath;
-    return path == null ? const {} : {path};
+    return {?path, ..._discardingTemps};
   }
 
   void pickersChanged(bool open, Duration since) {
@@ -959,18 +1034,19 @@ final class TransferReceiver {
 
   ApiReply? _limitReply(_InSession session, ReceiveTarget target) {
     final folderOffer = session.folderOffer;
+    final manifest = session.manifest;
     final tooLong = folderOffer == null
         ? _exceedsFinalPath(target.path, session.name)
         : !folderFitsIn(
             targetPath: target.path,
             folderName: session.name,
-            longest: folderOffer.longest,
+            longest: manifest?.longest ?? folderOffer.longest,
           );
     if (tooLong) {
       _end(session, TransferOutcome.pathTooLong);
       return _pathTooLong;
     }
-    if (!hasRoomFor(target.freeBytes, session.size)) {
+    if (!hasRoomFor(target.freeBytes, manifest?.totalBytes ?? session.size)) {
       final throttled = _recentNoSpace.blocks(session.fingerprint);
       if (throttled && !session.exposed) {
         _end(session, TransferOutcome.noSpace, register: false);
@@ -1194,6 +1270,66 @@ final class TransferReceiver {
     return cut <= 0 ? null : path.substring(0, cut);
   }
 
+  void _noteRelation(String fingerprint, PeerRelation relation) {
+    final previous = _seenRelations[fingerprint];
+    _seenRelations[fingerprint] = relation;
+    if (previous != null && previous != relation) {
+      _limiter.relationChanged(fingerprint, previous, relation);
+    }
+  }
+
+  void _forgetRelation(String fingerprint) {
+    _seenRelations.remove(fingerprint);
+    _limiter.forget(fingerprint);
+  }
+
+  bool _reserve(
+    String fingerprint,
+    TransferRoute route,
+    PeerRelation relation,
+  ) {
+    _noteRelation(fingerprint, relation);
+    final verdict = _limiter.check(fingerprint, route, relation);
+    if (verdict == RateVerdict.limited) {
+      _log('transfer ${route.name} rate limited');
+    }
+    return verdict == RateVerdict.allowed;
+  }
+
+  bool _hasRoomFor(
+    String fingerprint,
+    PeerRelation relation, {
+    required bool folder,
+  }) {
+    _noteRelation(fingerprint, relation);
+    return _limiter.hasRoom(fingerprint, TransferRoute.upload, relation) &&
+        (!folder ||
+            _limiter.hasRoom(fingerprint, TransferRoute.manifest, relation));
+  }
+
+  ApiReply _decide(_InSession session, {bool cut = true}) {
+    if (!session.uploadReserved) {
+      final device = _paired.deviceOf(session.fingerprint);
+      if (device != null) {
+        if (!_reserve(
+          session.fingerprint,
+          TransferRoute.upload,
+          device.relation,
+        )) {
+          _end(
+            session,
+            TransferOutcome.cancelledByPeer,
+            register: false,
+            cut: cut,
+          );
+          return _rateLimited;
+        }
+        session.uploadReserved = true;
+      }
+    }
+    return _offerReply(session, _advance(session, defer: true));
+  }
+
   Future<ApiReply> _handleOffer(ApiCall call) async {
     if (_closed) return _unavailable;
     _InSession? session;
@@ -1216,6 +1352,9 @@ final class TransferReceiver {
     if (fingerprint == null) return (refusal: _unauthorized, session: null);
     final device = _paired.deviceOf(fingerprint);
     if (device == null) return (refusal: _unauthorized, session: null);
+    if (!_reserve(fingerprint, TransferRoute.offer, device.relation)) {
+      return (refusal: _rateLimited, session: null);
+    }
     if (!device.permissions.contains(Permission.receive)) {
       return (refusal: _declined, session: null);
     }
@@ -1238,19 +1377,22 @@ final class TransferReceiver {
     if (_recordOf(fingerprint, transferId)?.tombstone ?? false) {
       return (refusal: _cancelled, session: null);
     }
-    if (!isValidFileName(name)) {
+    if (!isValidFileName(name) ||
+        (folderRequest != null && isAppReservedName(name))) {
       return (refusal: _invalidName, session: null);
     }
     if (isBlockedType(name)) {
       return (refusal: _blockedType, session: null);
     }
-    if (folderRequest != null) {
-      if (folderRequest.exceedsLimits) {
-        return (refusal: _tooLarge, session: null);
-      }
-      if (device.relation != PeerRelation.mine) {
-        return (refusal: _incompatible, session: null);
-      }
+    if (folderRequest != null && folderRequest.exceedsLimits) {
+      return (refusal: _tooLarge, session: null);
+    }
+    if (!_hasRoomFor(
+      fingerprint,
+      device.relation,
+      folder: folderRequest != null,
+    )) {
+      return (refusal: _rateLimited, session: null);
     }
     final session = _InSession(
       localId: _randomHex32(),
@@ -1297,10 +1439,6 @@ final class TransferReceiver {
       if (inspection is FolderUsable) target = inspection.target;
       if (_gone(session)) return _cancelled;
     }
-    if (isFolder && target == null) {
-      _end(session, TransferOutcome.cancelledByPeer, register: false);
-      return _incompatible;
-    }
     var proposal = remembered?.path;
     var proposalLost = false;
     if (proposal == null) {
@@ -1321,10 +1459,20 @@ final class TransferReceiver {
       ..target = target
       ..proposedPath = proposal;
     if (isFolder) return _askManifest(session);
-    return _offerReply(session, _advance(session, defer: true));
+    return _decide(session);
   }
 
   ApiReply _askManifest(_InSession session) {
+    final device = _paired.deviceOf(session.fingerprint);
+    if (device != null &&
+        !_reserve(
+          session.fingerprint,
+          TransferRoute.manifest,
+          device.relation,
+        )) {
+      _end(session, TransferOutcome.cancelledByPeer, register: false);
+      return _rateLimited;
+    }
     final permit = _randomHex32();
     session
       ..manifestPermit = permit
@@ -1587,14 +1735,37 @@ final class TransferReceiver {
         );
         return ApiReply(reply.status, {'error': reply.error});
       case ManifestBroken():
+        _noteUnfinishedManifest(session);
         _end(session, TransferOutcome.cancelledByPeer, register: false);
         return _internal;
       case ManifestComplete(:final manifest):
         session
           ..manifest = manifest
+          ..manifestDone = true
           ..upload = null;
-        return _offerReply(session, _advance(session, defer: true));
+        session.containsGit =
+            (manifest.containsGitEntry ||
+                session.name.toLowerCase() == '.git') &&
+            _paired.deviceOf(session.fingerprint)?.relation ==
+                PeerRelation.foreign;
+        session.isProgram = await manifestHasPrograms(manifest, _fs);
+        if (_gone(session)) return _cancelled;
+        final target = session.target;
+        if (target != null) {
+          final refusal = _limitReply(session, target);
+          if (refusal != null) return refusal;
+        }
+        return _decide(session, cut: false);
     }
+  }
+
+  void _noteUnfinishedManifest(_InSession session) {
+    if (session.manifestDone) return;
+    if (session.phase != _InPhase.awaitingManifest &&
+        session.phase != _InPhase.readingManifest) {
+      return;
+    }
+    _noteForeignRejection(session.fingerprint);
   }
 
   Future<ApiReply> _runUpload(_InSession session, ApiUpload upload) async {
@@ -1722,6 +1893,8 @@ final class TransferReceiver {
           tempFolder: prepared.folder,
           manifest: manifest,
           supportsMark: target.supportsMark,
+          markFile: _markFile,
+          clearHidden: _clearHidden,
           onProgress: (files, bytes) => _folderProgress(session, files, bytes),
           onActivity: () => session.lastDataAt = _clock(),
           onFailure: (failure) => _folderFailure(session, failure),
@@ -1733,8 +1906,7 @@ final class TransferReceiver {
         return null;
       }
       if (session.phase != _InPhase.uploading) {
-        await host.discard();
-        await _releaseFolderTemp(target);
+        _discardFolder(host, target);
         return null;
       }
       return host;
@@ -1773,6 +1945,7 @@ final class TransferReceiver {
     _signal(session);
     _onChanged();
     Future<ApiReply> fail(TransferOutcome outcome, {int? entry}) async {
+      if (session.phase != _InPhase.finishing) return _uploadReply(session);
       session.folderWriter = null;
       session.problemEntry = entry;
       try {
@@ -1792,15 +1965,18 @@ final class TransferReceiver {
       _log('incoming folder finish failed: ${e.runtimeType}');
       written = const FolderWriteFailed(TransferOutcome.writeFailed);
     }
+    if (session.phase != _InPhase.finishing) return _uploadReply(session);
     if (written is FolderWriteFailed) {
       return fail(written.outcome, entry: written.entry);
     }
     final declared = session.folderOffer;
     if (declared == null) return fail(TransferOutcome.writeFailed);
-    if (!isValidFileName(session.name)) {
+    if (!isValidFileName(session.name) || isAppReservedName(session.name)) {
       return fail(TransferOutcome.invalidName);
     }
     if (isBlockedType(session.name)) return fail(TransferOutcome.blockedType);
+    session.moving = true;
+    _onChanged();
     FreeNameMove moved;
     try {
       moved = await _fs.moveFolderToFreeName(
@@ -1985,6 +2161,13 @@ final class TransferReceiver {
       }
       return;
     }
+    if (previous == _InPhase.finishing) {
+      final target = session.target;
+      if (folderWriter != null && target != null) {
+        _discardFolder(folderWriter, target);
+      }
+      return;
+    }
     if (previous != _InPhase.uploading) return;
     if (cut && upload != null) {
       try {
@@ -2001,11 +2184,21 @@ final class TransferReceiver {
       });
     }
     if (folderWriter != null && target != null) {
-      _track(() async {
-        await folderWriter.discard();
-        await _releaseFolderTemp(target);
-      });
+      _discardFolder(folderWriter, target);
     }
+  }
+
+  void _discardFolder(FolderWriterHost host, ReceiveTarget target) {
+    final temp = host.tempRoot;
+    _discardingTemps.add(temp);
+    _track(() async {
+      try {
+        await host.discard();
+        await _releaseFolderTemp(target);
+      } finally {
+        _discardingTemps.remove(temp);
+      }
+    });
   }
 
   Future<void> _forgetJournal(ReceiveTarget target) async {
@@ -2031,10 +2224,15 @@ final class TransferReceiver {
   }
 
   Future<ApiReply> _wait(ApiCall call) async {
-    final request = WaitRequest.tryParse(call.json);
-    if (request == null) return _incompatible;
     final fingerprint = call.clientFingerprint;
     if (fingerprint == null) return _unauthorized;
+    final device = _paired.deviceOf(fingerprint);
+    if (device == null) return _unauthorized;
+    if (!_reserve(fingerprint, TransferRoute.wait, device.relation)) {
+      return _rateLimited;
+    }
+    final request = WaitRequest.tryParse(call.json);
+    if (request == null) return _incompatible;
     final session = _activeFor(fingerprint, request.transfer);
     if (session == null) {
       final record = _recordOf(fingerprint, request.transfer);
@@ -2073,10 +2271,15 @@ final class TransferReceiver {
   }
 
   Future<ApiReply> _cancel(ApiCall call) async {
-    final request = CancelRequest.tryParse(call.json);
-    if (request == null) return _incompatible;
     final fingerprint = call.clientFingerprint;
     if (fingerprint == null) return _unauthorized;
+    final device = _paired.deviceOf(fingerprint);
+    if (device == null) return _unauthorized;
+    if (!_reserve(fingerprint, TransferRoute.cancel, device.relation)) {
+      return _rateLimited;
+    }
+    final request = CancelRequest.tryParse(call.json);
+    if (request == null) return _incompatible;
     final session = _activeFor(fingerprint, request.transfer);
     if (session == null) {
       final record = _recordOf(fingerprint, request.transfer);
@@ -2104,36 +2307,39 @@ final class TransferReceiver {
         if (request.reason == CancelReason.noContact) {
           _withdrawByPeer(session);
         } else {
-          _end(
-            session,
-            request.reason == CancelReason.unreadable
-                ? TransferOutcome.unreadable
-                : TransferOutcome.cancelledByPeer,
-          );
+          _noteProblemEntry(session, request);
+          _end(session, _outcomeOfCancel(request));
         }
       case _InPhase.uploading:
-        final entry = request.entry;
-        final manifest = session.manifest;
-        if (request.reason == CancelReason.unreadable &&
-            entry != null &&
-            manifest != null &&
-            entry >= 1 &&
-            entry <= manifest.length &&
-            !manifest.isFolder(entry)) {
-          session.problemEntry = entry;
-        }
-        _end(
-          session,
-          request.reason == CancelReason.unreadable
-              ? TransferOutcome.unreadable
-              : TransferOutcome.cancelledByPeer,
-        );
+        _noteProblemEntry(session, request);
+        _end(session, _outcomeOfCancel(request));
       case _InPhase.finishing:
-        await session.finished.future;
+        if (_canCutFinishing(session)) _noteProblemEntry(session, request);
+        if (!_cutBeforeMove(session, _outcomeOfCancel(request))) {
+          await session.finished.future;
+        }
       case _InPhase.ended:
         break;
     }
     return ApiReply(200, _stateOf(session).toJson());
+  }
+
+  TransferOutcome _outcomeOfCancel(CancelRequest request) =>
+      request.reason == CancelReason.unreadable
+      ? TransferOutcome.unreadable
+      : TransferOutcome.cancelledByPeer;
+
+  void _noteProblemEntry(_InSession session, CancelRequest request) {
+    final entry = request.entry;
+    final manifest = session.manifest;
+    if (request.reason == CancelReason.unreadable &&
+        entry != null &&
+        manifest != null &&
+        entry >= 1 &&
+        entry <= manifest.length &&
+        !manifest.isFolder(entry)) {
+      session.problemEntry = entry;
+    }
   }
 
   void _withdrawIfPending(_InSession session) {
@@ -2152,9 +2358,10 @@ final class TransferReceiver {
 
   void _withdrawByPeer(_InSession session) {
     switch (session.phase) {
-      case _InPhase.checking ||
-          _InPhase.awaitingManifest ||
-          _InPhase.readingManifest:
+      case _InPhase.checking:
+        _end(session, TransferOutcome.cancelledByPeer, register: false);
+      case _InPhase.awaitingManifest || _InPhase.readingManifest:
+        _noteUnfinishedManifest(session);
         _end(session, TransferOutcome.cancelledByPeer, register: false);
       case _InPhase.warning || _InPhase.folderQuestion || _InPhase.accepted:
         final wasExposed = session.exposed;
@@ -2177,10 +2384,12 @@ final class TransferReceiver {
   }
 
   void _tickManifest(_InSession session, Duration now) {
+    if (session.manifestDone) return;
     switch (session.phase) {
       case _InPhase.awaitingManifest:
         final askedAt = session.manifestAskedAt ?? session.arrivedAt;
         if (now - askedAt >= Limits.transferManifestStartTimeout) {
+          _noteUnfinishedManifest(session);
           _end(session, TransferOutcome.cancelledByPeer, register: false);
         }
       case _InPhase.readingManifest:
@@ -2197,6 +2406,7 @@ final class TransferReceiver {
             );
         if (now - lastDataAt >= Limits.manifestIdleTimeout ||
             now - startedAt >= cap) {
+          _noteUnfinishedManifest(session);
           _end(session, TransferOutcome.cancelledByPeer, register: false);
         }
       default:
@@ -2292,6 +2502,7 @@ final class TransferReceiver {
         canReveal: finalPath != null,
         isFolder: folderOffer != null,
         fileCount: folderOffer?.files ?? 0,
+        containsGitRepository: session.containsGit,
         problemPath:
             manifest != null &&
                 problemEntry != null &&
@@ -2334,12 +2545,7 @@ final class TransferReceiver {
     switch (session.phase) {
       case _InPhase.checking || _InPhase.warning || _InPhase.folderQuestion:
         return RemoteState.waiting(picker: _pickers.isOpen);
-      case _InPhase.awaitingManifest:
-        final manifestPermit = session.manifestPermit;
-        return manifestPermit == null
-            ? const RemoteState.cancelled()
-            : RemoteState.manifest(permit: manifestPermit);
-      case _InPhase.readingManifest:
+      case _InPhase.awaitingManifest || _InPhase.readingManifest:
         return const RemoteState.waiting(picker: false);
       case _InPhase.accepted:
         final permit = session.permit;

@@ -512,6 +512,34 @@ final class ForgedPeer {
     at: at,
   );
 
+  Future<RawReply?> offerFolder(
+    FolderOfferRequest request, {
+    InternetAddress? at,
+  }) => post(ApiPaths.transferOffer, request.toJson(), at: at);
+
+  Future<StreamPostResult> manifest({
+    required String transfer,
+    required String permit,
+    required Uint8List bytes,
+    InternetAddress? at,
+  }) => postStream(
+    address: at ?? target.internetAddress,
+    port: target.port,
+    path: ApiPaths.transferManifest,
+    headers: {
+      TransferHeaders.transfer: transfer,
+      TransferHeaders.permit: permit,
+    },
+    contentLength: bytes.length,
+    body: chunksOf(bytes),
+    context: _context,
+    acceptServer: _acceptServer,
+    sourceAddress: from,
+    idleTimeout: const Duration(seconds: 30),
+    answerTimeout: const Duration(seconds: 30),
+    maxResponseBytes: Limits.maxTransferBodyBytes,
+  );
+
   Future<RawReply?> wait(String transfer) =>
       post(ApiPaths.transferWait, WaitRequest(transfer: transfer).toJson());
 

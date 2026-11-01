@@ -197,6 +197,9 @@ bool isProgram(String name) {
   return _programSuffixes.any((suffix) => lower.endsWith(suffix));
 }
 
+bool _isDirectionMark(int unit) =>
+    unit == 0x200E || unit == 0x200F || unit == 0x061C;
+
 String visibleFileName(String name) {
   final units = name.codeUnits;
   final result = StringBuffer();
@@ -220,6 +223,8 @@ String visibleFileName(String name) {
       i++;
     } else if (_isHighSurrogate(unit) || _isLowSurrogate(unit)) {
       result.write(_replacement);
+    } else if (_isDirectionMark(unit)) {
+      continue;
     } else {
       final character = String.fromCharCode(unit);
       result.write(

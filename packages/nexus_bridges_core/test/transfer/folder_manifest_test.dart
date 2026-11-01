@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
@@ -787,6 +788,135 @@ void main() {
 
       expect(manifest.firstLevel(), isEmpty);
       expect(manifest.firstLevelCount, 0);
+    });
+  });
+
+  group('M-2 and Q-2: the first level is computed once per manifest', () {
+    ManifestBuilder flat(int count) {
+      final builder = ManifestBuilder();
+      for (var i = 0; i < count; i++) {
+        builder.setFile(
+          builder.addFile(0, 'f${count - i}.txt', 1),
+          1,
+          Uint8List(32),
+        );
+      }
+      return builder;
+    }
+
+    test('100000 flat entries: 100 repeated reads take no time and give the '
+        'same list', () {
+      final manifest = flat(100000).build();
+      final first = manifest.firstLevel();
+
+      final watch = Stopwatch()..start();
+      for (var k = 0; k < 100; k++) {
+        expect(identical(manifest.firstLevel(), first), isTrue);
+        expect(manifest.firstLevelCount, 100000);
+      }
+      watch.stop();
+
+      expect(watch.elapsedMilliseconds, lessThan(50));
+      expect(first.map((item) => item.name), [
+        'f1.txt',
+        'f10.txt',
+        'f100.txt',
+        'f1000.txt',
+        'f10000.txt',
+      ]);
+    });
+
+    test('the first five come out the same as with a full sort, for random '
+        'names with mixed case', () {
+      final random = Random(7);
+      const letters = 'aAbBcCzZ_-.0123';
+      for (var round = 0; round < 40; round++) {
+        final builder = ManifestBuilder();
+        final seen = <String>{};
+        final count = 1 + random.nextInt(60);
+        while (seen.length < count) {
+          final name = String.fromCharCodes([
+            for (var k = 0; k < 1 + random.nextInt(4); k++)
+              letters.codeUnitAt(random.nextInt(letters.length)),
+          ]);
+          if (seen.add(name)) {
+            if (random.nextBool()) {
+              builder.addFolder(0, name);
+            } else {
+              builder.addFile(0, name, 1);
+            }
+          }
+        }
+        final manifest = builder.build();
+
+        expect(
+          manifest.firstLevel(),
+          manifest.firstLevel(max: count).take(5).toList(),
+          reason: 'round $round',
+        );
+        expect(manifest.firstLevelCount, count);
+      }
+    });
+
+    test('children of folders never count as first level', () {
+      final builder = ManifestBuilder();
+      final folder = builder.addFolder(0, 'zz');
+      builder.addFile(folder, 'aa', 1);
+      builder.addFile(folder, 'ab', 1);
+
+      final manifest = builder.build();
+
+      expect(manifest.firstLevelCount, 1);
+      expect(manifest.firstLevel().single.name, 'zz');
+    });
+  });
+
+  group('M-3: an entry named .git at any level', () {
+    bool hasGit(List<String> lines) {
+      final built = ManifestBuilder();
+      final folders = <int>[0];
+      for (final line in lines) {
+        final parts = line.split('|');
+        final parent = folders[int.parse(parts[0])];
+        if (parts[1] == 'd') {
+          folders.add(built.addFolder(parent, parts[2]));
+        } else {
+          built.addFile(parent, parts[2], 1);
+        }
+      }
+      return built.build().containsGitEntry;
+    }
+
+    test('at the first level, deep inside and in any case', () {
+      expect(hasGit(['0|d|.git']), isTrue);
+      expect(hasGit(['0|d|src', '1|d|vendor', '2|d|.git']), isTrue);
+      expect(hasGit(['0|d|.GIT']), isTrue);
+      expect(hasGit(['0|f|.git']), isTrue);
+      expect(hasGit(['0|d|a', '1|d|b', '2|f|.GIT']), isTrue);
+      expect(hasGit(['0|d|.Git']), isTrue);
+      expect(hasGit(['0|d|a', '1|d|.gIt', '2|f|HEAD']), isTrue);
+    });
+
+    test('look alikes are not a .git entry', () {
+      expect(hasGit(['0|d|.github']), isFalse);
+      expect(hasGit(['0|d|x.git']), isFalse);
+      expect(hasGit(['0|f|.gitignore']), isFalse);
+      expect(hasGit(['0|d|.git2']), isFalse);
+      expect(hasGit(['0|d|git']), isFalse);
+      expect(hasGit([]), isFalse);
+    });
+
+    test('a manifest read from the wire says the same', () {
+      final builder = ManifestBuilder();
+      final src = builder.addFolder(0, 'src');
+      builder.addFolder(src, '.git');
+      final built = builder.build();
+      final encoded = encodeManifest(built);
+
+      final result = readAll(encoded, declareFor(built, encoded));
+
+      expect(result.refusal, isNull);
+      expect(result.manifest!.containsGitEntry, isTrue);
     });
   });
 

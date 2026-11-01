@@ -12,6 +12,8 @@ const int _hashBytes = 32;
 const int _tempFolderUnits = 26;
 const int _maxPathUnits = 259;
 const int _frameOverhead = 13;
+const int _headSize = 5;
+const String _gitName = '.git';
 
 final RegExp _sha256Hex = RegExp(r'^[0-9a-f]{64}$');
 
@@ -102,9 +104,19 @@ final class FolderManifest {
     var sum = 0;
     var deepest = 0;
     var longestPath = 0;
+    var topLevel = 0;
+    var git = false;
     final indexes = <int>[];
     for (var i = 1; i < _c.count; i++) {
       final relative = _c.prefix[i] - 1;
+      if (_c.parent[i] == 0) {
+        topLevel++;
+        _offerToHead(i);
+      }
+      if (_c.names[i].length == _gitName.length &&
+          _c.names[i].toLowerCase() == _gitName) {
+        git = true;
+      }
       if (_c.isFile[i] == 1) {
         fileTotal++;
         sum += _c.size[i];
@@ -123,9 +135,22 @@ final class FolderManifest {
     depth = deepest;
     longest = longestPath;
     fileIndexes = Int32List.fromList(indexes);
+    firstLevelCount = topLevel;
+    containsGitEntry = git;
   }
 
   final _Columns _c;
+
+  final List<int> _headIndexes = [];
+
+  final List<String> _headKeys = [];
+
+  late final List<FirstLevelItem> _head = List.unmodifiable([
+    for (final i in _headIndexes) _itemOf(i),
+  ]);
+
+  late final int firstLevelCount;
+  late final bool containsGitEntry;
 
   late final int files;
   late final int folders;
@@ -170,6 +195,33 @@ final class FolderManifest {
     return parts.reversed.join(r'\');
   }
 
+  bool _precedes(String name, String key, int other, String otherKey) {
+    final byUpper = key.compareTo(otherKey);
+    return byUpper != 0 ? byUpper < 0 : name.compareTo(_c.names[other]) < 0;
+  }
+
+  void _offerToHead(int index) {
+    final name = _c.names[index];
+    final key = name.toUpperCase();
+    var at = _headIndexes.length;
+    while (at > 0 &&
+        _precedes(name, key, _headIndexes[at - 1], _headKeys[at - 1])) {
+      at--;
+    }
+    if (at >= _headSize) return;
+    _headIndexes.insert(at, index);
+    _headKeys.insert(at, key);
+    if (_headIndexes.length > _headSize) {
+      _headIndexes.removeLast();
+      _headKeys.removeLast();
+    }
+  }
+
+  FirstLevelItem _itemOf(int index) => FirstLevelItem(
+    name: visibleFileName(_c.names[index]),
+    isFolder: isFolder(index),
+  );
+
   List<int> _firstLevelIndexes() {
     final children = <int>[
       for (var i = 1; i < _c.count; i++)
@@ -184,17 +236,11 @@ final class FolderManifest {
     return children;
   }
 
-  List<FirstLevelItem> firstLevel({int max = 5}) => [
-    for (final i in _firstLevelIndexes().take(max))
-      FirstLevelItem(name: visibleFileName(_c.names[i]), isFolder: isFolder(i)),
-  ];
-
-  int get firstLevelCount {
-    var total = 0;
-    for (var i = 1; i < _c.count; i++) {
-      if (_c.parent[i] == 0) total++;
+  List<FirstLevelItem> firstLevel({int max = _headSize}) {
+    if (max <= _headSize) {
+      return max >= _head.length ? _head : _head.sublist(0, max < 0 ? 0 : max);
     }
-    return total;
+    return [for (final i in _firstLevelIndexes().take(max)) _itemOf(i)];
   }
 }
 
