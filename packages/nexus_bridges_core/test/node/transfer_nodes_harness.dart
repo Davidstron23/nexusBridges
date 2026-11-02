@@ -53,9 +53,12 @@ Future<int> _freeUdpPort() => pickPort(udp: [InternetAddress.anyIPv4]);
 final class NodePicker implements FilePicker {
   String? nextFile;
   String? nextFolder;
+  List<String>? nextFiles;
+  List<String> nextFolders = const [];
   Completer<void>? fileGate;
   int fileCalls = 0;
   int folderCalls = 0;
+  int multiFolderCalls = 0;
 
   void hold() => fileGate = Completer<void>();
 
@@ -84,12 +87,19 @@ final class NodePicker implements FilePicker {
     fileCalls++;
     final gate = fileGate;
     if (gate != null) await gate.future;
+    final files = nextFiles;
+    if (files != null) return List.of(files);
     final file = nextFile;
     return file == null ? const [] : [file];
   }
 
   @override
-  Future<List<String>> pickFolders() async => const [];
+  Future<List<String>> pickFolders() async {
+    multiFolderCalls++;
+    final gate = fileGate;
+    if (gate != null) await gate.future;
+    return List.of(nextFolders);
+  }
 }
 
 final class FakeRevealer implements FolderRevealer {
@@ -108,8 +118,19 @@ final class SlowWrites {
 
   Duration delay;
   int written = 0;
+  Completer<void>? gate;
+
+  void hold() => gate ??= Completer<void>();
+
+  void release() {
+    final current = gate;
+    gate = null;
+    if (current != null && !current.isCompleted) current.complete();
+  }
 
   Future<void> call(RandomAccessFile file, List<int> bytes) async {
+    final current = gate;
+    if (current != null) await current.future;
     if (delay > Duration.zero) await Future<void>.delayed(delay);
     await writeAllBytes(file, bytes);
     written += bytes.length;
@@ -533,4 +554,57 @@ Future<bool> tcpPortFree(InternetAddress address, int port) async {
   } on SocketException {
     return false;
   }
+}
+
+Future<(TransferNode, TransferNode, TransferNode)> transferTrio({
+  PeerRelation aAtB = PeerRelation.mine,
+  PeerRelation cAtB = PeerRelation.foreign,
+}) async {
+  const hosts = ['127.0.0.1', '127.0.0.2', '127.0.0.3'];
+  final port = await freeTcpPort(hosts: hosts);
+  final a = await TransferNode.create('Desk PC', hosts[0], port: port);
+  final b = await TransferNode.create('Laptop', hosts[1], port: port);
+  final c = await TransferNode.create('Tablet', hosts[2], port: port);
+  final trio = [a, b, c];
+  for (final node in trio) {
+    node.prefixLength = 29;
+  }
+  final idA = await a.loadIdentity();
+  final idB = await b.loadIdentity();
+  final idC = await c.loadIdentity();
+  await a.writePaired(idA, [
+    pairedEntryFor(idB, name: b.name, relation: PeerRelation.mine),
+    pairedEntryFor(idC, name: c.name, relation: PeerRelation.mine),
+  ]);
+  await b.writePaired(idB, [
+    pairedEntryFor(idA, name: a.name, relation: aAtB),
+    pairedEntryFor(idC, name: c.name, relation: cAtB),
+  ]);
+  await c.writePaired(idC, [
+    pairedEntryFor(idA, name: a.name, relation: PeerRelation.mine),
+    pairedEntryFor(idB, name: b.name, relation: PeerRelation.mine),
+  ]);
+  for (final node in trio) {
+    await node.rememberFolder();
+  }
+  await onFreshPorts(
+    () async {
+      for (final node in trio) {
+        await node.start();
+      }
+    },
+    reset: () async {
+      for (final node in trio) {
+        if (node._node != null) await node.stop();
+      }
+      final fresh = await freeTcpPort(hosts: hosts);
+      for (final node in trio) {
+        node.port = fresh;
+      }
+    },
+  );
+  await meet(a, b);
+  await meet(a, c);
+  await meet(b, c);
+  return (a, b, c);
 }

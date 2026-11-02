@@ -133,6 +133,93 @@ void main() {
     });
   });
 
+  group('E514: the root library exposes the queues, the tray and the send '
+      'results', () {
+    test('SendResult, TrayResult, SelectionProgress and the outbox views fit '
+        'in a NodeState', () {
+      const item = QueueItemView(
+        id: 'q1',
+        name: 'a.txt',
+        isFolder: false,
+        isArchive: false,
+        state: QueueItemState.done,
+        outcome: TransferOutcome.saved,
+      );
+      const queues = SendQueuesView(
+        selectionId: 1,
+        peerFingerprint: 'F',
+        peerName: 'PC',
+        loose: [item],
+        bundles: [],
+        finished: true,
+        delivered: 1,
+        total: 1,
+        completedBytes: 5,
+        pendingKnownBytes: 0,
+        currentProbeSize: null,
+      );
+      const progress = SelectionProgress(
+        selectionId: 1,
+        doneBytes: 5,
+        totalBytes: 5,
+        currentName: 'a.txt',
+        currentIsFolder: false,
+        finished: true,
+      );
+      const state = NodeState(
+        queues: queues,
+        tray: [TrayItemView(id: 't1', name: 'b', isFolder: true)],
+        sendingTo: 'F',
+        selectionProgress: progress,
+      );
+
+      expect(state.queues!.loose.single.state, QueueItemState.done);
+      expect(state.tray.single.isFolder, isTrue);
+      expect(state.selectionProgress!.doneBytes, 5);
+      expect(state.canSendTo('F'), isFalse);
+      expect(SendResult.values, [
+        SendResult.started,
+        SendResult.queued,
+        SendResult.nothingChosen,
+        SendResult.otherTargetBusy,
+        SendResult.tooMany,
+        SendResult.unavailable,
+      ]);
+      expect(TrayResult.values, [
+        TrayResult.added,
+        TrayResult.nothingNew,
+        TrayResult.tooMany,
+        TrayResult.unavailable,
+      ]);
+      expect(QueueItemState.values, [
+        QueueItemState.pending,
+        QueueItemState.inProgress,
+        QueueItemState.done,
+        QueueItemState.notSent,
+      ]);
+    });
+
+    test('from outbox it only shows the view types', () {
+      final exports = _exportsOf(_read('lib/src/node/node.dart'));
+
+      expect(exports['../outbox/outbox.dart'], {
+        'QueueItemState',
+        'QueueItemView',
+        'SendQueuesView',
+        'TrayItemView',
+      });
+    });
+
+    test('sendFile and SendFileResult are gone from the node', () {
+      final node = _read('lib/src/node/node.dart');
+      final state = _read('lib/src/node/node_state.dart');
+
+      expect(node, isNot(contains('sendFile(')));
+      expect(node, isNot(contains('SendFileResult')));
+      expect(state, isNot(contains('SendFileResult')));
+    });
+  });
+
   group('the export list of the node module', () {
     late Map<String, Set<String>?> exports;
 
