@@ -1,5 +1,8 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+
+#include <cstdio>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -27,6 +30,22 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  drop_view_ = flutter_controller_->view()->GetNativeWindow();
+  drop_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "nexus_bridges/drop",
+          &flutter::StandardMethodCodec::GetInstance());
+  drop_target_ = new DropTarget(drop_view_, drop_channel_.get());
+  const HRESULT drop_result = ::RegisterDragDrop(drop_view_, drop_target_);
+  if (SUCCEEDED(drop_result)) {
+    drop_registered_ = true;
+  } else {
+    std::fprintf(stderr, "RegisterDragDrop failed: 0x%08lx\n",
+                 static_cast<unsigned long>(drop_result));
+    drop_target_->Release();
+    drop_target_ = nullptr;
+  }
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +59,16 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  if (drop_registered_) {
+    ::RevokeDragDrop(drop_view_);
+    drop_registered_ = false;
+  }
+  if (drop_target_) {
+    drop_target_->Release();
+    drop_target_ = nullptr;
+  }
+  drop_channel_ = nullptr;
+
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

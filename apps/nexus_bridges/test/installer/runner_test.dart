@@ -4,6 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 const String _mainPath = 'windows/runner/main.cpp';
 const String _windowPath = 'windows/runner/win32_window.cpp';
+const String _flutterWindowPath = 'windows/runner/flutter_window.cpp';
+const String _dropTargetPath = 'windows/runner/drop_target.cpp';
+const String _dropTargetHeaderPath = 'windows/runner/drop_target.h';
+const String _cmakePath = 'windows/runner/CMakeLists.txt';
 
 const String _createMutex =
     r'::CreateMutexW(nullptr, TRUE, L"Local\\NexusBridges.SingleInstance")';
@@ -81,7 +85,7 @@ void main() {
     test('the mutex is created before COM, the console and the window', () {
       final mutex = _indexOf(source, 'CreateMutexW(');
       for (final later in [
-        'CoInitializeEx(',
+        'OleInitialize(',
         'AttachConsole(',
         'DartProject project(',
         'window.Create(',
@@ -366,6 +370,157 @@ void main() {
 
     test('the initial window size is still 1280 by 720', () {
       expect(source, contains('Win32Window::Size size(1280, 720);'));
+    });
+  });
+
+  group('E603: the runner receives files dropped from the Explorer', () {
+    late String mainSource;
+    late String flutterWindow;
+    late String dropTarget;
+    late String rawDropTarget;
+    late String rawDropHeader;
+    late String cmake;
+
+    setUpAll(() {
+      mainSource = _withoutLineComments(File(_mainPath).readAsStringSync());
+      flutterWindow = _withoutLineComments(
+        File(_flutterWindowPath).readAsStringSync(),
+      );
+      rawDropTarget = File(_dropTargetPath).readAsStringSync();
+      rawDropHeader = File(_dropTargetHeaderPath).readAsStringSync();
+      dropTarget = _withoutLineComments(rawDropTarget);
+      cmake = File(_cmakePath).readAsStringSync();
+    });
+
+    test('main.cpp starts and stops OLE once, in place of plain COM', () {
+      expect(_count(mainSource, '::OleInitialize(nullptr);'), 1);
+      expect(_count(mainSource, '::OleUninitialize();'), 1);
+      expect(mainSource.contains('CoInitializeEx('), isFalse);
+      expect(mainSource.contains('CoUninitialize('), isFalse);
+    });
+
+    test('OLE starts before the window exists and stops after the loop', () {
+      final init = _indexOf(mainSource, '::OleInitialize(');
+      expect(init, lessThan(_indexOf(mainSource, 'DartProject project(')));
+      expect(init, lessThan(_indexOf(mainSource, 'window.Create(')));
+      final loop = _indexOf(mainSource, '::GetMessage(');
+      expect(_indexOf(mainSource, '::OleUninitialize();'), greaterThan(loop));
+    });
+
+    test('the drop target is registered in OnCreate and revoked in '
+        'OnDestroy, once each', () {
+      expect(_count(flutterWindow, '::RegisterDragDrop('), 1);
+      expect(_count(flutterWindow, '::RevokeDragDrop('), 1);
+      final create = _indexOf(flutterWindow, 'FlutterWindow::OnCreate()');
+      final destroy = _indexOf(flutterWindow, 'FlutterWindow::OnDestroy()');
+      final register = _indexOf(flutterWindow, '::RegisterDragDrop(');
+      final revoke = _indexOf(flutterWindow, '::RevokeDragDrop(');
+      expect(register, inExclusiveRange(create, destroy));
+      expect(revoke, greaterThan(destroy));
+    });
+
+    test('the view is registered after it is created and revoked before '
+        'the controller is released', () {
+      final view = _indexOf(flutterWindow, 'SetChildContent(');
+      expect(_indexOf(flutterWindow, '::RegisterDragDrop('), greaterThan(view));
+      final destroy = _indexOf(flutterWindow, 'FlutterWindow::OnDestroy()');
+      final revoke = _indexOf(flutterWindow, '::RevokeDragDrop(', destroy);
+      final release = _indexOf(
+        flutterWindow,
+        'flutter_controller_ = nullptr;',
+        destroy,
+      );
+      expect(revoke, lessThan(release));
+    });
+
+    test('a failed registration is logged and the window keeps going', () {
+      final register = _indexOf(flutterWindow, '::RegisterDragDrop(');
+      final end = _indexOf(flutterWindow, 'return true;', register);
+      final block = flutterWindow.substring(register, end);
+      expect(block, contains('SUCCEEDED('));
+      expect(block, contains('stderr'));
+      expect(block.contains('return false'), isFalse);
+    });
+
+    test('the events travel on the nexus_bridges/drop channel', () {
+      expect(flutterWindow, contains('"nexus_bridges/drop"'));
+      expect(flutterWindow, contains('StandardMethodCodec::GetInstance()'));
+      for (final method in ['enter', 'over', 'leave', 'drop']) {
+        expect(dropTarget, contains('"$method"'), reason: method);
+      }
+    });
+
+    test('only lists of disk paths (CF_HDROP) are accepted', () {
+      expect(dropTarget, contains('CF_HDROP'));
+      expect(dropTarget, contains('QueryGetData('));
+      expect(dropTarget, contains('DROPEFFECT_NONE'));
+      expect(dropTarget, contains('DROPEFFECT_COPY'));
+      final enter = _indexOf(dropTarget, 'DropTarget::DragEnter(');
+      final query = _indexOf(dropTarget, 'OffersDiskPaths(data)', enter);
+      final notify = _indexOf(dropTarget, 'NotifyPoint("enter"', enter);
+      expect(query, lessThan(notify));
+    });
+
+    test('files extracted by the Explorer into a temporary folder are '
+        'ignored', () {
+      expect(dropTarget, contains('GetTempPathW('));
+      expect(dropTarget, contains('L"Temp"'));
+      expect(dropTarget, contains('iswdigit('));
+      expect(dropTarget, contains('InsideExtractionFolder('));
+    });
+
+    test('the real count and the length of every path come from '
+        'DragQueryFileW', () {
+      expect(
+        dropTarget,
+        contains('DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0)'),
+      );
+      expect(dropTarget, contains('DragQueryFileW(hdrop, i, nullptr, 0)'));
+      expect(dropTarget, contains('DragQueryFileW(hdrop, i, path.data()'));
+      expect(dropTarget, contains('constexpr UINT kMaxPaths = 1001;'));
+      expect(dropTarget, contains('std::min(count, kMaxPaths)'));
+      expect(dropTarget, contains('flutter::EncodableValue("count")'));
+      expect(dropTarget, contains('ReleaseStgMedium('));
+    });
+
+    test('the dropped items are never opened, run or logged', () {
+      for (final forbidden in [
+        'CreateFile',
+        'fopen',
+        'ifstream',
+        'ShellExecute',
+        'CreateProcess',
+        'GetFileAttributes',
+        'FindFirstFile',
+        'printf',
+        'cout',
+        'cerr',
+        'OutputDebugString',
+        'MoveFile',
+        'DeleteFile',
+      ]) {
+        expect(dropTarget.contains(forbidden), isFalse, reason: forbidden);
+      }
+    });
+
+    test('the target counts references and answers IDropTarget', () {
+      expect(dropTarget, contains('IID_IDropTarget'));
+      expect(dropTarget, contains('InterlockedIncrement('));
+      expect(dropTarget, contains('InterlockedDecrement('));
+      expect(dropTarget, contains('delete this;'));
+    });
+
+    test('CMake builds the target and links the system libraries', () {
+      expect(cmake, contains('"drop_target.cpp"'));
+      expect(cmake, contains('"ole32.lib"'));
+      expect(cmake, contains('"shell32.lib"'));
+    });
+
+    test('the new C++ files have no comments', () {
+      for (final source in [rawDropTarget, rawDropHeader]) {
+        expect(source.contains('//'), isFalse);
+        expect(source.contains('/*'), isFalse);
+      }
     });
   });
 }
