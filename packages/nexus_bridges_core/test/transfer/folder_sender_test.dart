@@ -17,8 +17,6 @@ import 'package:nexus_bridges_core/src/transfer/folder_stream.dart'
 import 'package:nexus_bridges_core/src/transfer/manifest.dart'
     show FolderManifest;
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
-import 'package:nexus_bridges_core/src/transport/transport.dart'
-    show AbortSignal;
 import 'package:test/test.dart';
 import 'package:win32/win32.dart';
 

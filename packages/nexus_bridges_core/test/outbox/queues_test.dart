@@ -242,17 +242,16 @@ void main() {
     });
 
     test(
-      'names go through displayName while the sent path stays the same',
+      'names go through visibleFileName while the sent path stays the same',
       () async {
-        h = Harness(
-          probes: {inA: file(1), inFolder: folder},
-          displayName: (name) => 'visible $name',
-        );
-        await h.submit([inFolder, inA]);
-        expect(h.looseNames, ['visible A.TXT']);
-        expect(h.bundleNames, ['visible Carpeta']);
+        const marked = 'C:\\in\\A\u200E.TXT';
+        const markedFolder = 'C:\\in\\Carpeta\u200F';
+        h = Harness(probes: {marked: file(1), markedFolder: folder});
+        await h.submit([markedFolder, marked]);
+        expect(h.looseNames, ['A.TXT']);
+        expect(h.bundleNames, ['Carpeta']);
         await until(() => h.sender.busy);
-        expect(h.sender.paths, [inA]);
+        expect(h.sender.paths, [marked]);
       },
     );
 

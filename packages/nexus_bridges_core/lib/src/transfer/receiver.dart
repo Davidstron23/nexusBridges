@@ -7,7 +7,6 @@ import '../pairing/pairing.dart'
     show PairedDevicesStore, PeerRelation, Permission;
 import '../protocol/protocol.dart';
 import '../server/server.dart';
-import '../transport/transport.dart' show AbortSignal;
 import 'decision.dart';
 import 'folder_intake.dart';
 import 'folder_writer.dart';

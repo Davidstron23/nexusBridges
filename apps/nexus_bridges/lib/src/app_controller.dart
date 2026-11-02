@@ -121,10 +121,10 @@ class AppController extends ChangeNotifier {
     return _node?.setMine(fingerprint, mine: mine) ?? Future<void>.value();
   }
 
-  Future<SendFileResult> sendFile(String fingerprint) async {
+  Future<SendResult> sendFile(String fingerprint) async {
     final node = _node;
-    if (node == null) return SendFileResult.unavailable;
-    return node.sendFile(fingerprint);
+    if (node == null) return SendResult.unavailable;
+    return node.sendFiles(fingerprint);
   }
 
   void cancelSending() {

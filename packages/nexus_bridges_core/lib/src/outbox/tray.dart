@@ -1,10 +1,9 @@
 import 'dart:async';
 
 import '../protocol/protocol.dart' show Limits;
+import '../transfer/transfer.dart' show visibleFileName;
 import 'policy.dart';
 import 'selection.dart';
-
-String _sameName(String name) => name;
 
 enum TrayAddResult { added, nothingNew, tooMany }
 
@@ -59,10 +58,9 @@ String _normalizePath(String path) {
 }
 
 final class SendTray {
-  SendTray({required this._probe, this._displayName = _sameName});
+  SendTray({required this._probe});
 
   final Future<ElementProbe> Function(String path) _probe;
-  final String Function(String name) _displayName;
 
   final StreamController<void> _changes = StreamController<void>.broadcast();
   final List<_TrayEntry> _entries = [];
@@ -112,7 +110,7 @@ final class SendTray {
         _TrayEntry(
           id: 't${++_counter}',
           path: path,
-          name: _displayName(baseNameOfPath(path)),
+          name: visibleFileName(baseNameOfPath(path)),
           isFolder: probe.kind == ElementKind.folder || isDriveRootPath(path),
         ),
       );

@@ -140,25 +140,15 @@ final class Harness {
   Harness({
     Map<String, ElementProbe>? probes,
     Duration gap = Duration.zero,
-    String Function(String name)? displayName,
     this.throwingProbes = const {},
   }) : probes = probes ?? {} {
-    queues = displayName == null
-        ? SendQueues(
-            sender: sender,
-            probe: _probe,
-            measureFolder: measure.call,
-            gap: gap,
-            log: logs.add,
-          )
-        : SendQueues(
-            sender: sender,
-            probe: _probe,
-            measureFolder: measure.call,
-            gap: gap,
-            log: logs.add,
-            displayName: displayName,
-          );
+    queues = SendQueues(
+      sender: sender,
+      probe: _probe,
+      measureFolder: measure.call,
+      gap: gap,
+      log: logs.add,
+    );
     _subscription = queues.changes.listen((_) => changes++);
   }
 

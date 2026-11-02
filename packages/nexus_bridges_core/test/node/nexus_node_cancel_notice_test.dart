@@ -10,7 +10,7 @@ final String _dot = String.fromCharCode(0x00B7);
 
 Future<Notice> _cancelOnce(TransferNode a, TransferNode b, String path) async {
   final before = b.state.notices.isEmpty ? -1 : b.state.notices.last.id;
-  expect(await a.send(b, path), SendFileResult.started);
+  expect(await a.send(b, path), SendResult.started);
   await b.incomingAt(IncomingStage.warning);
   a.node.cancelSending();
   await a.sentResult(after: a.state.lastSent);

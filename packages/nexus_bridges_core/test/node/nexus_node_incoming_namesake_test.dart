@@ -72,7 +72,7 @@ void main() {
       final mark = b.states.length;
       final path = await a.sourceFile('notes.txt', [1, 2, 3]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await b.incomingAt(IncomingStage.warning);
       expect(warning.peerFingerprint, a.fingerprint);
       expect(b.state.incomingNamesake, _laptopNfc);
@@ -96,7 +96,7 @@ void main() {
       final mark = b.states.length;
       final path = await a.sourceFile('report.txt', List<int>.filled(4096, 9));
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await b.incomingAt(IncomingStage.warning);
       expect(b.state.incomingNamesake, _laptopNfc);
       b.node.answerIncoming(warning.sessionId, accept: true);
@@ -122,7 +122,7 @@ void main() {
       final mark = b.states.length;
       final path = await a.sourceFile('nfd.txt', [4]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await b.incomingAt(IncomingStage.warning);
       expect(b.state.incomingNamesake, _laptopNfc);
 
@@ -143,7 +143,7 @@ void main() {
       final b = seeded.b;
       final path = await a.sourceFile('fold.txt', [5]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await b.incomingAt(IncomingStage.warning);
       expect(b.state.incomingNamesake, 'PORTATIL DE DAVID');
 
@@ -164,7 +164,7 @@ void main() {
       final mark = b.states.length;
       final path = await a.sourceFile('plain.txt', [6]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await b.incomingAt(IncomingStage.warning);
       expect(b.state.incomingNamesake, isNull);
 
@@ -189,7 +189,7 @@ void main() {
       final mark = b.states.length;
       final path = await a.sourceFile('mine.txt', [7]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final question = await b.incomingAt(IncomingStage.folderQuestion);
       expect(b.state.incomingNamesake, _laptopNfc);
 
@@ -211,7 +211,7 @@ void main() {
       final b = seeded.b;
       final path = await a.sourceFile('live.txt', [8]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await b.incomingAt(IncomingStage.warning);
       expect(b.state.incomingNamesake, _laptopNfc);
 

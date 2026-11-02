@@ -355,9 +355,9 @@ final class TransferNode {
     return path;
   }
 
-  Future<SendFileResult> sendTo(TransferNode to, String path) {
-    picker.next = path;
-    return node.sendFile(to.fingerprint);
+  Future<SendResult> sendTo(TransferNode to, String path) {
+    picker.nextMany = [path];
+    return node.sendFiles(to.fingerprint);
   }
 
   Future<TransferResultView> sentResult({

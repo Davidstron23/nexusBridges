@@ -15,7 +15,10 @@ import 'windows_file_system.dart' show WindowsFileSystemPlatform;
 import 'windows_shell.dart' show WindowsFolderRevealer;
 import 'writer.dart' show writeAllBytes;
 
+export '../transport/transport.dart' show AbortSignal;
+export 'folder_size.dart' show measureFolderSize;
 export 'journal.dart' show TempJournal;
+export 'names.dart' show visibleFileName;
 export 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
 export 'windows_file_system.dart' show WindowsFileSystemPlatform;
 export 'windows_shell.dart' show WindowsFilePicker;

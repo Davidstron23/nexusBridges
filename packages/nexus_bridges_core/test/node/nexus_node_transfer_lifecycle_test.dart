@@ -123,7 +123,7 @@ void main() {
       }
 
       final path = await a.sourceFile('first.txt', [1]);
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       expect((await a.sentResult()).outcome, TransferOutcome.saved);
       expect(File('${b.recvDir}\\first.txt').readAsBytesSync(), [1]);
     }, timeout: transferTimeout);
@@ -148,7 +148,7 @@ void main() {
       );
       final path = await a.sourceFile('later.txt', [6, 6]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final busy = await a.sentResult();
       expect(busy.outcome, TransferOutcome.busy);
       expect(b.state.incoming, isNull);
@@ -160,7 +160,7 @@ void main() {
         () => !Directory('$old\\$tempFolderName').existsSync(),
         reason: 'stale temp folder swept',
       );
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       expect((await a.sentResult(after: busy)).outcome, TransferOutcome.saved);
       expect(File('${b.recvDir}\\later.txt').readAsBytesSync(), [6, 6]);
     }, timeout: transferTimeout);
@@ -217,7 +217,7 @@ void main() {
 
       expect(a.state.transferInProgress, isFalse);
       expect(b.state.transferInProgress, isFalse);
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
       expect(a.state.transferInProgress, isTrue);
       expect(b.state.transferInProgress, isTrue);
@@ -248,7 +248,7 @@ void main() {
       b.writes.delay = const Duration(milliseconds: 40);
       final path = await _bigFile(a, 'big.bin');
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
 
       final took = await _timed(a.stop);
@@ -278,7 +278,7 @@ void main() {
       );
       final path = await a.sourceFile('doc.txt', [1, 2]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await b.incomingAt(IncomingStage.warning);
       expect(b.state.transferInProgress, isTrue);
       await Future<void>.delayed(const Duration(milliseconds: 1500));
@@ -306,7 +306,7 @@ void main() {
       );
       final path = await a.sourceFile('slow.txt', _bytes(5000));
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await marking.future.timeout(scaled(transferWait));
       await a.until(
         (s) => s.outgoing?.phase == OutgoingPhase.verifying,
@@ -341,7 +341,7 @@ void main() {
       );
       final path = await a.sourceFile('slow.txt', _bytes(5000));
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await marking.future.timeout(scaled(transferWait));
 
       final took = await _timed(b.stop);
@@ -375,7 +375,7 @@ void main() {
     withEarlierReception() async {
       final (a, b) = await transferNodes(aAtB: PeerRelation.foreign);
       final path = await a.sourceFile('earlier.txt', [1]);
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       b.node.answerIncoming(
         (await b.incomingAt(IncomingStage.warning)).sessionId,
         accept: true,
@@ -392,7 +392,7 @@ void main() {
       final (a, b, earlierSent, earlier) = await withEarlierReception();
       final path = await a.sourceFile('second.txt', [2]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await b.incomingAt(IncomingStage.warning);
       a.node.cancelSending();
 
@@ -419,7 +419,7 @@ void main() {
       final (a, b, _, earlier) = await withEarlierReception();
       final path = await a.sourceFile('second.txt', [2]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await b.incomingAt(IncomingStage.warning);
       await a.stop();
 
@@ -451,7 +451,7 @@ void main() {
       final mark = b.states.length;
       final path = await a.sourceFile('second.txt', [2]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await eventually(
         () => b.platform.volumeCalls > calls,
         reason: 'B checking the offer',
@@ -477,7 +477,7 @@ void main() {
       final (a, b) = await transferNodes(aAtB: PeerRelation.foreign);
       final path = await a.sourceFile('x.txt', [1]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await b.incomingAt(IncomingStage.warning);
       await a.node.unpair(b.fingerprint);
 
@@ -505,7 +505,7 @@ void main() {
       b.writes.delay = const Duration(milliseconds: 40);
       final path = await _bigFile(a, 'big.bin');
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
       await a.node.unpair(b.fingerprint);
 
@@ -535,7 +535,7 @@ void main() {
       final identityA = await a.loadIdentity();
       a.clock.followRealTime();
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
       expect(await _rawUnpair(identityA, from: a.address, target: b), 200);
 
@@ -555,7 +555,7 @@ void main() {
       b.writes.delay = const Duration(milliseconds: 40);
       final path = await _bigFile(a, 'big.bin');
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
       a.clock.followRealTime();
       await b.node.unpair(a.fingerprint);
@@ -582,7 +582,7 @@ void main() {
       b.writes.delay = const Duration(milliseconds: 40);
       final path = await _bigFile(a, 'big.bin');
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
       a.adapters = [];
 
@@ -605,7 +605,7 @@ void main() {
       b.writes.delay = const Duration(milliseconds: 40);
       final path = await _bigFile(a, 'big.bin');
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _receiving(b);
       a.clock.followRealTime();
       b.adapters = [];

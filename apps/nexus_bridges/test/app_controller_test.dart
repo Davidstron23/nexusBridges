@@ -638,7 +638,7 @@ void main() {
         'and the rest do nothing nor throw', () async {
       final controller = controllerFor();
 
-      expect(await controller.sendFile(unknown), SendFileResult.unavailable);
+      expect(await controller.sendFile(unknown), SendResult.unavailable);
       expect(await controller.revealLastReceived(), RevealResult.unavailable);
       controller.cancelSending();
       controller.cancelReceiving(session);
@@ -664,7 +664,7 @@ void main() {
         await controller.init();
         expect(controller.startFailed, isTrue);
 
-        expect(await controller.sendFile(unknown), SendFileResult.unavailable);
+        expect(await controller.sendFile(unknown), SendResult.unavailable);
         expect(await controller.revealLastReceived(), RevealResult.unavailable);
         await controller.useProposedFolder(session);
         await controller.chooseOtherFolder(session);
@@ -680,7 +680,7 @@ void main() {
 
       expect(
         await controller.sendFile(unknown).timeout(const Duration(seconds: 5)),
-        SendFileResult.unavailable,
+        SendResult.unavailable,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
@@ -752,7 +752,7 @@ void main() {
       await controller.init();
       await controller.shutdown();
 
-      expect(await controller.sendFile(unknown), SendFileResult.unavailable);
+      expect(await controller.sendFile(unknown), SendResult.unavailable);
       expect(await controller.revealLastReceived(), RevealResult.unavailable);
       controller.cancelSending();
       controller.cancelReceiving(session);

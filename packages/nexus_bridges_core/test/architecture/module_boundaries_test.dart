@@ -29,7 +29,7 @@ const Map<String, Set<String>> allowedImports = {
     'server',
     'transport',
   },
-  'outbox': {'protocol', 'transfer', 'transport'},
+  'outbox': {'protocol', 'transfer'},
   'browse': {
     'identity',
     'network',
@@ -191,9 +191,9 @@ void main() {
     expect(allowedImports['protocol'], isEmpty);
   });
 
-  test('E513: outbox uses protocol and transfer, with AbortSignal from '
-      'transport, and the node may use outbox', () {
-    expect(allowedImports['outbox'], {'protocol', 'transfer', 'transport'});
+  test('E513: outbox uses protocol and transfer, and the node may use '
+      'outbox', () {
+    expect(allowedImports['outbox'], {'protocol', 'transfer'});
     expect(allowedImports['node'], contains('outbox'));
     for (final module in allowedImports.keys) {
       if (module == 'node' || module == 'outbox') continue;
@@ -207,10 +207,15 @@ void main() {
       findViolations({
         'src/outbox/queues.dart':
             "import '../transfer/transfer.dart';\n"
-            "import '../protocol/protocol.dart';\n"
-            "import '../transport/transport.dart';\n",
+            "import '../protocol/protocol.dart';\n",
       }),
       isEmpty,
+    );
+    expect(
+      findViolations({
+        'src/outbox/queues.dart': "import '../transport/transport.dart';\n",
+      }),
+      hasLength(1),
     );
     expect(
       findViolations({

@@ -3,18 +3,17 @@ import 'dart:async';
 import '../protocol/protocol.dart' show Limits;
 import '../transfer/transfer.dart'
     show
+        AbortSignal,
         ReceiveFolderDestination,
         SendDestination,
         SendTarget,
         TransferOutcome,
-        TransferResultView;
-import '../transport/transport.dart' show AbortSignal;
+        TransferResultView,
+        visibleFileName;
 import 'policy.dart';
 import 'selection.dart';
 
 void _noLog(String message) {}
-
-String _sameName(String name) => name;
 
 enum _Mode { none, single, queues }
 
@@ -89,7 +88,6 @@ final class SendQueues {
     required this._measureFolder,
     this._gap = Limits.queueElementGap,
     this._log = _noLog,
-    this._displayName = _sameName,
   });
 
   final ElementSender _sender;
@@ -97,7 +95,6 @@ final class SendQueues {
   final Future<int?> Function(String path, AbortSignal abort) _measureFolder;
   final Duration _gap;
   final void Function(String) _log;
-  final String Function(String name) _displayName;
 
   final StreamController<void> _changes = StreamController<void>.broadcast();
   final List<_Item> _loose = [];
@@ -256,7 +253,7 @@ final class SendQueues {
     return _Item(
       id: 'q${++_itemCounter}',
       path: path,
-      name: _displayName(rawName),
+      name: visibleFileName(rawName),
       isFolder: isFolder,
       isArchive: isArchive,
       isMeasurable: probe.kind == ElementKind.folder && !isRoot,

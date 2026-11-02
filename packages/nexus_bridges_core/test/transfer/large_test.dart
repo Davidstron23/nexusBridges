@@ -234,7 +234,7 @@ void main() {
       await writeBigFile(path, size, 4);
 
       final watch = Stopwatch()..start();
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       final sent = await a.sentResult(limit: const Duration(minutes: 25));
       final received = await b.receivedResult(
         limit: const Duration(minutes: 2),

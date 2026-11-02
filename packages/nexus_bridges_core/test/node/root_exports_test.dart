@@ -194,6 +194,7 @@ void main() {
         '../protocol/protocol.dart',
         '../network/network.dart',
         '../identity/identity.dart',
+        '../outbox/outbox.dart',
         '../pairing_flow/pairing_flow.dart',
         '../transfer/transfer.dart',
       });

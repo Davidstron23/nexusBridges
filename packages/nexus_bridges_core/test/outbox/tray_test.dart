@@ -63,10 +63,8 @@ void main() {
   late SendTray tray;
   late int changes;
 
-  SendTray makeTray({String Function(String name)? displayName}) {
-    final created = displayName == null
-        ? SendTray(probe: probe.call)
-        : SendTray(probe: probe.call, displayName: displayName);
+  SendTray makeTray() {
+    final created = SendTray(probe: probe.call);
     created.changes.listen((_) => changes++);
     addTearDown(created.close);
     return created;
@@ -151,11 +149,12 @@ void main() {
       expect(tray.paths, [r'D:\']);
     });
 
-    test('E510 the shown name goes through displayName', () async {
-      tray = makeTray(displayName: (name) => '<$name>');
-      await tray.add([docA, project]);
-      expect(tray.items.map((i) => i.name), ['<Informe.pdf>', '<Proyecto>']);
-      expect(tray.paths, [docA, project]);
+    test('E510 the shown name goes through visibleFileName', () async {
+      const marked = 'C:\\in\\Informe\u200E.pdf';
+      const markedFolder = 'C:\\in\\Proyecto\u200F';
+      await tray.add([marked, markedFolder]);
+      expect(tray.items.map((i) => i.name), ['Informe.pdf', 'Proyecto']);
+      expect(tray.paths, [marked, markedFolder]);
     });
 
     test('E510 removing one item leaves the rest in order', () async {

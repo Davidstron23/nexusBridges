@@ -80,7 +80,13 @@ final class NodePicker implements FilePicker {
   }
 
   @override
-  Future<List<String>> pickFiles() async => const [];
+  Future<List<String>> pickFiles() async {
+    fileCalls++;
+    final gate = fileGate;
+    if (gate != null) await gate.future;
+    final file = nextFile;
+    return file == null ? const [] : [file];
+  }
 
   @override
   Future<List<String>> pickFolders() async => const [];
@@ -375,9 +381,9 @@ final class TransferNode {
     return null;
   }
 
-  Future<SendFileResult> send(TransferNode to, String path) {
+  Future<SendResult> send(TransferNode to, String path) {
     picker.nextFile = path;
-    return node.sendFile(to.fingerprint);
+    return node.sendFiles(to.fingerprint);
   }
 
   Future<TransferResultView> sentResult({
@@ -388,7 +394,8 @@ final class TransferNode {
       (s) =>
           s.lastSent != null &&
           !identical(s.lastSent, after) &&
-          s.outgoing == null,
+          s.outgoing == null &&
+          s.sendingTo == null,
       limit: limit,
       reason: '$name last sent',
     );
