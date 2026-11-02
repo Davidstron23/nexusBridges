@@ -634,13 +634,15 @@ final Map<TransferOutcome, (String, String)> _expectedSent = {
     'No se pueden enviar unidades enteras, solo carpetas de dentro.',
   ),
   TransferOutcome.protectedData: (
-    "This is NexusBridges' own data and is never sent.",
-    'Son datos de la propia app y nunca se envían.',
+    "It can't be sent: it's NexusBridges' own data or an administrative "
+        'resource.',
+    'No se puede enviar: son datos de la propia app o un recurso '
+        'administrativo.',
   ),
   TransferOutcome.notFound: ('It no longer exists.', 'Ya no existe.'),
   TransferOutcome.tooManyEntries: (
-    'The folder has more than 100,000 items.',
-    'La carpeta tiene más de 100 000 elementos.',
+    'The folder has too many items to send.',
+    'La carpeta tiene demasiados elementos para enviarla.',
   ),
   TransferOutcome.tooDeep: (
     'The folder has more than 64 levels.',
@@ -786,8 +788,8 @@ final Map<TransferOutcome, (String, String)> _expectedReceived = {
     'Ya no existía en el otro equipo.',
   ),
   TransferOutcome.tooManyEntries: (
-    'It was rejected because the folder has more than 100,000 items.',
-    'Se rechazó porque la carpeta tiene más de 100 000 elementos.',
+    'It was rejected because the folder has too many items.',
+    'Se rechazó porque la carpeta tiene demasiados elementos.',
   ),
   TransferOutcome.tooDeep: (
     'It was rejected because the folder has more than 64 levels.',
@@ -1808,6 +1810,32 @@ void main() {
           );
         }
       }
+    });
+  });
+
+  group('E548: both text tables declare the same keys', () {
+    final declaration = RegExp(
+      r'^  (?:String\??|Future<[^>]+>)\s+(?:get\s+)?(\w+)\b',
+      multiLine: true,
+    );
+
+    Set<String> keysOf(String fileName) {
+      final source = File(
+        'lib${Platform.pathSeparator}src${Platform.pathSeparator}l10n'
+        '${Platform.pathSeparator}$fileName',
+      ).readAsStringSync();
+      return {
+        for (final match in declaration.allMatches(source)) match.group(1)!,
+      };
+    }
+
+    test('app_strings_en and app_strings_es implement every key of '
+        'AppStrings and nothing else', () {
+      final abstractKeys = keysOf('app_strings.dart')
+        ..removeAll({'stringsFor', 'load', 'of'});
+      expect(abstractKeys, hasLength(greaterThan(200)));
+      expect(keysOf('app_strings_en.dart'), abstractKeys);
+      expect(keysOf('app_strings_es.dart'), abstractKeys);
     });
   });
 

@@ -150,6 +150,78 @@ class FakeAppController extends AppController {
     return sendFileResult;
   }
 
+  SendResult sendFilesResult = SendResult.started;
+  SendResult sendFoldersResult = SendResult.started;
+  SendResult sendPathsResult = SendResult.started;
+  SendResult sendTrayResult = SendResult.started;
+  TrayResult addToTrayResult = TrayResult.added;
+  final List<List<String>> sendPathsCalls = [];
+  final List<List<String>> addToTrayCalls = [];
+  final List<int?> addToTrayTotals = [];
+
+  @override
+  Future<SendResult> sendFiles(String fingerprint) async {
+    calls.add('sendFiles $fingerprint');
+    return sendFilesResult;
+  }
+
+  @override
+  Future<SendResult> sendFolders(String fingerprint) async {
+    calls.add('sendFolders $fingerprint');
+    return sendFoldersResult;
+  }
+
+  @override
+  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+    calls.add('sendPaths $fingerprint ${paths.join('|')}');
+    sendPathsCalls.add(List.of(paths));
+    return sendPathsResult;
+  }
+
+  @override
+  void cancelQueueItem(String itemId) {
+    calls.add('cancelQueueItem $itemId');
+  }
+
+  @override
+  void removeQueueItem(String itemId) {
+    calls.add('removeQueueItem $itemId');
+  }
+
+  @override
+  void cancelAllQueued() {
+    calls.add('cancelAllQueued');
+  }
+
+  @override
+  Future<TrayResult> addToTray(List<String> paths, {int? totalCount}) async {
+    calls.add('addToTray ${paths.join('|')} $totalCount');
+    addToTrayCalls.add(List.of(paths));
+    addToTrayTotals.add(totalCount);
+    return addToTrayResult;
+  }
+
+  @override
+  void removeFromTray(String itemId) {
+    calls.add('removeFromTray $itemId');
+  }
+
+  @override
+  void clearTray() {
+    calls.add('clearTray');
+  }
+
+  @override
+  Future<SendResult> sendTray(String fingerprint) async {
+    calls.add('sendTray $fingerprint');
+    return sendTrayResult;
+  }
+
+  @override
+  Future<void> requestPortal(String fingerprint) async {
+    calls.add('requestPortal $fingerprint');
+  }
+
   @override
   void cancelSending() {
     calls.add('cancelSending');

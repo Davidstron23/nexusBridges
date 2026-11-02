@@ -1,6 +1,7 @@
 import 'package:nexus_bridges_core/nexus_bridges_core.dart'
     show PairingOutcome, TransferOutcome;
 
+import '../ui/format.dart';
 import 'app_strings.dart';
 
 final class AppStringsEs implements AppStrings {
@@ -597,10 +598,11 @@ final class AppStringsEs implements AppStrings {
     TransferOutcome.wholeDrive =>
       'No se pueden enviar unidades enteras, solo carpetas de dentro.',
     TransferOutcome.protectedData =>
-      'Son datos de la propia app y nunca se envían.',
+      'No se puede enviar: son datos de la propia app o un recurso '
+          'administrativo.',
     TransferOutcome.notFound => 'Ya no existe.',
     TransferOutcome.tooManyEntries =>
-      'La carpeta tiene más de 100 000 elementos.',
+      'La carpeta tiene demasiados elementos para enviarla.',
     TransferOutcome.tooDeep => 'La carpeta tiene más de 64 niveles.',
     TransferOutcome.tooLargeForPeer =>
       'La carpeta es demasiado grande para el otro equipo.',
@@ -672,7 +674,7 @@ final class AppStringsEs implements AppStrings {
       'Se rechazó porque los datos de NexusBridges nunca se envían.',
     TransferOutcome.notFound => 'Ya no existía en el otro equipo.',
     TransferOutcome.tooManyEntries =>
-      'Se rechazó porque la carpeta tiene más de 100 000 elementos.',
+      'Se rechazó porque la carpeta tiene demasiados elementos.',
     TransferOutcome.tooDeep =>
       'Se rechazó porque la carpeta tiene más de 64 niveles.',
     TransferOutcome.tooLargeForPeer =>
@@ -772,4 +774,141 @@ final class AppStringsEs implements AppStrings {
   @override
   String get incomingExpiresNote =>
       'Si no respondes, el aviso caduca al cabo de un minuto.';
+
+  @override
+  String get sendEllipsis => 'Enviar…';
+
+  @override
+  String get sendFilesOption => 'Archivos…';
+
+  @override
+  String get sendFoldersOption => 'Carpetas…';
+
+  @override
+  String preparingItems(int count) =>
+      'Preparando… ${formatCount(count, 'es')} '
+      "${count == 1 ? 'elemento encontrado' : 'elementos encontrados'}";
+
+  @override
+  String folderSummary(int files, String size) =>
+      "${formatCount(files, 'es')} ${files == 1 ? 'archivo' : 'archivos'} · "
+      '$size';
+
+  @override
+  String foldersLeftOut(int count, String? size) =>
+      "${formatCount(count, 'es')} "
+      "${count == 1 ? 'carpeta queda' : 'carpetas quedan'} fuera"
+      "${size == null ? '' : ' ($size)'}";
+
+  @override
+  String linksNotFollowed(int count) =>
+      "${formatCount(count, 'es')} "
+      "${count == 1 ? 'enlace no se sigue' : 'enlaces no se siguen'}";
+
+  @override
+  String get appDataLeftOut => 'Los datos de NexusBridges nunca se envían';
+
+  @override
+  String blockedLeftOut(int count) => count == 1
+      ? '1 archivo no se envía: accesos directos y archivos de sistema del '
+            'Explorador'
+      : "${formatCount(count, 'es')} archivos no se envían: accesos directos "
+            'y archivos de sistema del Explorador';
+
+  @override
+  String get containsPrograms => 'contiene programas';
+
+  @override
+  String filesProgress(int done, int total) =>
+      "${formatCount(done, 'es')} de ${formatCount(total, 'es')} "
+      "${total == 1 ? 'archivo' : 'archivos'}";
+
+  @override
+  String firstLevelMore(int count) => "y ${formatCount(count, 'es')} más";
+
+  @override
+  String outcomeUnreadableEntry(String path) =>
+      'No se pudo leer o cambió mientras se enviaba: $path';
+
+  @override
+  String outcomeInvalidNameEntry(String path) =>
+      'Este nombre no se puede usar en el otro equipo: $path';
+
+  @override
+  String get outcomeFolderIncompatible =>
+      'El otro equipo no puede recibir carpetas; puede que tenga que '
+      'actualizar NexusBridges';
+
+  @override
+  String queueTitle(String name) => 'Enviando a $name';
+
+  @override
+  String get looseQueue => 'Archivos';
+
+  @override
+  String get bundleQueue => 'Carpetas y comprimidos';
+
+  @override
+  String get queuePending => 'Pendiente';
+
+  @override
+  String queueNotSent(String reason) => 'No enviado: $reason';
+
+  @override
+  String get queueRemove => 'Quitar';
+
+  @override
+  String get queueCancelAll => 'Cancelar todo';
+
+  @override
+  String queueRemaining(int count) => count == 1
+      ? 'Queda 1 en cola'
+      : "Quedan ${formatCount(count, 'es')} en cola";
+
+  @override
+  String get queueLastItem => 'Último elemento';
+
+  @override
+  String deliveredSummary(int delivered, int total) =>
+      "${formatCount(delivered, 'es')} de ${formatCount(total, 'es')} "
+      "${total == 1 ? 'entregado' : 'entregados'}";
+
+  @override
+  String waitForQueues(String name) =>
+      'Espera a que terminen los envíos a $name';
+
+  @override
+  String get tooManySelected =>
+      'Se pueden enviar como mucho 1 000 elementos a la vez';
+
+  @override
+  String trayTitle(int count) => "Para enviar (${formatCount(count, 'es')})";
+
+  @override
+  String get trayRemoveAll => 'Quitar todo';
+
+  @override
+  String traySendTo(String name) => 'Enviar a $name';
+
+  @override
+  String get trayFull =>
+      'La bandeja Para enviar admite como mucho 1 000 elementos';
+
+  @override
+  String get trayNothingNew => 'Ya estaban en Para enviar';
+
+  @override
+  String get dragHint =>
+      'Suelta sobre un equipo · fuera de ellos, a Para enviar';
+
+  @override
+  String get dragTipTitle => 'Arrastra y suelta';
+
+  @override
+  String get dragTipBody =>
+      'Sobre un equipo para enviárselo; fuera de ellos, a Para enviar';
+
+  @override
+  String folderSavedNotice(String name, String peer) =>
+      'Carpeta $name recibida de $peer';
 }

@@ -1,6 +1,7 @@
 import 'package:nexus_bridges_core/nexus_bridges_core.dart'
     show PairingOutcome, TransferOutcome;
 
+import '../ui/format.dart';
 import 'app_strings.dart';
 
 final class AppStringsEn implements AppStrings {
@@ -584,9 +585,10 @@ final class AppStringsEn implements AppStrings {
     TransferOutcome.wholeDrive =>
       "Whole drives can't be sent, only folders inside them.",
     TransferOutcome.protectedData =>
-      "This is NexusBridges' own data and is never sent.",
+      "It can't be sent: it's NexusBridges' own data or an administrative "
+          'resource.',
     TransferOutcome.notFound => 'It no longer exists.',
-    TransferOutcome.tooManyEntries => 'The folder has more than 100,000 items.',
+    TransferOutcome.tooManyEntries => 'The folder has too many items to send.',
     TransferOutcome.tooDeep => 'The folder has more than 64 levels.',
     TransferOutcome.tooLargeForPeer =>
       'The folder is too big for the other device.',
@@ -657,7 +659,7 @@ final class AppStringsEn implements AppStrings {
       "It was rejected because NexusBridges' own data is never sent.",
     TransferOutcome.notFound => 'It no longer existed on the other device.',
     TransferOutcome.tooManyEntries =>
-      'It was rejected because the folder has more than 100,000 items.',
+      'It was rejected because the folder has too many items.',
     TransferOutcome.tooDeep =>
       'It was rejected because the folder has more than 64 levels.',
     TransferOutcome.tooLargeForPeer =>
@@ -757,4 +759,132 @@ final class AppStringsEn implements AppStrings {
   @override
   String get incomingExpiresNote =>
       "If you don't answer, this request expires after a minute.";
+
+  @override
+  String get sendEllipsis => 'Send…';
+
+  @override
+  String get sendFilesOption => 'Files…';
+
+  @override
+  String get sendFoldersOption => 'Folders…';
+
+  @override
+  String preparingItems(int count) =>
+      'Preparing… ${formatCount(count, 'en')} '
+      "${count == 1 ? 'item' : 'items'} found";
+
+  @override
+  String folderSummary(int files, String size) =>
+      "${formatCount(files, 'en')} ${files == 1 ? 'file' : 'files'} · $size";
+
+  @override
+  String foldersLeftOut(int count, String? size) =>
+      "${formatCount(count, 'en')} ${count == 1 ? 'folder' : 'folders'} left "
+      "out${size == null ? '' : ' ($size)'}";
+
+  @override
+  String linksNotFollowed(int count) =>
+      "${formatCount(count, 'en')} ${count == 1 ? 'link' : 'links'} not "
+      'followed';
+
+  @override
+  String get appDataLeftOut => "NexusBridges' own data is never sent";
+
+  @override
+  String blockedLeftOut(int count) => count == 1
+      ? '1 file is not sent: shortcuts and Explorer system files'
+      : "${formatCount(count, 'en')} files are not sent: shortcuts and "
+            'Explorer system files';
+
+  @override
+  String get containsPrograms => 'contains programs';
+
+  @override
+  String filesProgress(int done, int total) =>
+      "${formatCount(done, 'en')} of ${formatCount(total, 'en')} "
+      "${total == 1 ? 'file' : 'files'}";
+
+  @override
+  String firstLevelMore(int count) => "and ${formatCount(count, 'en')} more";
+
+  @override
+  String outcomeUnreadableEntry(String path) =>
+      "Couldn't be read or changed while sending: $path";
+
+  @override
+  String outcomeInvalidNameEntry(String path) =>
+      "This name can't be used on the other device: $path";
+
+  @override
+  String get outcomeFolderIncompatible =>
+      "The other device can't receive folders; it may need to update "
+      'NexusBridges';
+
+  @override
+  String queueTitle(String name) => 'Sending to $name';
+
+  @override
+  String get looseQueue => 'Files';
+
+  @override
+  String get bundleQueue => 'Folders and archives';
+
+  @override
+  String get queuePending => 'Waiting';
+
+  @override
+  String queueNotSent(String reason) => 'Not sent: $reason';
+
+  @override
+  String get queueRemove => 'Remove';
+
+  @override
+  String get queueCancelAll => 'Cancel all';
+
+  @override
+  String queueRemaining(int count) =>
+      "${formatCount(count, 'en')} left in the queue";
+
+  @override
+  String get queueLastItem => 'Last item';
+
+  @override
+  String deliveredSummary(int delivered, int total) =>
+      "${formatCount(delivered, 'en')} of ${formatCount(total, 'en')} "
+      'delivered';
+
+  @override
+  String waitForQueues(String name) => 'Wait for the sends to $name to finish';
+
+  @override
+  String get tooManySelected => 'You can send up to 1,000 items at a time';
+
+  @override
+  String trayTitle(int count) => "To send (${formatCount(count, 'en')})";
+
+  @override
+  String get trayRemoveAll => 'Remove all';
+
+  @override
+  String traySendTo(String name) => 'Send to $name';
+
+  @override
+  String get trayFull => 'The To send tray holds up to 1,000 items';
+
+  @override
+  String get trayNothingNew => 'Already in To send';
+
+  @override
+  String get dragHint => 'Drop on a device · anywhere else goes to To send';
+
+  @override
+  String get dragTipTitle => 'Drag and drop';
+
+  @override
+  String get dragTipBody => 'On a device to send it; anywhere else to To send';
+
+  @override
+  String folderSavedNotice(String name, String peer) =>
+      'Folder $name received from $peer';
 }

@@ -77,3 +77,15 @@ int percentOf(int done, int total) {
 
 String formatPercent(int percent, String languageCode) =>
     languageCode == 'es' ? '$percent %' : '$percent%';
+
+String formatCount(int count, String languageCode) {
+  final digits = count.abs().toString();
+  if (digits.length < 4) return count.toString();
+  final separator = languageCode == 'es' ? ' ' : ',';
+  final buffer = StringBuffer(count < 0 ? '-' : '');
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(separator);
+    buffer.write(digits[i]);
+  }
+  return buffer.toString();
+}

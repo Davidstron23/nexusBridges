@@ -192,6 +192,45 @@ abstract class AppStrings {
   String get chipUnconfirmed;
   String foreignSenderNote(String short);
   String get incomingExpiresNote;
+
+  String get sendEllipsis;
+  String get sendFilesOption;
+  String get sendFoldersOption;
+  String preparingItems(int count);
+  String folderSummary(int files, String size);
+  String foldersLeftOut(int count, String? size);
+  String linksNotFollowed(int count);
+  String get appDataLeftOut;
+  String blockedLeftOut(int count);
+  String get containsPrograms;
+  String filesProgress(int done, int total);
+  String firstLevelMore(int count);
+  String outcomeUnreadableEntry(String path);
+  String outcomeInvalidNameEntry(String path);
+  String get outcomeFolderIncompatible;
+
+  String queueTitle(String name);
+  String get looseQueue;
+  String get bundleQueue;
+  String get queuePending;
+  String queueNotSent(String reason);
+  String get queueRemove;
+  String get queueCancelAll;
+  String queueRemaining(int count);
+  String get queueLastItem;
+  String deliveredSummary(int delivered, int total);
+  String waitForQueues(String name);
+  String get tooManySelected;
+
+  String trayTitle(int count);
+  String get trayRemoveAll;
+  String traySendTo(String name);
+  String get trayFull;
+  String get trayNothingNew;
+  String get dragHint;
+  String get dragTipTitle;
+  String get dragTipBody;
+  String folderSavedNotice(String name, String peer);
 }
 
 AppStrings stringsFor(String languageCode) {
