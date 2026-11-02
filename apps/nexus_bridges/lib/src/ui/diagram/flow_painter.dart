@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart' show DeviceType;
 
 import '../icons/file_icon.dart';
+import '../icons/folder_icon.dart';
 import '../icons/glyphs.dart';
+import '../progress/selection_progress_painter.dart';
 import '../theme/app_theme.dart';
 import '../theme/components.dart' show ChipTone;
 import '../theme/tokens.dart';
@@ -147,7 +149,10 @@ class FlowPainter extends CustomPainter {
     required this.hover,
     required this.reduceMotion,
     required this.textDirection,
-  }) : super(repaint: Listenable.merge([clock, hover]));
+    this.progress,
+    this.iconFade,
+    this.iconFrom = const {},
+  }) : super(repaint: Listenable.merge([clock, hover, ?progress, ?iconFade]));
 
   final FlowScene scene;
   final NbColors colors;
@@ -155,6 +160,9 @@ class FlowPainter extends CustomPainter {
   final Animation<double> hover;
   final bool reduceMotion;
   final TextDirection textDirection;
+  final ProgressTracker? progress;
+  final Animation<double>? iconFade;
+  final Map<String, TravelIcon> iconFrom;
 
   final Map<_TextKey, TextPainter> _texts = {};
 
@@ -289,6 +297,25 @@ class FlowPainter extends CustomPainter {
     }
   }
 
+  double progressOf(LinkView link) {
+    final tracker = progress;
+    final value = tracker == null || !link.tracked
+        ? link.progress
+        : tracker.valueOf(
+            link.towardsHub ? ProgressTrack.incoming : ProgressTrack.outgoing,
+          );
+    return value.clamp(0.0, 1.0);
+  }
+
+  void _paintTravelIcon(Canvas canvas, Rect rect, TravelIcon icon) {
+    final kind = icon.kind;
+    if (kind == null) {
+      paintFolderIcon(canvas, rect);
+    } else {
+      paintFileIcon(canvas, rect, kind);
+    }
+  }
+
   void _paintActiveLine(
     Canvas canvas,
     FlowPeer peer,
@@ -301,7 +328,7 @@ class FlowPainter extends CustomPainter {
     final metric = metrics.first;
     final link = peer.link;
     final length = metric.length;
-    final progress = link.progress.clamp(0.0, 1.0);
+    final progress = progressOf(link);
 
     paint.shader = LinearGradient(
       begin: Alignment.topLeft,
@@ -348,11 +375,26 @@ class FlowPainter extends CustomPainter {
           ..color = colors.nodeShadow
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, _shadowSigma),
       );
-      paintFileIcon(
-        canvas,
-        rect,
-        fileKindOf(link.fileName ?? '', isProgram: link.isProgram),
-      );
+      final to = link.travelIcon;
+      final from = iconFrom[peer.fingerprint];
+      final fade = iconFade?.value ?? 1;
+      if (from == null || from == to || fade >= 1) {
+        _paintTravelIcon(canvas, rect, to);
+      } else {
+        final bounds = rect.inflate(_shadowDrop);
+        canvas.saveLayer(
+          bounds,
+          Paint()..color = colors.card.withValues(alpha: 1 - fade),
+        );
+        _paintTravelIcon(canvas, rect, from);
+        canvas.restore();
+        canvas.saveLayer(
+          bounds,
+          Paint()..color = colors.card.withValues(alpha: fade),
+        );
+        _paintTravelIcon(canvas, rect, to);
+        canvas.restore();
+      }
     }
   }
 
@@ -719,5 +761,8 @@ class FlowPainter extends CustomPainter {
       !identical(oldDelegate.scene, scene) ||
       oldDelegate.colors != colors ||
       oldDelegate.reduceMotion != reduceMotion ||
-      oldDelegate.textDirection != textDirection;
+      oldDelegate.textDirection != textDirection ||
+      !identical(oldDelegate.progress, progress) ||
+      !identical(oldDelegate.iconFade, iconFade) ||
+      !identical(oldDelegate.iconFrom, iconFrom);
 }

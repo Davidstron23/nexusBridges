@@ -8,6 +8,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../../l10n/app_strings.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
+import '../progress/selection_progress_painter.dart';
 import '../send_menu.dart';
 import '../theme/app_theme.dart';
 import '../theme/components.dart';
@@ -20,6 +21,7 @@ const Duration _clockPeriod = Duration(milliseconds: 14400);
 const Duration _hoverDuration = Duration(milliseconds: 200);
 const Duration _popoverDuration = Duration(milliseconds: 240);
 const Duration _doneDuration = Duration(milliseconds: 3200);
+const Duration _iconFadeDuration = Duration(milliseconds: 400);
 const Cubic _motionCurve = Cubic(0.2, 0.8, 0.2, 1);
 const double _popoverWidth = 264;
 const double _hitExtra = 6;
@@ -61,6 +63,9 @@ class _FlowDiagramState extends State<FlowDiagram>
   late final AnimationController _clock;
   late final AnimationController _hover;
   late final CurvedAnimation _hoverCurve;
+  late final AnimationController _iconFade;
+  Map<String, TravelIcon> _icons = const {};
+  Map<String, TravelIcon> _iconFrom = const {};
   Timer? _doneTimer;
   String? _done;
   String? _popoverFor;
@@ -74,9 +79,11 @@ class _FlowDiagramState extends State<FlowDiagram>
     _clock = AnimationController(vsync: this, duration: _clockPeriod);
     _hover = AnimationController(vsync: this, duration: _hoverDuration);
     _hoverCurve = CurvedAnimation(parent: _hover, curve: _motionCurve);
+    _iconFade = AnimationController(vsync: this, duration: _iconFadeDuration);
     _hover.addStatusListener(_onHoverStatus);
     widget.hovered.addListener(_onHovered);
     _previous = widget.state;
+    _icons = _travelIcons(widget.state);
     _shownHover = widget.hovered.value;
     if (_shownHover != null) _hover.value = 1;
   }
@@ -89,6 +96,7 @@ class _FlowDiagramState extends State<FlowDiagram>
       widget.hovered.addListener(_onHovered);
       _onHovered();
     }
+    _trackIcons();
     final finished = newlyDone(_previous, widget.state);
     _previous = widget.state;
     if (finished != null) {
@@ -112,8 +120,38 @@ class _FlowDiagramState extends State<FlowDiagram>
     _hover.removeStatusListener(_onHoverStatus);
     _hoverCurve.dispose();
     _hover.dispose();
+    _iconFade.dispose();
     _clock.dispose();
     super.dispose();
+  }
+
+  Map<String, TravelIcon> _travelIcons(NodeState state) {
+    final icons = <String, TravelIcon>{};
+    for (final entry in state.entries) {
+      if (!entry.paired) continue;
+      final link = linkFor(state, entry.fingerprint);
+      if (link.state == LinkState.active) {
+        icons[entry.fingerprint] = link.travelIcon;
+      }
+    }
+    return icons;
+  }
+
+  void _trackIcons() {
+    final next = _travelIcons(widget.state);
+    final changed = <String, TravelIcon>{};
+    for (final MapEntry(:key, :value) in next.entries) {
+      final before = _icons[key];
+      if (before != null && before != value) changed[key] = before;
+    }
+    _icons = next;
+    if (changed.isEmpty) return;
+    _iconFrom = changed;
+    if (_reduceMotion) {
+      _iconFade.value = 1;
+    } else {
+      _iconFade.forward(from: 0);
+    }
   }
 
   void _onHovered() {
@@ -165,6 +203,7 @@ class _FlowDiagramState extends State<FlowDiagram>
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final tracker = SelectionProgressScope.maybeOf(context);
         final scene = buildFlowScene(
           state: widget.state,
           strings: strings,
@@ -252,6 +291,9 @@ class _FlowDiagramState extends State<FlowDiagram>
                     hover: _hoverCurve,
                     reduceMotion: _reduceMotion,
                     textDirection: textDirection,
+                    progress: tracker,
+                    iconFade: _iconFade,
+                    iconFrom: _iconFrom,
                   ),
                 ),
               ),

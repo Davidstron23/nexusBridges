@@ -49,6 +49,7 @@ final Map<String, _Text> _texts = {
   'dragTipTitle': (s) => s.dragTipTitle,
   'dragTipBody': (s) => s.dragTipBody,
   'folderSavedNotice': (s) => s.folderSavedNotice(_name, _peer),
+  'incomingFolderRequestTitle': (s) => s.incomingFolderRequestTitle(_name),
 };
 
 final Map<String, (String, String)> _expected = {
@@ -130,6 +131,10 @@ final Map<String, (String, String)> _expected = {
     'Folder $_name received from $_peer',
     'Carpeta $_name recibida de $_peer',
   ),
+  'incomingFolderRequestTitle': (
+    '$_name wants to send you a folder',
+    '$_name quiere enviarte una carpeta',
+  ),
 };
 
 void main() {
@@ -137,8 +142,8 @@ void main() {
   final spanish = AppStringsEs();
 
   group('E548: the texts of the 006', () {
-    test('the table covers the 36 new keys', () {
-      expect(_texts.length, 36);
+    test('the table covers the 37 new keys', () {
+      expect(_texts.length, 37);
       expect(_expected.keys.toSet(), _texts.keys.toSet());
     });
 

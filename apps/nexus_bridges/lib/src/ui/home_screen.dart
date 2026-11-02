@@ -10,6 +10,7 @@ import 'device_list.dart';
 import 'incoming_cards.dart';
 import 'modal/timeline.dart';
 import 'network_strip.dart';
+import 'progress/selection_progress_painter.dart';
 import 'send_action.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
@@ -77,30 +78,33 @@ class _HomeScreenState extends State<HomeScreen> {
         final strings = AppStringsDelegate.of(context);
         final state = controller.state;
         final failure = _failureMessage(strings);
-        return Scaffold(
-          body: Column(
-            children: [
-              _Header(
-                controller: controller,
-                state: failure == null ? state : null,
-              ),
-              Expanded(
-                child: failure != null
-                    ? _MessageWithRetry(
-                        message: failure,
-                        retryLabel: strings.retryButton,
-                        onRetry: controller.retry,
-                      )
-                    : _Body(
-                        strings: strings,
-                        controller: controller,
-                        state: state!,
-                        tab: _tab,
-                        hovered: _hovered,
-                        noticeText: (notice) => _noticeText(strings, notice),
-                      ),
-              ),
-            ],
+        return SelectionProgressScope(
+          state: state,
+          child: Scaffold(
+            body: Column(
+              children: [
+                _Header(
+                  controller: controller,
+                  state: failure == null ? state : null,
+                ),
+                Expanded(
+                  child: failure != null
+                      ? _MessageWithRetry(
+                          message: failure,
+                          retryLabel: strings.retryButton,
+                          onRetry: controller.retry,
+                        )
+                      : _Body(
+                          strings: strings,
+                          controller: controller,
+                          state: state!,
+                          tab: _tab,
+                          hovered: _hovered,
+                          noticeText: (notice) => _noticeText(strings, notice),
+                        ),
+                ),
+              ],
+            ),
           ),
         );
       },

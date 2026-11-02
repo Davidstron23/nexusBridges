@@ -399,6 +399,10 @@ final class AppStringsEn implements AppStrings {
   String incomingRequestTitle(String name) => '$name wants to send you a file';
 
   @override
+  String incomingFolderRequestTitle(String name) =>
+      '$name wants to send you a folder';
+
+  @override
   String get withoutMarkNote =>
       'It will be saved without the mark that tells Windows it comes from '
       "another device, because that drive doesn't support it.";

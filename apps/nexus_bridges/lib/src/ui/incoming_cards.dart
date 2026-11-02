@@ -284,7 +284,9 @@ class _WarningCard extends StatelessWidget {
             ),
             children: [
               Text(
-                strings.incomingRequestTitle(_senderName(view)),
+                view.isFolder
+                    ? strings.incomingFolderRequestTitle(_senderName(view))
+                    : strings.incomingRequestTitle(_senderName(view)),
                 style: NbText.title.copyWith(color: colors.text),
               ),
               const SizedBox(height: 3),

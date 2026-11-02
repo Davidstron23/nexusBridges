@@ -10,6 +10,7 @@ import 'icons/file_icon.dart';
 import 'icons/folder_icon.dart';
 import 'icons/glyphs.dart';
 import 'modal/timeline.dart';
+import 'progress/selection_progress_painter.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -153,18 +154,30 @@ class _QueueCardState extends State<QueueCard> {
             title: finished ? strings.lastSentTitle : strings.queueTitle(name),
             chip: StatusChip(label: chipLabel, tone: chipTone, icon: chipIcon),
           ),
-          if (finished) ...[
-            const SizedBox(height: 4),
-            Text(
-              strings.toPeer(name),
-              style: NbText.caption.copyWith(color: colors.textWeak),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ] else ...[
-            const SizedBox(height: 10),
-            SelectionBar(value: selectionValueOf(widget.state, queues)),
-          ],
+          SelectionProgressBuilder(
+            track: ProgressTrack.outgoing,
+            enabled:
+                widget.state.selectionProgress?.selectionId ==
+                queues.selectionId,
+            fallback: selectionValueOf(widget.state, queues),
+            builder: (context, value, gliding) {
+              if (finished && !gliding) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    strings.toPeer(name),
+                    style: NbText.caption.copyWith(color: colors.textWeak),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: SelectionBar(value: value),
+              );
+            },
+          ),
           for (final (section, title, items) in sections)
             if (items.isNotEmpty) ...[
               const SizedBox(height: 12),

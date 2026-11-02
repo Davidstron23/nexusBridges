@@ -8,6 +8,7 @@ import 'format.dart';
 import 'icons/file_icon.dart';
 import 'icons/folder_icon.dart';
 import 'icons/glyphs.dart';
+import 'progress/selection_progress_painter.dart';
 import 'queue_card.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
@@ -433,6 +434,7 @@ class ActivityPanel extends StatelessWidget {
           key: const ValueKey('activity-outgoing'),
           controller: controller,
           view: outgoing,
+          tracked: state.selectionProgress != null,
         ),
       if (incoming != null && _isActive(incoming.stage))
         _IncomingCard(
@@ -475,11 +477,13 @@ class _OutgoingCard extends StatelessWidget {
   const _OutgoingCard({
     required this.controller,
     required this.view,
+    required this.tracked,
     super.key,
   });
 
   final AppController controller;
   final OutgoingTransferView view;
+  final bool tracked;
 
   @override
   Widget build(BuildContext context) {
@@ -549,10 +553,13 @@ class _OutgoingCard extends StatelessWidget {
                 FolderSummaryLines(summary: summary, topGap: 8),
               if (transferring) ...[
                 const SizedBox(height: 12),
-                NbProgressBar(
-                  value: phase == OutgoingPhase.verifying
+                SelectionProgressBuilder(
+                  track: ProgressTrack.outgoing,
+                  enabled: tracked,
+                  fallback: phase == OutgoingPhase.verifying
                       ? 1
                       : percentOf(view.sentBytes, view.size) / 100,
+                  builder: (context, value, _) => NbProgressBar(value: value),
                 ),
               ],
               ActivityCardFooter(
@@ -652,10 +659,12 @@ class _IncomingCard extends StatelessWidget {
               ),
               if (transferring) ...[
                 const SizedBox(height: 12),
-                NbProgressBar(
-                  value: stage == IncomingStage.verifying
+                SelectionProgressBuilder(
+                  track: ProgressTrack.incoming,
+                  fallback: stage == IncomingStage.verifying
                       ? 1
                       : percentOf(view.receivedBytes, view.size) / 100,
+                  builder: (context, value, _) => NbProgressBar(value: value),
                 ),
               ],
               ActivityCardFooter(

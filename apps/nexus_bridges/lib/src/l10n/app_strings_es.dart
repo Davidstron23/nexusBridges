@@ -404,6 +404,10 @@ final class AppStringsEs implements AppStrings {
       '$name quiere enviarte un archivo';
 
   @override
+  String incomingFolderRequestTitle(String name) =>
+      '$name quiere enviarte una carpeta';
+
+  @override
   String get withoutMarkNote =>
       'Se guardará sin la marca que indica a Windows que viene de otro '
       'equipo, porque esa unidad no la admite.';

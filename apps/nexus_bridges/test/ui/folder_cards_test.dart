@@ -319,6 +319,32 @@ void main() {
         expect(controller.calls, ['answerIncoming s1 true']);
       });
 
+      testWidgets('the title says folder for a folder and file for a file', (
+        tester,
+      ) async {
+        await pumpColumn(
+          tester,
+          code,
+          NodeState(incoming: _folderIn()),
+          (controller, state) =>
+              IncomingCards(controller: controller, state: state),
+        );
+        final card = find.byType(IncomingCards);
+
+        expect(
+          textIn(card, strings.incomingFolderRequestTitle(senderName)),
+          findsOneWidget,
+        );
+        expect(
+          textIn(card, strings.incomingRequestTitle(senderName)),
+          findsNothing,
+        );
+        expect(
+          strings.incomingFolderRequestTitle(senderName),
+          isNot(strings.incomingRequestTitle(senderName)),
+        );
+      });
+
       testWidgets('with no more names there is no "and n more"', (
         tester,
       ) async {

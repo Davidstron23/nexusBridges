@@ -122,6 +122,7 @@ abstract class AppStrings {
   String get cancellingTransfer;
 
   String incomingRequestTitle(String name);
+  String incomingFolderRequestTitle(String name);
   String get withoutMarkNote;
   String get acceptButton;
   String get rejectButton;

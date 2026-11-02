@@ -237,6 +237,7 @@ void main() {
           towardsHub: true,
           progress: 0.25,
           fileName: 'in.txt',
+          tracked: true,
         ),
       );
     });
