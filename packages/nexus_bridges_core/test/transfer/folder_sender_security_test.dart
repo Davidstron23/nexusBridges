@@ -30,6 +30,7 @@ import 'folder_sender_test.dart'
         sendOne,
         stacks,
         startSend,
+        treeOf,
         write;
 import 'folder_writer_support.dart' show content;
 import 'transfer_stacks_harness.dart';
@@ -326,6 +327,61 @@ void main() {
       final inner = await readyPlanAt('$data\\identity', dataDir: short);
       expect(entriesOf(inner), isEmpty);
       expect(inner.summary.protectedOmitted, 1);
+    }, timeout: long);
+  });
+
+  group('Q-4, SEC-12: administrative shares are protectedData and a hidden '
+      'share of the user is not', () {
+    test('\\\\localhost\\ADMIN\$ and a file inside it end as protectedData '
+        'without asking anything', () async {
+      final (a, b) = await stacks();
+      if (FileSystemEntity.typeSync('\\\\localhost\\ADMIN\$\\win.ini') ==
+          FileSystemEntityType.notFound) {
+        markTestSkipped(
+          'the administrative share ADMIN\$ is not reachable: it needs an '
+          'administrator account and the Server service',
+        );
+        return;
+      }
+
+      await refusedAs(a, b, [
+        '\\\\localhost\\ADMIN\$',
+        '\\\\localhost\\admin\$\\win.ini',
+        '\\\\?\\UNC\\localhost\\ADMIN\$\\win.ini',
+      ], TransferOutcome.protectedData);
+    }, timeout: long);
+
+    test('a folder inside a hidden share of the user is sent', () async {
+      final (a, b) = await stacks();
+      final base = await scratch('nexus_q4_share_');
+      final shared = '$base\\shared';
+      write('$shared\\proj\\a.txt', 'a');
+      write('$shared\\proj\\sub\\b.txt', 'b');
+      final made = Process.runSync('net', [
+        'share',
+        'nexusq4\$=$shared',
+        '/grant:Everyone,READ',
+      ]);
+      if (made.exitCode != 0) {
+        markTestSkipped('net share could not create a share: needs an admin');
+        return;
+      }
+      addTearDown(
+        () => Process.runSync('net', ['share', 'nexusq4\$', '/delete', '/y']),
+      );
+
+      final result = await startSend(
+        a,
+        b,
+        '\\\\localhost\\nexusq4\$\\proj',
+      ).timeout(const Duration(seconds: 40));
+
+      expect(result?.outcome, TransferOutcome.saved);
+      expect(treeOf('${b.receiveDir}\\proj'), {
+        'a.txt': 'a',
+        'sub': null,
+        'sub\\b.txt': 'b',
+      });
     }, timeout: long);
   });
 

@@ -156,9 +156,9 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
     rootPath: request.rootRealPath,
     exclusions: request.exclusions.map((name) => name.toUpperCase()).toSet(),
     dataDirRealPath: request.dataDirRealPath,
-    isDataFolder: protectedIds.isEmpty
+    classifyFolder: protectedIds.isEmpty
         ? null
-        : (path) => pathHasIdentityIn(path, protectedIds),
+        : (path) => folderKindAmong(path, protectedIds),
     isCancelled: cancelled,
     onProgress: report,
   );

@@ -286,7 +286,12 @@ final RegExp _driveRootPattern = RegExp(
 );
 
 final RegExp _shareRootPattern = RegExp(
-  r'^(?:\\\\\?\\UNC\\|\\\\\.\\UNC\\|\\\\)[^\\]+\\[^\\]*\$\\?$',
+  r'^(?:\\\\\?\\UNC\\|\\\\\.\\UNC\\|\\\\)[^\\]+\\[A-Za-z]\$\\?$',
+  caseSensitive: false,
+);
+
+final RegExp _administrativeSharePattern = RegExp(
+  r'^(?:\\\\\?\\UNC\\|\\\\\.\\UNC\\|\\\\)[^\\]+\\(?:[A-Za-z]|ADMIN|IPC|PRINT)\$(?:\\|$)',
   caseSensitive: false,
 );
 
@@ -295,6 +300,9 @@ bool isDriveRoot(String path) {
   return _driveRootPattern.hasMatch(normalized) ||
       _shareRootPattern.hasMatch(normalized);
 }
+
+bool isSenderAdministrativeShare(String path) =>
+    _administrativeSharePattern.hasMatch(path.replaceAll('/', r'\'));
 
 bool isShortcutName(String name) => name.toLowerCase().endsWith('.lnk');
 

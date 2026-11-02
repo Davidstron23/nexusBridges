@@ -5,7 +5,8 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
-import 'folder_walk.dart' show FolderLister, ListedEntry, isLinkTag;
+import 'folder_walk.dart'
+    show DataFolderKind, FolderLister, ListedEntry, isLinkTag;
 import 'hashing.dart' show startSha256;
 
 const int _genericRead = 0x80000000;
@@ -33,7 +34,6 @@ const int _attributeNormal = 0x80;
 const int _attributeHidden = 0x02;
 const int _attributeDirectory = 0x10;
 const int _attributeReparse = 0x400;
-const int _errorSharingViolation = 32;
 const int _statusDiskFull = 0xC000007F;
 const int _statusNoMoreFiles = 0x80000006;
 const int _statusNoSuchFile = 0xC000000F;
@@ -752,11 +752,7 @@ enum DataCheck { clear, inData, unreadable }
 
 DataCheck checkAgainstData(String path, String dataFolder) {
   final identity = _pathIdentity(path);
-  if (!identity.found) {
-    return identity.error == _errorSharingViolation
-        ? DataCheck.unreadable
-        : DataCheck.inData;
-  }
+  if (!identity.found) return DataCheck.unreadable;
   final ids = fileIdsUnder(dataFolder, includeFolders: true);
   if (ids == null) return DataCheck.inData;
   return ids.contains((identity.volume, identity.index))
@@ -764,9 +760,12 @@ DataCheck checkAgainstData(String path, String dataFolder) {
       : DataCheck.clear;
 }
 
-bool pathHasIdentityIn(String path, Set<(int, int)> ids) {
+DataFolderKind folderKindAmong(String path, Set<(int, int)> ids) {
   final identity = _pathIdentity(path);
-  return !identity.found || ids.contains((identity.volume, identity.index));
+  if (!identity.found) return DataFolderKind.unknown;
+  return ids.contains((identity.volume, identity.index))
+      ? DataFolderKind.inside
+      : DataFolderKind.outside;
 }
 
 final class SendFileReader {

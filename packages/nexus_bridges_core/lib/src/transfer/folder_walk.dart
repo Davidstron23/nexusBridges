@@ -22,6 +22,8 @@ abstract interface class FolderLister {
   List<ListedEntry> list(String directoryPath);
 }
 
+enum DataFolderKind { outside, inside, unknown }
+
 bool isLinkTag(int tag) => (tag & 0x20000000) != 0 || tag == 0x8000001B;
 
 final class WalkResult {
@@ -55,7 +57,7 @@ WalkResult walkFolder({
   required String rootPath,
   required Set<String> exclusions,
   required String dataDirRealPath,
-  bool Function(String path)? isDataFolder,
+  DataFolderKind Function(String path)? classifyFolder,
   bool Function()? isCancelled,
   void Function(int entries)? onProgress,
 }) {
@@ -104,8 +106,16 @@ WalkResult walkFolder({
         final childPath = _join(folder.path, entry.name);
         if (isAppReservedName(entry.name) ||
             (dataDirRealPath.isNotEmpty &&
-                isSameOrInside(childPath, dataDirRealPath)) ||
-            (isDataFolder != null && isDataFolder(childPath))) {
+                isSameOrInside(childPath, dataDirRealPath))) {
+          result.protectedOmitted++;
+          continue;
+        }
+        final kind = classifyFolder?.call(childPath) ?? DataFolderKind.outside;
+        if (kind == DataFolderKind.unknown) {
+          stop(TransferOutcome.unreadable, relative);
+          return result;
+        }
+        if (kind == DataFolderKind.inside) {
           result.protectedOmitted++;
           continue;
         }

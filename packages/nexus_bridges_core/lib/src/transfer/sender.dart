@@ -16,7 +16,7 @@ import '../transport/transport.dart'
 import 'folder_plan.dart';
 import 'folder_send.dart';
 import 'folder_stream.dart';
-import 'folders.dart' show isAdminShare, isInsideTempFolder, isSameOrInside;
+import 'folders.dart' show isInsideTempFolder, isSameOrInside;
 import 'link.dart';
 import 'loose_file.dart';
 import 'manifest.dart' show encodeManifestChunks;
@@ -27,6 +27,7 @@ import 'names.dart'
         isBlockedType,
         isDriveRoot,
         isProgram,
+        isSenderAdministrativeShare,
         isShortcutName,
         isValidFileName,
         visibleFileName;
@@ -452,12 +453,16 @@ final class TransferSender {
     final name = baseName(path);
     final device = _paired.deviceOf(target.fingerprint);
     final peerName = device == null ? null : sanitizeDisplayName(device.name);
-    SendTarget? current;
-    try {
-      current = refresh();
-    } catch (e) {
-      _log('send target refresh failed: ${e.runtimeType}');
+    SendTarget? currentTarget() {
+      try {
+        return refresh();
+      } catch (e) {
+        _log('send target refresh failed: ${e.runtimeType}');
+        return null;
+      }
     }
+
+    final current = currentTarget();
     void record(TransferOutcome outcome, {String? problemPath}) {
       _record(
         target.fingerprint,
@@ -517,7 +522,8 @@ final class TransferSender {
       record(TransferOutcome.protectedData);
       return null;
     }
-    if (isAdminShare(path) || isAdminShare(real)) {
+    if (isSenderAdministrativeShare(path) ||
+        isSenderAdministrativeShare(real)) {
       record(TransferOutcome.protectedData);
       return null;
     }
@@ -535,6 +541,15 @@ final class TransferSender {
       }
     }
     if (_closed) return null;
+    if (_paired.deviceOf(target.fingerprint) == null) {
+      record(TransferOutcome.unpaired);
+      return null;
+    }
+    final latest = currentTarget();
+    if (latest == null || latest.fingerprint != target.fingerprint) {
+      record(TransferOutcome.noContact);
+      return null;
+    }
     if (!isValidFileName(name)) {
       record(TransferOutcome.invalidName, problemPath: isFolder ? name : null);
       return null;
@@ -544,8 +559,8 @@ final class TransferSender {
       return null;
     }
     final session = _OutSession(
-      target: current,
-      link: TransferLink(identity: _identity, target: current),
+      target: latest,
+      link: TransferLink(identity: _identity, target: latest),
       path: path,
       name: name,
       peerName: peerName,
@@ -842,9 +857,7 @@ final class TransferSender {
         await _conclude(session, TransferOutcome.protectedData);
         return;
       case FileHashFailed():
-        _log(
-          'send source unreadable: ${const FileSystemException().runtimeType}',
-        );
+        _log('send source unreadable: FileSystemException');
         await _conclude(session, TransferOutcome.unreadable);
         return;
       case FileHashed():
