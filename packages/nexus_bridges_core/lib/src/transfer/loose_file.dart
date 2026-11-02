@@ -67,15 +67,16 @@ Stream<List<int>> looseFileStream({
   required int size,
   required AbortSignal abort,
 }) async* {
-  final job = FolderReadJob.startFile(
-    path: path,
-    volume: volume,
-    index: index,
-    size: size,
-  );
+  final job = FolderReadJob.start(strict: false);
   final remove = abort.onAbort(job.interrupt);
   try {
-    job.open(1, 0);
+    job.open(
+      path: path,
+      size: size,
+      hashHex: null,
+      volume: volume,
+      index: index,
+    );
     while (true) {
       final event = await job.next();
       if (abort.aborted) return;

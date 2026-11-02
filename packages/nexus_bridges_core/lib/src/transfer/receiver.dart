@@ -233,6 +233,8 @@ final class _InSession {
 
   Duration? progressAt;
 
+  bool progressPending = false;
+
   bool writing = false;
 
   int received = 0;
@@ -1916,18 +1918,39 @@ final class TransferReceiver {
   }
 
   void _folderProgress(_InSession session, int files, int bytes) {
-    if (session.phase != _InPhase.uploading) return;
+    if (session.phase != _InPhase.uploading &&
+        session.phase != _InPhase.finishing) {
+      return;
+    }
     final now = _clock();
     session
       ..receivedFiles = files
       ..received = bytes
       ..lastDataAt = now;
+    _reportProgress(session, now);
+  }
+
+  void _reportProgress(_InSession session, Duration now) {
     final reportedAt = session.progressAt;
     if (reportedAt == null ||
         now - reportedAt >= Limits.transferProgressInterval) {
-      session.progressAt = now;
+      session
+        ..progressAt = now
+        ..progressPending = false;
       _onChanged();
+    } else {
+      session.progressPending = true;
     }
+  }
+
+  void _flushProgress(_InSession session, Duration now) {
+    final reportedAt = session.progressAt;
+    if (!session.progressPending ||
+        reportedAt == null ||
+        now - reportedAt < Limits.transferProgressInterval) {
+      return;
+    }
+    _reportProgress(session, now);
   }
 
   void _folderFailure(_InSession session, FolderWriteFailed failure) {
@@ -2082,12 +2105,7 @@ final class TransferReceiver {
       session
         ..received += chunk.length
         ..lastDataAt = now;
-      final reportedAt = session.progressAt;
-      if (reportedAt == null ||
-          now - reportedAt >= Limits.transferProgressInterval) {
-        session.progressAt = now;
-        _onChanged();
-      }
+      _reportProgress(session, now);
     } on TooManyBytesException {
       _end(session, TransferOutcome.tooManyBytes);
     } on DiskFullException {
@@ -2449,16 +2467,18 @@ final class TransferReceiver {
           _end(session, TransferOutcome.uploadNotStarted);
         }
       case _InPhase.uploading:
+        _flushProgress(session, now);
         final lastDataAt = session.lastDataAt;
         if (!session.writing &&
             lastDataAt != null &&
             now - lastDataAt >= _idleTimeout) {
           _end(session, TransferOutcome.idle);
         }
+      case _InPhase.finishing:
+        _flushProgress(session, now);
       case _InPhase.checking ||
           _InPhase.awaitingManifest ||
           _InPhase.readingManifest ||
-          _InPhase.finishing ||
           _InPhase.ended:
         break;
     }

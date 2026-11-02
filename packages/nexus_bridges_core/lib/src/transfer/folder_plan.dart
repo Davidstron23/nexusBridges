@@ -7,7 +7,7 @@ import 'package:ffi/ffi.dart';
 
 import '../protocol/protocol.dart' show Limits;
 import 'folder_walk.dart' show FolderMeasure, measureFolders, walkFolder;
-import 'manifest.dart' show FolderManifest, encodeManifest;
+import 'manifest.dart' show FolderManifest, encodedManifestLength;
 import 'names.dart' show isProgram, windowsExtension;
 import 'transfer.dart' show FolderSummaryView, TransferOutcome;
 import 'windows_folder_io.dart';
@@ -19,7 +19,7 @@ final class FolderPlan {
     required this.rootPath,
     required this.name,
     required this.manifest,
-    required this.encoded,
+    required this.encodedLength,
     required this.summary,
     required this.fileVolumes,
     required this.fileIndexes,
@@ -28,7 +28,7 @@ final class FolderPlan {
   final String rootPath;
   final String name;
   final FolderManifest manifest;
-  final Uint8List encoded;
+  final int encodedLength;
   final FolderSummaryView summary;
   final Uint32List fileVolumes;
   final Uint64List fileIndexes;
@@ -232,8 +232,8 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
     freeReadBuffer(buffer);
   }
   final manifest = builder.build();
-  final encoded = encodeManifest(manifest);
-  if (encoded.length > Limits.maxManifestBytes) {
+  final encodedLength = encodedManifestLength(manifest);
+  if (encodedLength > Limits.maxManifestBytes) {
     return const PlanStopped(TransferOutcome.tooManyEntries);
   }
   return PlanReady(
@@ -241,7 +241,7 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
       rootPath: request.rootRealPath,
       name: request.name,
       manifest: manifest,
-      encoded: encoded,
+      encodedLength: encodedLength,
       summary: FolderSummaryView(
         files: manifest.files,
         folders: manifest.folders,

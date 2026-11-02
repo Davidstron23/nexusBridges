@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
-import 'dart:typed_data';
 
 import '../identity/identity.dart' show DeviceIdentity;
 import '../pairing/pairing.dart' show PairedDevicesStore;
@@ -20,6 +19,7 @@ import 'folder_stream.dart';
 import 'folders.dart' show isAdminShare, isInsideTempFolder, isSameOrInside;
 import 'link.dart';
 import 'loose_file.dart';
+import 'manifest.dart' show encodeManifestChunks;
 import 'messages.dart';
 import 'names.dart'
     show
@@ -45,19 +45,6 @@ import 'windows_folder_io.dart'
 const Duration _pollMargin = Duration(seconds: 3);
 
 const Duration _retryDelay = Duration(seconds: 1);
-
-const int _manifestSliceBytes = 65536;
-
-Stream<List<int>> _slices(Uint8List data) async* {
-  for (var offset = 0; offset < data.length; offset += _manifestSliceBytes) {
-    final end = offset + _manifestSliceBytes;
-    yield Uint8List.sublistView(
-      data,
-      offset,
-      end < data.length ? end : data.length,
-    );
-  }
-}
 
 Future<DataCheck> _checkData(String path, String dataPath) =>
     Isolate.run(() => checkAgainstData(path, dataPath));
@@ -704,7 +691,7 @@ final class TransferSender {
       bytes: manifest.totalBytes,
       depth: manifest.depth,
       longest: manifest.longest,
-      manifestBytes: plan.encoded.length,
+      manifestBytes: plan.encodedLength,
     );
     final reply = await session.link.post(
       ApiPaths.transferOffer,
@@ -750,8 +737,8 @@ final class TransferSender {
     final result = await session.link.uploadManifest(
       transfer: id,
       permit: permit,
-      body: _slices(plan.encoded),
-      contentLength: plan.encoded.length,
+      body: Stream<List<int>>.fromIterable(encodeManifestChunks(plan.manifest)),
+      contentLength: plan.encodedLength,
       onProgress: (_) {},
       onBodySent: () {},
       idleTimeout: _idleTimeout,

@@ -1062,7 +1062,7 @@ void main() {
         }
       }
       expect(grown.map((c) => c.$2).toSet().length, greaterThan(2));
-      expect(grown.map((c) => c.$3).reduce((a, b) => a > b ? a : b), 5);
+      expect(grown.map((c) => c.$3).reduce((a, b) => a > b ? a : b), 6);
       expect(s.coordinator.lastReceived?.outcome, TransferOutcome.saved);
       expect(s.coordinator.lastReceived?.fileCount, 6);
     }, timeout: long);

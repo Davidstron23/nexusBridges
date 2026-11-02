@@ -12,7 +12,6 @@ import '../transport/transport.dart' show AbortSignal;
 import 'folder_plan.dart' show FolderPlan;
 import 'folder_stream.dart' show encodeFrameHeader;
 import 'hashing.dart' show startSha256;
-import 'manifest.dart' show FolderManifest, ManifestBuilder;
 import 'windows_folder_io.dart'
     show ReadCancelGate, ReadCancelPort, openFileForSend;
 
@@ -57,10 +56,6 @@ final class FolderReadDone extends FolderReadEvent {
 final class _ReadRequest {
   const _ReadRequest({
     required this.port,
-    required this.rootPath,
-    required this.manifest,
-    required this.volumes,
-    required this.indexes,
     required this.strict,
     required this.cancelSlot,
     required this.cancelMutex,
@@ -69,28 +64,25 @@ final class _ReadRequest {
   final int cancelSlot;
   final int cancelMutex;
   final SendPort port;
-  final String rootPath;
-  final FolderManifest manifest;
-  final Uint32List volumes;
-  final Uint64List indexes;
   final bool strict;
 }
 
 Future<bool> _readEntry({
   required _ReadRequest request,
   required Pointer<Uint8> buffer,
-  required int entry,
-  required int ordinal,
+  required String path,
+  required int expected,
+  required String? hashHex,
+  required int volume,
+  required int index,
   required bool Function() stopped,
   required Future<void> Function() creditAvailable,
   required void Function() spendCredit,
 }) async {
-  final manifest = request.manifest;
-  final expected = manifest.sizeOf(entry);
   final reader = openFileForSend(
-    path: _join(request.rootPath, manifest.relativePath(entry)),
-    volume: request.volumes[ordinal],
-    index: request.indexes[ordinal],
+    path: path,
+    volume: volume,
+    index: index,
     size: request.strict ? expected : null,
     cancelPort: ReadCancelPort(request.cancelSlot, request.cancelMutex),
   );
@@ -115,7 +107,7 @@ Future<bool> _readEntry({
     if (!request.strict) return true;
     if (reader.read(buffer, 1) != 0) return false;
     final hex = digest.close();
-    return hex != null && hex == manifest.hashHexOf(entry);
+    return hex != null && hex == hashHex;
   } finally {
     digest.dispose();
     reader.close();
@@ -160,15 +152,16 @@ Future<void> _readerMain(_ReadRequest request) async {
         continue;
       }
       final command = pending.removeFirst();
-      final entry = command[1] as int;
-      final ordinal = command[2] as int;
       var ok = false;
       try {
         ok = await _readEntry(
           request: request,
           buffer: buffer,
-          entry: entry,
-          ordinal: ordinal,
+          path: command[1] as String,
+          expected: command[2] as int,
+          hashHex: command[3] as String?,
+          volume: command[4] as int,
+          index: command[5] as int,
           stopped: () => stopped,
           creditAvailable: () async {
             while (credits == 0 && !stopped) {
@@ -206,7 +199,7 @@ final class FolderReadJob {
   final ReadCancelGate _gate;
   bool _gateReleased = false;
   final Queue<FolderReadEvent> _events = Queue<FolderReadEvent>();
-  final List<List<Object>> _early = [];
+  final List<List<Object?>> _early = [];
   SendPort? _commands;
   Completer<void>? _waiter;
   Isolate? _isolate;
@@ -215,49 +208,14 @@ final class FolderReadJob {
   bool _closed = false;
   bool _portClosed = false;
 
-  static FolderReadJob start(FolderPlan plan) => _launch(
-    (port, gate) => _ReadRequest(
-      port: port,
-      rootPath: plan.rootPath,
-      manifest: plan.manifest,
-      volumes: plan.fileVolumes,
-      indexes: plan.fileIndexes,
-      strict: true,
-      cancelSlot: gate.slotAddress,
-      cancelMutex: gate.mutexAddress,
-    ),
-  );
-
-  static FolderReadJob startFile({
-    required String path,
-    required int volume,
-    required int index,
-    required int size,
-  }) {
-    final cut = path.lastIndexOf(r'\');
-    final builder = ManifestBuilder();
-    builder
-      ..addFile(0, path.substring(cut + 1), size)
-      ..setFile(1, size, Uint8List(32));
-    return _launch(
-      (port, gate) => _ReadRequest(
-        port: port,
-        rootPath: path.substring(0, cut),
-        manifest: builder.build(),
-        volumes: Uint32List.fromList([volume]),
-        indexes: Uint64List.fromList([index]),
-        strict: false,
-        cancelSlot: gate.slotAddress,
-        cancelMutex: gate.mutexAddress,
-      ),
-    );
-  }
-
-  static FolderReadJob _launch(
-    _ReadRequest Function(SendPort port, ReadCancelGate gate) build,
-  ) {
+  static FolderReadJob start({required bool strict}) {
     final job = FolderReadJob._();
-    final request = build(job._port.sendPort, job._gate);
+    final request = _ReadRequest(
+      port: job._port.sendPort,
+      strict: strict,
+      cancelSlot: job._gate.slotAddress,
+      cancelMutex: job._gate.mutexAddress,
+    );
     Isolate.spawn(_readerMain, request, onExit: job._exit.sendPort).then(
       (isolate) {
         job._isolate = isolate;
@@ -278,9 +236,15 @@ final class FolderReadJob {
     _gate.dispose();
   }
 
-  void open(int entry, int ordinal) {
+  void open({
+    required String path,
+    required int size,
+    required String? hashHex,
+    required int volume,
+    required int index,
+  }) {
     if (_closed || _dead) return;
-    final command = <Object>[_openCommand, entry, ordinal];
+    final command = <Object?>[_openCommand, path, size, hashHex, volume, index];
     final commands = _commands;
     if (commands == null) {
       _early.add(command);
@@ -376,7 +340,7 @@ Stream<List<int>> folderStream(
   final manifest = plan.manifest;
   final committed = BytesBuilder(copy: false);
   final pending = BytesBuilder(copy: false);
-  final job = FolderReadJob.start(plan);
+  final job = FolderReadJob.start(strict: true);
   final remove = abort.onAbort(job.interrupt);
   try {
     var ordinal = 0;
@@ -385,7 +349,14 @@ Stream<List<int>> folderStream(
       await beforeEntry(index);
       if (abort.aborted) return;
       pending.add(encodeFrameHeader(index, manifest.sizeOf(index)));
-      job.open(index, ordinal++);
+      job.open(
+        path: _join(plan.rootPath, manifest.relativePath(index)),
+        size: manifest.sizeOf(index),
+        hashHex: manifest.hashHexOf(index),
+        volume: plan.fileVolumes[ordinal],
+        index: plan.fileIndexes[ordinal],
+      );
+      ordinal++;
       var ok = false;
       while (true) {
         final event = await job.next();
