@@ -280,6 +280,7 @@ final class TransferStack {
     FolderRevealer? revealer,
     MarkFile? markFile,
     ClearHidden? clearHidden,
+    ExclusionSource exclusions = const NoExclusionSource(),
   }) async {
     final root = await transferFolder('nexus_t11_');
     final base = (await realFs.realPath(root.path))!;
@@ -347,6 +348,7 @@ final class TransferStack {
       idleTimeout: idleTimeout,
       confirmTimeout: confirmTimeout,
       writeBytes: writeBytes ?? writeAllBytes,
+      exclusions: exclusions,
       beforeStreamEntry: beforeStreamEntry,
       revealer: revealer,
       markFile: markFile,

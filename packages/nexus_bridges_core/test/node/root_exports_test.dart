@@ -201,6 +201,8 @@ void main() {
 
     test('from transfer it only shows the view types of the app', () {
       expect(exports['../transfer/transfer.dart'], {
+        'FirstLevelItem',
+        'FolderSummaryView',
         'OutgoingTransferView',
         'OutgoingPhase',
         'IncomingTransferView',

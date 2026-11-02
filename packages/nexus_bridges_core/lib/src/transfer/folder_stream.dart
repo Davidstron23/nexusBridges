@@ -111,25 +111,27 @@ final class FrameLayout {
   FrameLayout(FolderManifest manifest) {
     final count = manifest.files;
     _ends = Int64List(count);
-    _payloadBefore = Int64List(count);
-    _sizes = Int64List(count);
     var offset = 0;
-    var payload = 0;
     for (var i = 0; i < count; i++) {
-      final size = manifest.sizeOf(manifest.fileIndexes[i]);
-      _sizes[i] = size;
-      _payloadBefore[i] = payload;
-      offset += frameHeaderBytes + size + frameTrailerBytes;
-      payload += size;
+      offset +=
+          frameHeaderBytes +
+          manifest.sizeOf(manifest.fileIndexes[i]) +
+          frameTrailerBytes;
       _ends[i] = offset;
     }
     totalBytes = offset;
   }
 
+  static const int _overhead = frameHeaderBytes + frameTrailerBytes;
+
   late final Int64List _ends;
-  late final Int64List _payloadBefore;
-  late final Int64List _sizes;
   late final int totalBytes;
+
+  int _startOf(int ordinal) => ordinal == 0 ? 0 : _ends[ordinal - 1];
+
+  int _sizeOf(int ordinal) => _ends[ordinal] - _startOf(ordinal) - _overhead;
+
+  int _payloadBefore(int ordinal) => _startOf(ordinal) - ordinal * _overhead;
 
   ({int files, int payload}) progressAt(int rawSent) {
     final count = _ends.length;
@@ -147,14 +149,12 @@ final class FrameLayout {
     if (low >= count) {
       return (
         files: count,
-        payload: _payloadBefore[count - 1] + _sizes[count - 1],
+        payload: _payloadBefore(count - 1) + _sizeOf(count - 1),
       );
     }
-    final start = low == 0 ? 0 : _ends[low - 1];
-    final inFrame = rawSent - start - frameHeaderBytes;
-    final partial = inFrame <= 0
-        ? 0
-        : (inFrame > _sizes[low] ? _sizes[low] : inFrame);
-    return (files: low, payload: _payloadBefore[low] + partial);
+    final inFrame = rawSent - _startOf(low) - frameHeaderBytes;
+    final size = _sizeOf(low);
+    final partial = inFrame <= 0 ? 0 : (inFrame > size ? size : inFrame);
+    return (files: low, payload: _payloadBefore(low) + partial);
   }
 }

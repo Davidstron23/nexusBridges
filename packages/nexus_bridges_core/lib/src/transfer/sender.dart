@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
-import 'dart:typed_data';
 
 import '../identity/identity.dart' show DeviceIdentity;
 import '../pairing/pairing.dart' show PairedDevicesStore;
@@ -17,8 +17,9 @@ import 'folder_plan.dart';
 import 'folder_send.dart';
 import 'folder_stream.dart';
 import 'folders.dart' show isInsideTempFolder, isSameOrInside;
-import 'hashing.dart';
 import 'link.dart';
+import 'loose_file.dart';
+import 'manifest.dart' show encodeManifestChunks;
 import 'messages.dart';
 import 'names.dart'
     show
@@ -26,28 +27,28 @@ import 'names.dart'
         isBlockedType,
         isDriveRoot,
         isProgram,
+        isSenderAdministrativeShare,
         isShortcutName,
         isValidFileName,
         visibleFileName;
 import 'platform.dart';
 import 'transfer.dart';
+import 'windows_folder_io.dart'
+    show
+        DataCheck,
+        FileHashCancelled,
+        FileHashResult,
+        FileHashed,
+        FileHashFailed,
+        FileHashSkipped,
+        checkAgainstData;
 
 const Duration _pollMargin = Duration(seconds: 3);
 
 const Duration _retryDelay = Duration(seconds: 1);
 
-const int _manifestSliceBytes = 65536;
-
-Stream<List<int>> _slices(Uint8List data) async* {
-  for (var offset = 0; offset < data.length; offset += _manifestSliceBytes) {
-    final end = offset + _manifestSliceBytes;
-    yield Uint8List.sublistView(
-      data,
-      offset,
-      end < data.length ? end : data.length,
-    );
-  }
-}
+Future<DataCheck> _checkData(String path, String dataPath) =>
+    Isolate.run(() => checkAgainstData(path, dataPath));
 
 String _randomHex32() {
   final random = Random.secure();
@@ -75,8 +76,16 @@ final class _OutSession {
 
   final String? realPath;
 
+  String? sourcePath;
+
+  int sourceVolume = 0;
+
+  int sourceIndex = 0;
+
   final Completer<TransferResultView?> completion =
       Completer<TransferResultView?>();
+
+  final Set<Future<Object?>> cancels = {};
 
   FolderPlanJob? planJob;
 
@@ -444,12 +453,16 @@ final class TransferSender {
     final name = baseName(path);
     final device = _paired.deviceOf(target.fingerprint);
     final peerName = device == null ? null : sanitizeDisplayName(device.name);
-    SendTarget? current;
-    try {
-      current = refresh();
-    } catch (e) {
-      _log('send target refresh failed: ${e.runtimeType}');
+    SendTarget? currentTarget() {
+      try {
+        return refresh();
+      } catch (e) {
+        _log('send target refresh failed: ${e.runtimeType}');
+        return null;
+      }
     }
+
+    final current = currentTarget();
     void record(TransferOutcome outcome, {String? problemPath}) {
       _record(
         target.fingerprint,
@@ -509,8 +522,34 @@ final class TransferSender {
       record(TransferOutcome.protectedData);
       return null;
     }
-    if (_closed) return null;
+    if (isSenderAdministrativeShare(path) ||
+        isSenderAdministrativeShare(real)) {
+      record(TransferOutcome.protectedData);
+      return null;
+    }
     final isFolder = kind == FileSystemEntityType.directory;
+    if (dataReal != null) {
+      switch (await _checkData(real, dataReal)) {
+        case DataCheck.clear:
+          break;
+        case DataCheck.inData:
+          record(TransferOutcome.protectedData);
+          return null;
+        case DataCheck.unreadable:
+          record(TransferOutcome.unreadable);
+          return null;
+      }
+    }
+    if (_closed) return null;
+    if (_paired.deviceOf(target.fingerprint) == null) {
+      record(TransferOutcome.unpaired);
+      return null;
+    }
+    final latest = currentTarget();
+    if (latest == null || latest.fingerprint != target.fingerprint) {
+      record(TransferOutcome.noContact);
+      return null;
+    }
     if (!isValidFileName(name)) {
       record(TransferOutcome.invalidName, problemPath: isFolder ? name : null);
       return null;
@@ -520,8 +559,8 @@ final class TransferSender {
       return null;
     }
     final session = _OutSession(
-      target: current,
-      link: TransferLink(identity: _identity, target: current),
+      target: latest,
+      link: TransferLink(identity: _identity, target: latest),
       path: path,
       name: name,
       peerName: peerName,
@@ -608,7 +647,6 @@ final class TransferSender {
     );
     session.planJob = job;
     final result = await job.result;
-    session.planJob = null;
     if (session.done) return;
     switch (result) {
       case PlanCancelled():
@@ -617,7 +655,34 @@ final class TransferSender {
         session.problemPath = problemPath;
         _finish(session, outcome);
       case PlanReady(:final plan):
+        unawaited(_trackExcludedBytes(session, job));
         await _requestFolder(session, plan);
+    }
+  }
+
+  Future<void> _trackExcludedBytes(
+    _OutSession session,
+    FolderPlanJob job,
+  ) async {
+    try {
+      final measured = await job.excluded;
+      final summary = session.summary;
+      if (session.done || summary == null) return;
+      session.summary = FolderSummaryView(
+        files: summary.files,
+        folders: summary.folders,
+        totalBytes: summary.totalBytes,
+        excludedFolders: summary.excludedFolders,
+        excludedBytes: measured.bytes,
+        excludedBytesPartial: measured.partial,
+        linksOmitted: summary.linksOmitted,
+        protectedOmitted: summary.protectedOmitted,
+        blockedOmitted: summary.blockedOmitted,
+        containsPrograms: summary.containsPrograms,
+      );
+      _onChanged();
+    } catch (e) {
+      _log('excluded size failed: ${e.runtimeType}');
     }
   }
 
@@ -641,7 +706,7 @@ final class TransferSender {
       bytes: manifest.totalBytes,
       depth: manifest.depth,
       longest: manifest.longest,
-      manifestBytes: plan.encoded.length,
+      manifestBytes: plan.encodedLength,
     );
     final reply = await session.link.post(
       ApiPaths.transferOffer,
@@ -687,8 +752,8 @@ final class TransferSender {
     final result = await session.link.uploadManifest(
       transfer: id,
       permit: permit,
-      body: _slices(plan.encoded),
-      contentLength: plan.encoded.length,
+      body: Stream<List<int>>.fromIterable(encodeManifestChunks(plan.manifest)),
+      contentLength: plan.encodedLength,
       onProgress: (_) {},
       onBodySent: () {},
       idleTimeout: _idleTimeout,
@@ -761,32 +826,60 @@ final class TransferSender {
         _onChanged();
       }),
     );
-    FileDigest? digest;
+    final source = session.realPath ?? await _fs.realPath(path);
+    if (session.done) return;
+    if (source == null) {
+      await _conclude(session, TransferOutcome.unreadable);
+      return;
+    }
+    final dataReal = _dataDirPath.isEmpty
+        ? ''
+        : await _fs.realPath(_dataDirPath) ?? _dataDirPath;
+    if (session.done) return;
+    final FileHashResult hashed;
     try {
-      digest = await hashFile(path, abort: session.abort);
-    } on FileSystemException catch (e) {
+      hashed = await hashLooseFile(
+        path: source,
+        dataPath: dataReal,
+        abort: session.abort,
+      );
+    } catch (e) {
       _log('send source unreadable: ${e.runtimeType}');
       await _conclude(session, TransferOutcome.unreadable);
       return;
     }
     if (session.done) return;
-    if (digest == null) {
-      await _conclude(session, TransferOutcome.cancelledHere);
-      return;
+    switch (hashed) {
+      case FileHashCancelled():
+        await _conclude(session, TransferOutcome.cancelledHere);
+        return;
+      case FileHashSkipped():
+        await _conclude(session, TransferOutcome.protectedData);
+        return;
+      case FileHashFailed():
+        _log('send source unreadable: FileSystemException');
+        await _conclude(session, TransferOutcome.unreadable);
+        return;
+      case FileHashed():
+        break;
     }
+    session
+      ..sourcePath = source
+      ..sourceVolume = hashed.volume
+      ..sourceIndex = hashed.index;
     session.isProgram = await session.typeCheck;
     if (session.done) return;
     final id = _randomHex32();
     session
       ..id = id
-      ..size = digest.size
+      ..size = hashed.size
       ..phase = OutgoingPhase.requesting;
     _onChanged();
     final offer = OfferRequest(
       transfer: id,
       name: session.name,
-      size: digest.size,
-      sha256: digest.sha256,
+      size: hashed.size,
+      sha256: hexOfDigest(hashed.sha256),
     );
     final reply = await session.link.post(
       ApiPaths.transferOffer,
@@ -909,7 +1002,13 @@ final class TransferSender {
     }
     final plan = session.plan;
     final layout = session.layout;
-    final result = session.isFolder && plan != null && layout != null
+    final source = session.sourcePath;
+    final folderBody = session.isFolder && plan != null && layout != null;
+    if (!folderBody && source == null) {
+      _finish(session, TransferOutcome.unreadable);
+      return;
+    }
+    final result = folderBody
         ? await session.link.uploadFolder(
             transfer: id,
             permit: permit,
@@ -928,11 +1027,17 @@ final class TransferSender {
             answerTimeout: Limits.transferConfirmCap,
             abort: session.abort,
           )
-        : await session.link.upload(
+        : await session.link.uploadFolder(
             transfer: id,
             permit: permit,
-            filePath: session.path,
-            size: session.size,
+            body: looseFileStream(
+              path: source!,
+              volume: session.sourceVolume,
+              index: session.sourceIndex,
+              size: session.size,
+              abort: session.abort,
+            ),
+            contentLength: session.size,
             onProgress: (sent) => _progress(session, sent),
             onBodySent: () => _bodySent(session),
             idleTimeout: _idleTimeout,
@@ -1210,7 +1315,13 @@ final class TransferSender {
       timeout: timeout,
     );
     _cancels.add(pending);
-    unawaited(pending.whenComplete(() => _cancels.remove(pending)));
+    session.cancels.add(pending);
+    unawaited(
+      pending.whenComplete(() {
+        _cancels.remove(pending);
+        session.cancels.remove(pending);
+      }),
+    );
     return pending;
   }
 
@@ -1243,7 +1354,24 @@ final class TransferSender {
     );
     _lastSent = result;
     _onChanged();
-    if (!session.completion.isCompleted) session.completion.complete(result);
+    _completeAfterCancels(session, result);
+  }
+
+  void _completeAfterCancels(_OutSession session, TransferResultView result) {
+    void complete() {
+      if (!session.completion.isCompleted) session.completion.complete(result);
+    }
+
+    if (session.cancels.isEmpty) {
+      complete();
+      return;
+    }
+    unawaited(
+      Future.wait<Object?>(session.cancels.toList())
+          .then<void>((_) {}, onError: (Object _) {})
+          .timeout(Limits.transferCancelTimeout, onTimeout: () {})
+          .whenComplete(complete),
+    );
   }
 
   Future<void> _keepGap(_OutSession session, Duration sentAt) {

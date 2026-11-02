@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' show min;
 import 'dart:typed_data';
 
 import '../protocol/protocol.dart' show Limits;
@@ -13,6 +14,7 @@ const int _tempFolderUnits = 26;
 const int _maxPathUnits = 259;
 const int _frameOverhead = 13;
 const int _headSize = 5;
+const int _manifestChunkBytes = 65536;
 const String _gitName = '.git';
 
 final RegExp _sha256Hex = RegExp(r'^[0-9a-f]{64}$');
@@ -305,25 +307,62 @@ final class ManifestBuilder {
   }
 }
 
-Uint8List encodeManifest(FolderManifest manifest) {
-  final buffer = StringBuffer();
-  for (var i = 1; i <= manifest.length; i++) {
+Uint8List _encodeLine(FolderManifest manifest, int index) {
+  final buffer = StringBuffer()
+    ..write('[')
+    ..write(manifest.parentOf(index))
+    ..write(',')
+    ..write(jsonEncode(manifest.nameOf(index)));
+  if (!manifest.isFolder(index)) {
     buffer
-      ..write('[')
-      ..write(manifest.parentOf(i))
       ..write(',')
-      ..write(jsonEncode(manifest.nameOf(i)));
-    if (!manifest.isFolder(i)) {
-      buffer
-        ..write(',')
-        ..write(manifest.sizeOf(i))
-        ..write(',"')
-        ..write(manifest.hashHexOf(i))
-        ..write('"');
-    }
-    buffer.write(']\n');
+      ..write(manifest.sizeOf(index))
+      ..write(',"')
+      ..write(manifest.hashHexOf(index))
+      ..write('"');
   }
-  return Uint8List.fromList(utf8.encode(buffer.toString()));
+  buffer.write(']\n');
+  return utf8.encode(buffer.toString());
+}
+
+Iterable<Uint8List> encodeManifestChunks(
+  FolderManifest manifest, {
+  int chunkBytes = _manifestChunkBytes,
+}) sync* {
+  var chunk = Uint8List(chunkBytes);
+  var filled = 0;
+  for (var i = 1; i <= manifest.length; i++) {
+    final line = _encodeLine(manifest, i);
+    var copied = 0;
+    while (copied < line.length) {
+      final count = min(chunkBytes - filled, line.length - copied);
+      chunk.setRange(filled, filled + count, line, copied);
+      filled += count;
+      copied += count;
+      if (filled == chunkBytes) {
+        yield chunk;
+        chunk = Uint8List(chunkBytes);
+        filled = 0;
+      }
+    }
+  }
+  if (filled > 0) yield Uint8List.sublistView(chunk, 0, filled);
+}
+
+int encodedManifestLength(FolderManifest manifest) {
+  var total = 0;
+  for (var i = 1; i <= manifest.length; i++) {
+    total += _encodeLine(manifest, i).length;
+  }
+  return total;
+}
+
+Uint8List encodeManifest(FolderManifest manifest) {
+  final builder = BytesBuilder(copy: false);
+  for (final chunk in encodeManifestChunks(manifest)) {
+    builder.add(chunk);
+  }
+  return builder.takeBytes();
 }
 
 final class ManifestReader {

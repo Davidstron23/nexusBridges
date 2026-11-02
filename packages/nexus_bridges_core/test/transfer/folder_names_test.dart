@@ -117,4 +117,107 @@ void main() {
       });
     }
   });
+
+  group(
+    'B-2, RF-306: isDriveRoot with the root of an administrative share',
+    () {
+      for (final path in [
+        r'\\x\D$',
+        r'\\x\D$\',
+        r'\\localhost\C$',
+        r'\\localhost\c$\',
+        r'\\127.0.0.1\C$',
+        r'\\SOBREMESA\E$',
+        r'//localhost/C$',
+        r'//localhost/C$/',
+        r'\\?\UNC\localhost\C$',
+        r'\\?\UNC\localhost\C$\',
+        r'\\?\unc\localhost\C$',
+        r'\\.\UNC\localhost\C$',
+        r'\\.\UNC\localhost\C$\',
+      ]) {
+        test('"$path" is a drive root', () {
+          expect(isDriveRoot(path), isTrue);
+        });
+      }
+
+      for (final path in [
+        r'\\x\D$\folder',
+        r'\\x\D$\folder\',
+        r'\\localhost\C$\Users',
+        r'\\localhost\C$\Users\David\AppData\Local\NexusBridges',
+        r'//localhost/C$/Users',
+        r'\\?\UNC\localhost\C$\Users',
+        r'\\.\UNC\localhost\C$\Users',
+        r'\\server\share',
+        r'\\server\share\',
+        r'\\server\share\D$',
+        r'\\server',
+        r'\\server\',
+        r'\\?\UNC\server\share',
+        r'\\.\UNC\server\share',
+        r'C:\x\D$',
+        r'\\nas\fotos$',
+        r'\\nas\fotos$\',
+        r'\\nas\fotos$\x',
+        r'\\x\ADMIN$',
+        r'\\x\IPC$',
+        r'\\x\PRINT$',
+        r'\\?\UNC\nas\fotos$',
+      ]) {
+        test('"$path" is not a drive root', () {
+          expect(isDriveRoot(path), isFalse);
+        });
+      }
+    },
+  );
+
+  group('Q-4, SEC-12: isSenderAdministrativeShare', () {
+    for (final path in [
+      r'\\x\C$',
+      r'\\x\c$\x',
+      r'\\x\D$\',
+      r'\\x\z$\a\b',
+      r'\\x\ADMIN$',
+      r'\\x\admin$\x',
+      r'\\x\Admin$\x\',
+      r'\\x\IPC$',
+      r'\\x\ipc$\x',
+      r'\\x\PRINT$',
+      r'\\x\print$\x',
+      r'//x/C$/x',
+      r'\\?\UNC\x\C$',
+      r'\\?\UNC\x\c$\x',
+      r'\\?\unc\x\ADMIN$\x',
+      r'\\.\UNC\x\C$\x',
+      r'\\.\UNC\x\IPC$',
+      r'\\localhost\C$\Users\David\AppData\Local\NexusBridges',
+    ]) {
+      test('"$path" is an administrative share', () {
+        expect(isSenderAdministrativeShare(path), isTrue);
+      });
+    }
+
+    for (final path in [
+      r'\\nas\fotos$',
+      r'\\nas\fotos$\x',
+      r'\\nas\fotos$\',
+      r'\\?\UNC\nas\fotos$\x',
+      r'\\.\UNC\nas\fotos$\x',
+      r'\\nas\backup$\C$',
+      r'\\nas\CC$\x',
+      r'\\nas\ADMINS$\x',
+      r'\\nas\fotos\C$',
+      r'\\server\share',
+      r'\\server',
+      r'C:\x\C$',
+      r'C:\Users',
+      r'\\?\C:\Users',
+      '',
+    ]) {
+      test('"$path" is not an administrative share', () {
+        expect(isSenderAdministrativeShare(path), isFalse);
+      });
+    }
+  });
 }

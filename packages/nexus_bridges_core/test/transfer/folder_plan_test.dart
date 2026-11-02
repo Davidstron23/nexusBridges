@@ -483,7 +483,7 @@ void main() {
           if (!run.manifest.isFolder(i)) hexOf(run.manifest.hashOf(i)),
       ], isNot(contains(sha(markerContent))));
       expect(
-        utf8.decode(run.plan.encoded, allowMalformed: true),
+        utf8.decode(encodeManifest(run.plan.manifest), allowMalformed: true),
         isNot(contains('copy.bin')),
       );
     }, timeout: long);
@@ -788,7 +788,8 @@ void main() {
       final run = await runPlan(root);
 
       expect(run.plan.summary.totalBytes, 3 + 14 + 5000);
-      expect(run.plan.encoded.length, greaterThan(0));
+      expect(run.plan.encodedLength, encodeManifest(run.plan.manifest).length);
+      expect(run.plan.encodedLength, greaterThan(0));
       expect(run.plan.rootPath, root);
     }, timeout: long);
   });

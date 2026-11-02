@@ -940,7 +940,10 @@ void main() {
 
       await s.coordinator.cleanupAtStart();
 
-      expect(Directory(orphan).existsSync(), isFalse);
+      await eventually(
+        () => !Directory(orphan).existsSync(),
+        reason: 'orphan temporary folder removed',
+      );
       expect(Directory(active).existsSync(), isTrue);
       expect(File('$active\\a.bin').readAsBytesSync(), content(95, 90 * kib));
       run.held.send(job.tree.frames[1]);
@@ -1059,7 +1062,7 @@ void main() {
         }
       }
       expect(grown.map((c) => c.$2).toSet().length, greaterThan(2));
-      expect(grown.map((c) => c.$3).reduce((a, b) => a > b ? a : b), 5);
+      expect(grown.map((c) => c.$3).reduce((a, b) => a > b ? a : b), 6);
       expect(s.coordinator.lastReceived?.outcome, TransferOutcome.saved);
       expect(s.coordinator.lastReceived?.fileCount, 6);
     }, timeout: long);

@@ -1243,7 +1243,7 @@ void main() {
       expect(await push(64 * kib), 1);
       expect(
         s.views.last?.receivedBytes,
-        inInclusiveRange(sent - 64 * kib + 1, sent),
+        inInclusiveRange(sent - 64 * kib, sent),
       );
       s.clock.advance(const Duration(milliseconds: 100));
       expect(await push(64 * kib), 0);
@@ -1251,7 +1251,7 @@ void main() {
       expect(await push(64 * kib), 1);
       expect(
         s.views.last?.receivedBytes,
-        inInclusiveRange(sent - 64 * kib + 1, sent),
+        inInclusiveRange(sent - 64 * kib, sent),
       );
 
       held.sendAll(Uint8List.sublistView(a.bytes, sent));

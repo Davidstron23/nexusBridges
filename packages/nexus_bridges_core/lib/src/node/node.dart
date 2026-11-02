@@ -18,6 +18,7 @@ import '../settings/settings.dart' show SavedReceiveFolder, SettingsStore;
 import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
 import '../transfer/transfer.dart'
     show
+        ExclusionSource,
         FilePicker,
         FileSystemPlatform,
         FolderRevealer,
@@ -46,6 +47,8 @@ export '../pairing_flow/pairing_flow.dart'
 export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
 export '../transfer/transfer.dart'
     show
+        FirstLevelItem,
+        FolderSummaryView,
         OutgoingTransferView,
         OutgoingPhase,
         IncomingTransferView,
@@ -109,6 +112,15 @@ final class _SettingsReceiveFolders implements ReceiveFolderStore {
       return false;
     }
   }
+}
+
+final class _SettingsExclusions implements ExclusionSource {
+  _SettingsExclusions(this._settings);
+
+  final SettingsStore _settings;
+
+  @override
+  Future<List<String>?> load() => _settings.readExclusions();
 }
 
 final class NexusNode {
@@ -839,6 +851,7 @@ final class NexusNode {
       idleTimeout: _transferIdleTimeout,
       confirmTimeout: _transferConfirmTimeout,
       writeBytes: _transferWriteBytes ?? writeAllBytes,
+      exclusions: _SettingsExclusions(settings),
       log: _log,
     );
     final server = ApiServer(

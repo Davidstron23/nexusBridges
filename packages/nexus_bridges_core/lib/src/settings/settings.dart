@@ -5,6 +5,8 @@ import '../storage/storage.dart';
 final RegExp _folderPathStart = RegExp(r'^(?:[A-Za-z]:\\|\\\\)');
 final RegExp _folderVolume = RegExp(r'^[A-Za-z0-9]{1,16}-[0-9a-f]{8}$');
 const int _maxFolderPathUnits = 32767;
+const int _maxExclusions = 64;
+const int _maxExclusionUnits = 255;
 
 bool _isValidSavedFolder(String path, String volume) =>
     path.isNotEmpty &&
@@ -28,6 +30,25 @@ final class SettingsStore {
     try {
       final language = (await _store.readVersioned(1))?['language'];
       return language == 'es' || language == 'en' ? language as String : null;
+    } on Exception {
+      return null;
+    }
+  }
+
+  Future<List<String>?> readExclusions() async {
+    try {
+      final raw = (await _store.readVersioned(1))?['exclusions'];
+      if (raw is! List<Object?> || raw.length > _maxExclusions) return null;
+      final names = <String>[];
+      for (final item in raw) {
+        if (item is! String ||
+            item.isEmpty ||
+            item.length > _maxExclusionUnits) {
+          return null;
+        }
+        names.add(item);
+      }
+      return names;
     } on Exception {
       return null;
     }

@@ -5,7 +5,8 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
-import 'folder_walk.dart' show FolderLister, ListedEntry, isLinkTag;
+import 'folder_walk.dart'
+    show DataFolderKind, FolderLister, ListedEntry, isLinkTag;
 import 'hashing.dart' show startSha256;
 
 const int _genericRead = 0x80000000;
@@ -443,6 +444,102 @@ String? _finalPath(Arena arena, HANDLE handle) {
 String? finalPathOfHandle(HANDLE handle) =>
     using((arena) => _finalPath(arena, handle));
 
+typedef _CreateMutexNative = Pointer<Void> Function(
+  Pointer<Void>,
+  Int32,
+  Pointer<Void>,
+);
+typedef _CreateMutex = Pointer<Void> Function(
+  Pointer<Void>,
+  int,
+  Pointer<Void>,
+);
+typedef _WaitNative = Uint32 Function(Pointer<Void>, Uint32);
+typedef _Wait = int Function(Pointer<Void>, int);
+typedef _ReleaseNative = Int32 Function(Pointer<Void>);
+typedef _Release = int Function(Pointer<Void>);
+
+const int _waitInfinite = 0xFFFFFFFF;
+const int _waitAbandoned = 0x80;
+
+final class _MutexApi {
+  _MutexApi._(this.create, this.wait, this.release);
+
+  static final _MutexApi instance = _load();
+
+  static _MutexApi _load() {
+    final library = DynamicLibrary.open('kernel32.dll');
+    return _MutexApi._(
+      library.lookupFunction<_CreateMutexNative, _CreateMutex>('CreateMutexW'),
+      library.lookupFunction<_WaitNative, _Wait>('WaitForSingleObject'),
+      library.lookupFunction<_ReleaseNative, _Release>('ReleaseMutex'),
+    );
+  }
+
+  final _CreateMutex create;
+  final _Wait wait;
+  final _Release release;
+
+  void locked(Pointer<Void> mutex, void Function() action) {
+    final result = wait(mutex, _waitInfinite);
+    if (result != 0 && result != _waitAbandoned) return;
+    try {
+      action();
+    } finally {
+      release(mutex);
+    }
+  }
+}
+
+final class ReadCancelGate {
+  ReadCancelGate._(this._slot, this._mutex);
+
+  factory ReadCancelGate.create() => ReadCancelGate._(
+    calloc<IntPtr>(),
+    _MutexApi.instance.create(nullptr, 0, nullptr),
+  );
+
+  final Pointer<IntPtr> _slot;
+  final Pointer<Void> _mutex;
+
+  int get slotAddress => _slot.address;
+
+  int get mutexAddress => _mutex.address;
+
+  void cancelPending() {
+    if (_mutex == nullptr) return;
+    _MutexApi.instance.locked(_mutex, () {
+      final address = _slot.value;
+      if (address == 0) return;
+      CancelIoEx(HANDLE(Pointer.fromAddress(address)), null);
+    });
+  }
+
+  void dispose() {
+    calloc.free(_slot);
+    if (_mutex != nullptr) HANDLE(_mutex).close();
+  }
+}
+
+final class ReadCancelPort {
+  ReadCancelPort(int slotAddress, int mutexAddress)
+    : _slot = Pointer<IntPtr>.fromAddress(slotAddress),
+      _mutex = Pointer<Void>.fromAddress(mutexAddress);
+
+  final Pointer<IntPtr> _slot;
+  final Pointer<Void> _mutex;
+
+  void publish(HANDLE handle) {
+    if (_mutex == nullptr) return;
+    _MutexApi.instance.locked(_mutex, () => _slot.value = handle.address);
+  }
+
+  void retract() {
+    if (_mutex == nullptr) return;
+    _MutexApi.instance.locked(_mutex, () => _slot.value = 0);
+  }
+}
+
 bool _isInside(String candidate, String rootFinal) =>
     candidate.toUpperCase().startsWith('${rootFinal.toUpperCase()}\\');
 
@@ -490,7 +587,8 @@ FileHashResult hashFileSync(
   String path, {
   required Pointer<Uint8> buffer,
   required bool Function() isCancelled,
-  bool Function(int volume, int index, int links)? isProtected,
+  bool Function(int volume, int index)? isProtected,
+  ReadCancelPort? cancelPort,
 }) {
   return using((arena) {
     final Win32Result(value: handle) = CreateFile(
@@ -504,6 +602,7 @@ FileHashResult hashFileSync(
     );
     if (!handle.isValid) return const FileHashFailed();
     final digest = startSha256();
+    cancelPort?.publish(handle);
     try {
       final resolved = _finalPath(arena, handle);
       if (resolved == null ||
@@ -524,7 +623,6 @@ FileHashResult hashFileSync(
           isProtected(
             info.ref.dwVolumeSerialNumber,
             (info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow,
-            info.ref.nNumberOfLinks,
           )) {
         return const FileHashSkipped();
       }
@@ -559,51 +657,203 @@ FileHashResult hashFileSync(
         links: info.ref.nNumberOfLinks,
       );
     } finally {
+      cancelPort?.retract();
       digest.dispose();
       handle.close();
     }
   });
 }
 
-Set<(int, int)> fileIdsUnder(String folderPath) {
+Set<(int, int)>? fileIdsUnder(
+  String folderPath, {
+  bool includeFolders = false,
+}) {
   final ids = <(int, int)>{};
-  void visit(String folder) {
+  bool addIdentityOf(String path) {
+    final identity = _pathIdentity(path);
+    if (!identity.found) return false;
+    ids.add((identity.volume, identity.index));
+    return true;
+  }
+
+  bool isMissing(String folder) =>
+      FileSystemEntity.typeSync(folder, followLinks: false) ==
+      FileSystemEntityType.notFound;
+
+  bool visit(String folder) {
     final List<RawEntry> entries;
     try {
       entries = listDirectorySync(folder);
     } catch (_) {
-      return;
+      return isMissing(folder);
     }
+    if (includeFolders && !addIdentityOf(folder)) return false;
     for (final entry in entries) {
       if ((entry.attributes & _attributeReparse) != 0) continue;
       final child = folder.endsWith(r'\')
           ? '$folder${entry.name}'
           : '$folder\\${entry.name}';
       if (entry.isDirectory) {
-        visit(child);
-      } else {
-        final id = _fileIdentity(child);
-        if (id != null) ids.add(id);
+        if (!visit(child)) return false;
+      } else if (!addIdentityOf(child)) {
+        return false;
       }
     }
+    return true;
   }
 
-  visit(folderPath);
-  return ids;
+  return visit(folderPath) ? ids : null;
 }
 
-(int, int)? _fileIdentity(String path) {
+final class _PathIdentity {
+  const _PathIdentity.found(this.volume, this.index, this.links) : error = 0;
+
+  const _PathIdentity.failed(this.error) : volume = 0, index = 0, links = 0;
+
+  final int volume;
+  final int index;
+  final int links;
+  final int error;
+
+  bool get found => error == 0;
+}
+
+_PathIdentity _pathIdentity(String path) {
   return using((arena) {
-    final Win32Result(value: handle) = CreateFile(
+    final Win32Result(value: handle, error: openError) = CreateFile(
       arena.pcwstr(extendedPath(path)),
       _fileReadAttributes,
       FILE_SHARE_MODE(_shareAll),
       null,
       OPEN_EXISTING,
-      FILE_FLAG_OPEN_REPARSE_POINT,
+      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
       null,
     );
-    if (!handle.isValid) return null;
+    if (!handle.isValid) return _PathIdentity.failed(openError);
+    try {
+      final info = arena<BY_HANDLE_FILE_INFORMATION>();
+      final Win32Result(value: informed, error: infoError) =
+          GetFileInformationByHandle(handle, info);
+      if (!informed) {
+        return _PathIdentity.failed(infoError == 0 ? 1 : infoError);
+      }
+      return _PathIdentity.found(
+        info.ref.dwVolumeSerialNumber,
+        (info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow,
+        info.ref.nNumberOfLinks,
+      );
+    } finally {
+      handle.close();
+    }
+  });
+}
+
+enum DataCheck { clear, inData, unreadable }
+
+DataCheck checkAgainstData(String path, String dataFolder) {
+  final identity = _pathIdentity(path);
+  if (!identity.found) return DataCheck.unreadable;
+  final ids = fileIdsUnder(dataFolder, includeFolders: true);
+  if (ids == null) return DataCheck.inData;
+  return ids.contains((identity.volume, identity.index))
+      ? DataCheck.inData
+      : DataCheck.clear;
+}
+
+DataFolderKind folderKindAmong(String path, Set<(int, int)> ids) {
+  final identity = _pathIdentity(path);
+  if (!identity.found) return DataFolderKind.unknown;
+  return ids.contains((identity.volume, identity.index))
+      ? DataFolderKind.inside
+      : DataFolderKind.outside;
+}
+
+final class SendFileReader {
+  SendFileReader._(this._handle, this.size, this._cancelPort)
+    : _count = calloc<Uint32>() {
+    _cancelPort?.publish(_handle);
+  }
+
+  final HANDLE _handle;
+  final ReadCancelPort? _cancelPort;
+  final Pointer<Uint32> _count;
+  final int size;
+  bool _closed = false;
+
+  int read(Pointer<Uint8> buffer, int length) {
+    if (_closed) return -1;
+    final Win32Result(value: ok) = ReadFile(
+      _handle,
+      buffer,
+      length,
+      _count,
+      null,
+    );
+    return ok ? _count.value : -1;
+  }
+
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _cancelPort?.retract();
+    _handle.close();
+    calloc.free(_count);
+  }
+}
+
+HANDLE? _openForSend(Arena arena, String path, {required bool reparse}) {
+  final Win32Result(value: handle) = CreateFile(
+    arena.pcwstr(extendedPath(path)),
+    _genericRead,
+    FILE_SHARE_MODE(_shareAll),
+    null,
+    OPEN_EXISTING,
+    reparse
+        ? FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_REPARSE_POINT
+        : FILE_FLAG_SEQUENTIAL_SCAN,
+    null,
+  );
+  return handle.isValid ? handle : null;
+}
+
+bool _isTheFileFromPlan(
+  Arena arena,
+  HANDLE handle, {
+  required String path,
+  required int volume,
+  required int index,
+  required int? size,
+}) {
+  final resolved = _finalPath(arena, handle);
+  if (resolved == null ||
+      resolved.toUpperCase() !=
+          stripExtendedPrefix(extendedPath(path)).toUpperCase()) {
+    return false;
+  }
+  final info = arena<BY_HANDLE_FILE_INFORMATION>();
+  final Win32Result(value: informed) = GetFileInformationByHandle(handle, info);
+  if (!informed) return false;
+  if ((info.ref.dwFileAttributes & _attributeDirectory) != 0) return false;
+  if (info.ref.dwVolumeSerialNumber != volume ||
+      ((info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow) != index) {
+    return false;
+  }
+  final length = arena<Int64>();
+  final Win32Result(value: sized) = GetFileSizeEx(handle, length);
+  return sized && (size == null || length.value == size);
+}
+
+SendFileReader? openFileForSend({
+  required String path,
+  required int volume,
+  required int index,
+  int? size,
+  ReadCancelPort? cancelPort,
+}) {
+  return using((arena) {
+    var handle = _openForSend(arena, path, reparse: true);
+    if (handle == null) return null;
+    var keep = false;
     try {
       final info = arena<BY_HANDLE_FILE_INFORMATION>();
       final Win32Result(value: informed) = GetFileInformationByHandle(
@@ -611,12 +861,30 @@ Set<(int, int)> fileIdsUnder(String folderPath) {
         info,
       );
       if (!informed) return null;
-      return (
-        info.ref.dwVolumeSerialNumber,
-        (info.ref.nFileIndexHigh << 32) | info.ref.nFileIndexLow,
-      );
+      if ((info.ref.dwFileAttributes & _attributeReparse) != 0) {
+        final tag = _folderReparseTag(arena, handle);
+        if (tag == null || isLinkTag(tag)) return null;
+        handle.close();
+        handle = _openForSend(arena, path, reparse: false);
+        if (handle == null) return null;
+      }
+      if (!_isTheFileFromPlan(
+        arena,
+        handle,
+        path: path,
+        volume: volume,
+        index: index,
+        size: size,
+      )) {
+        return null;
+      }
+      final length = arena<Int64>();
+      final Win32Result(value: sized) = GetFileSizeEx(handle, length);
+      if (!sized) return null;
+      keep = true;
+      return SendFileReader._(handle, length.value, cancelPort);
     } finally {
-      handle.close();
+      if (!keep && handle != null) handle.close();
     }
   });
 }
