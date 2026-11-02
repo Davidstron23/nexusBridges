@@ -13,6 +13,7 @@ import '../outbox/outbox.dart'
         QueueItemState,
         SelectionResult,
         SendQueues,
+        SendQueuesView,
         SendTray,
         TrayAddResult;
 import '../pairing/pairing.dart'
@@ -33,6 +34,7 @@ import '../transfer/transfer.dart'
         FilePicker,
         FileSystemPlatform,
         FolderRevealer,
+        OutgoingPhase,
         PeerCancelledTransfer,
         ReceiveFolder,
         ReceiveFolderNotSaved,
@@ -163,19 +165,20 @@ Future<ElementProbe> _probeElement(String path) async {
   return const ElementProbe(kind: ElementKind.other);
 }
 
-bool _sameStrings(List<String> a, List<String> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
-}
-
 final class _ElementSenderAdapter implements ElementSender {
-  _ElementSenderAdapter(this._transfers, this._targetOf);
+  _ElementSenderAdapter(this._transfers, this._targetOf, this._isForeign);
 
   final TransferCoordinator _transfers;
   final SendTarget? Function(String fingerprint) _targetOf;
+  final bool Function(String fingerprint) _isForeign;
+
+  @override
+  bool get cancelEndsQueue {
+    final outgoing = _transfers.outgoing;
+    return outgoing != null &&
+        outgoing.phase == OutgoingPhase.waiting &&
+        _isForeign(outgoing.peerFingerprint);
+  }
 
   @override
   Future<TransferResultView?> send(
@@ -562,18 +565,16 @@ final class NexusNode {
   Future<SendResult> sendTray(String fingerprint) async {
     final tray = _tray;
     if (_closing || tray == null) return SendResult.unavailable;
-    final sentIds = [for (final item in tray.items) item.id];
-    final sentPaths = tray.paths;
-    final result = await sendPaths(fingerprint, sentPaths);
-    if (result != SendResult.started && result != SendResult.queued) {
-      return result;
+    final batch = tray.take();
+    SendResult result;
+    try {
+      result = await sendPaths(fingerprint, batch.paths);
+    } catch (_) {
+      tray.restore(batch);
+      rethrow;
     }
-    final current = _tray;
-    if (current == null) return result;
-    if (_sameStrings(current.paths, sentPaths)) {
-      current.clear();
-    } else {
-      sentIds.forEach(current.remove);
+    if (result != SendResult.started && result != SendResult.queued) {
+      tray.restore(batch);
     }
     return result;
   }
@@ -1050,7 +1051,12 @@ final class NexusNode {
       log: _log,
     );
     final queues = SendQueues(
-      sender: _ElementSenderAdapter(transfers, _sendTargetOf),
+      sender: _ElementSenderAdapter(
+        transfers,
+        _sendTargetOf,
+        (fingerprint) =>
+            paired.deviceOf(fingerprint)?.relation == PeerRelation.foreign,
+      ),
       probe: _probeElement,
       measureFolder: (path, abort) => _measureFolder(exclusions, path, abort),
       log: _log,
@@ -1963,7 +1969,7 @@ final class NexusNode {
     _progressFolder = false;
   }
 
-  SelectionProgress? _selectionProgress() {
+  SelectionProgress? _selectionProgress(SendQueuesView? view) {
     final queues = _queues;
     final transfers = _transfers;
     if (queues == null) return null;
@@ -1973,7 +1979,6 @@ final class NexusNode {
       _resetProgress();
       _progressId = id;
     }
-    final view = queues.view;
     final outgoing = transfers?.outgoing;
     if (outgoing != null) {
       _progressName = outgoing.fileName;
@@ -2023,6 +2028,7 @@ final class NexusNode {
     final paired = _paired;
     final transfers = _transfers;
     final queues = _queues;
+    final queuesView = queues?.view;
     final incoming = transfers?.incoming;
     final next = NodeState(
       identityStatus: _identityStatus,
@@ -2067,10 +2073,10 @@ final class NexusNode {
               excluding: incoming.peerFingerprint,
               paired: paired.devices,
             ),
-      queues: queues?.view,
+      queues: queuesView,
       tray: _tray?.items ?? const [],
       sendingTo: _sendingTo(),
-      selectionProgress: _selectionProgress(),
+      selectionProgress: _selectionProgress(queuesView),
     );
     _state = next;
     final last = _lastEmitted;

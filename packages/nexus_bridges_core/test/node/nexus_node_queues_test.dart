@@ -713,6 +713,29 @@ void main() {
       expect(File('${b.recvDir}\\gone.txt').existsSync(), isFalse);
     }, timeout: transferTimeout);
 
+    test('a double sendTray sends each element once and the second call finds '
+        'the tray empty', () async {
+      final (a, b) = await transferNodes();
+      final one = await a.sourceFile('one.txt', _bytes(10));
+      final two = await a.sourceFile('two.txt', _bytes(11));
+      expect(await a.node.addToTray([one, two]), TrayResult.added);
+      await a.until((s) => s.tray.length == 2, reason: 'tray filled');
+
+      final results = await Future.wait([
+        a.node.sendTray(b.fingerprint),
+        a.node.sendTray(b.fingerprint),
+      ]);
+
+      expect(results.where((r) => r == SendResult.started), hasLength(1));
+      expect(results.where((r) => r == SendResult.nothingChosen), hasLength(1));
+      final view = await _finished(a);
+      expect(view.total, 2);
+      expect(view.delivered, 2);
+      expect(a.state.tray, isEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(b.filesIn(b.recvDir), ['one.txt', 'two.txt']);
+    }, timeout: transferTimeout);
+
     test('sendTray to a device that cannot take it leaves the tray as it '
         'was', () async {
       final (a, b) = await transferNodes();
@@ -823,7 +846,7 @@ void main() {
     }, timeout: transferTimeout);
   });
 
-  group('E591, RF-296: cancelling elements never stops the queue', () {
+  group('E591, RF-296: cancelling elements goes on with the queue, except a foreign warning already shown', () {
     test(
       'cancelling one element with the folder question open at the '
       'receiver and the next one as soon as it starts: both end '
@@ -920,9 +943,49 @@ void main() {
       expect(b.filesIn(b.recvDir), ['b.txt']);
     }, timeout: transferTimeout);
 
-    test('a foreign sender that withdraws a warning already shown: the next '
-        'element is declined by the minute of RF-215 (M2 of the 004), never '
-        'busy, and the queue stops with the rest not sent', () async {
+    test('cancelling the element whose warning a foreign receiver already '
+        'shows stops the queue: the rest is not sent, cancelled here, and '
+        'nothing more is requested', () async {
+      final (a, b) = await transferNodes(
+        aAtB: PeerRelation.foreign,
+        bAtA: PeerRelation.foreign,
+      );
+      final paths = [
+        await a.sourceFile('a.txt', _bytes(10)),
+        await a.sourceFile('b.txt', _bytes(11)),
+        await a.sourceFile('c.txt', _bytes(12)),
+      ];
+      final sessions = _Sessions(b);
+
+      expect(await a.node.sendPaths(b.fingerprint, paths), SendResult.started);
+      final warning = await b.incomingAt(IncomingStage.warning);
+      expect(warning.fileName, 'a.txt');
+      final waiting = await a.until(
+        (s) => s.outgoing?.phase == OutgoingPhase.waiting,
+        reason: 'A waiting on the warning',
+      );
+      a.node.cancelQueueItem(waiting.queues!.loose.first.id);
+
+      final view = await _finished(a);
+      expect(_outcomes(view.loose), [
+        TransferOutcome.cancelledHere,
+        TransferOutcome.cancelledHere,
+        TransferOutcome.cancelledHere,
+      ]);
+      expect(_states(view.loose), [
+        QueueItemState.done,
+        QueueItemState.notSent,
+        QueueItemState.notSent,
+      ]);
+      expect(view.delivered, 0);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(sessions.started, ['a.txt']);
+      expect(b.filesIn(b.recvDir), isEmpty);
+    }, timeout: transferTimeout);
+
+    test('cancelling a warning of a receiver that is foreign only at the '
+        'other end: the sender cannot know, so the next element is declined '
+        'by the minute of RF-215 and the queue stops there', () async {
       final (a, b) = await transferNodes(aAtB: PeerRelation.foreign);
       final paths = [
         await a.sourceFile('a.txt', _bytes(10)),

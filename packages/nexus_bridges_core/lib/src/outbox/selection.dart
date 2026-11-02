@@ -17,6 +17,8 @@ abstract interface class ElementSender {
     SendDestination destination,
   );
 
+  bool get cancelEndsQueue;
+
   void cancelCurrent();
 }
 

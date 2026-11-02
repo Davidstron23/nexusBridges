@@ -179,7 +179,7 @@ void main() {
       final probes = {
         r'C:\y\a.txt': file(1),
         r'C:\x\a.txt': file(1),
-        r'C:\x\A.txt': file(1),
+        r'C:\z\A.txt': file(1),
         r'C:\x\b.txt': file(1),
       };
       h = Harness(probes: probes);
@@ -189,7 +189,7 @@ void main() {
       }
       await until(() => !h.queues.active);
       expect(h.sender.paths, [
-        r'C:\x\A.txt',
+        r'C:\z\A.txt',
         r'C:\x\a.txt',
         r'C:\y\a.txt',
         r'C:\x\b.txt',

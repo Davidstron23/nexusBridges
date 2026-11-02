@@ -7,8 +7,9 @@ import 'package:ffi/ffi.dart';
 import '../protocol/protocol.dart' show Limits;
 import '../transport/transport.dart' show AbortSignal;
 import 'folder_walk.dart' show measureFolders;
-import 'names.dart' show isAppReservedName, isValidFileName;
+import 'names.dart' show isAppReservedName, isDriveRoot, isValidFileName;
 import 'transfer.dart' show defaultExclusions;
+import 'windows_file_system.dart' show WindowsFileSystemPlatform;
 import 'windows_folder_io.dart' show WindowsFolderLister;
 
 const int _failed = -1;
@@ -131,7 +132,9 @@ Future<int?> measureFolderSize(
   String path, {
   required List<String>? exclusions,
   required AbortSignal abort,
-}) {
-  if (abort.aborted) return Future.value(null);
-  return _SizeJob(abort).run(path, _effectiveExclusions(exclusions));
+}) async {
+  if (abort.aborted) return null;
+  final real = await const WindowsFileSystemPlatform().realPath(path);
+  if (real == null || isDriveRoot(real) || abort.aborted) return null;
+  return _SizeJob(abort).run(real, _effectiveExclusions(exclusions));
 }

@@ -10,6 +10,7 @@ import '../transfer/transfer.dart'
         TransferOutcome,
         TransferResultView,
         visibleFileName;
+import 'path_key.dart';
 import 'policy.dart';
 import 'selection.dart';
 
@@ -28,10 +29,11 @@ final class _Item {
     required this.isBundle,
     required this.probeSize,
     required this.destination,
-  });
+  }) : key = pathKey(path);
 
   final String id;
   final String path;
+  final String key;
   final String name;
   final bool isFolder;
   final bool isArchive;
@@ -46,6 +48,7 @@ final class _Item {
   int resultSize = 0;
   int? measuredSize;
   bool measureTried = false;
+  bool cancelEndsQueue = false;
   AbortSignal? measureAbort;
 
   bool get isFinished =>
@@ -196,15 +199,25 @@ final class SendQueues {
         return SelectionResult.otherTargetBusy;
       }
       final fresh = <_Item>[];
+      final seen = <String>{};
       for (final path in paths) {
+        if (!seen.add(pathKey(path))) continue;
         fresh.add(await _describe(path, destination));
         if (_closed) return SelectionResult.closed;
+      }
+      if (_pumpRunning) {
+        final waiting = {
+          for (final item in [..._loose, ..._bundles])
+            if (item.state == QueueItemState.pending) item.key,
+        };
+        fresh.removeWhere((item) => waiting.contains(item.key));
       }
       final newLoose = fresh.where((item) => !item.isBundle).toList()
         ..sort(_compareItems);
       final newBundles = fresh.where((item) => item.isBundle).toList()
         ..sort(_compareItems);
       if (_pumpRunning) {
+        if (fresh.isEmpty) return SelectionResult.queued;
         if (_mode == _Mode.single) _mode = _Mode.queues;
         _refresh = refresh;
         _peerName = peerName ?? _peerName;
@@ -266,6 +279,7 @@ final class SendQueues {
   void cancelItem(String id) {
     final item = _find(id);
     if (item == null || item.state != QueueItemState.inProgress) return;
+    item.cancelEndsQueue = item.cancelEndsQueue || _sender.cancelEndsQueue;
     _cancelCurrent();
   }
 
@@ -390,12 +404,13 @@ final class SendQueues {
         item.problemPath = result?.problemPath;
         item.resultSize = result?.size ?? 0;
         _log('queues: element ended with ${outcome.name}');
-        if (!continuesAfter(outcome)) _stopPending(outcome);
+        final stops =
+            !continuesAfter(outcome) ||
+            (item.cancelEndsQueue && outcome == TransferOutcome.cancelledHere);
+        if (stops) _stopPending(outcome);
         _emit();
         if (_closed) break;
-        if (continuesAfter(outcome) && _nextPending() != null) {
-          await _sleepGap();
-        }
+        if (!stops && _nextPending() != null) await _sleepGap();
       }
     } catch (_) {
       _log('queues: pump failed');

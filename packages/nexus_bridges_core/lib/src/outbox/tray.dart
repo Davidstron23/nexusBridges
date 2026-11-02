@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../protocol/protocol.dart' show Limits;
 import '../transfer/transfer.dart' show visibleFileName;
+import 'path_key.dart';
 import 'policy.dart';
 import 'selection.dart';
 
@@ -35,26 +36,26 @@ final class _TrayEntry {
     required this.path,
     required this.name,
     required this.isFolder,
-  });
+  }) : key = pathKey(path);
 
   final String id;
   final String path;
   final String name;
   final bool isFolder;
+  final String key;
 
   TrayItemView toView() => TrayItemView(id: id, name: name, isFolder: isFolder);
 }
 
-String _normalizePath(String path) {
-  final slashed = path.replaceAll('/', r'\');
-  if (isDriveRootPath(slashed)) {
-    return '${slashed.substring(0, 2)}\\';
-  }
-  var end = slashed.length;
-  while (end > 0 && slashed[end - 1] == r'\') {
-    end--;
-  }
-  return end == 0 ? slashed : slashed.substring(0, end);
+final class TrayBatch {
+  TrayBatch._(this._entries);
+
+  final List<_TrayEntry> _entries;
+
+  bool get isEmpty => _entries.isEmpty;
+
+  List<String> get paths =>
+      List.unmodifiable(_entries.map((entry) => entry.path));
 }
 
 final class SendTray {
@@ -88,9 +89,9 @@ final class SendTray {
     final fresh = <String>[];
     final seen = <String>{};
     for (final raw in paths) {
-      final path = _normalizePath(raw);
+      final path = normalizeElementPath(raw);
       if (path.isEmpty) continue;
-      final key = path.toUpperCase();
+      final key = pathKey(path);
       if (_keys.contains(key) || !seen.add(key)) continue;
       fresh.add(path);
     }
@@ -116,7 +117,7 @@ final class SendTray {
       );
     }
     for (final entry in described) {
-      _keys.add(entry.path.toUpperCase());
+      _keys.add(entry.key);
     }
     _entries.addAll(described);
     _emit();
@@ -127,7 +128,26 @@ final class SendTray {
     final index = _entries.indexWhere((entry) => entry.id == id);
     if (index < 0) return;
     final entry = _entries.removeAt(index);
-    _keys.remove(entry.path.toUpperCase());
+    _keys.remove(entry.key);
+    _emit();
+  }
+
+  TrayBatch take() {
+    final taken = List<_TrayEntry>.of(_entries);
+    if (taken.isEmpty) return TrayBatch._(taken);
+    _entries.clear();
+    _keys.clear();
+    _emit();
+    return TrayBatch._(taken);
+  }
+
+  void restore(TrayBatch batch) {
+    final back = <_TrayEntry>[];
+    for (final entry in batch._entries) {
+      if (_keys.add(entry.key)) back.add(entry);
+    }
+    if (back.isEmpty) return;
+    _entries.insertAll(0, back);
     _emit();
   }
 

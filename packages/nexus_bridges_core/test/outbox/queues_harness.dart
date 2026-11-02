@@ -60,6 +60,9 @@ final class FakeSender implements ElementSender {
   bool throwSynchronously = false;
   bool throwOnCancel = false;
 
+  @override
+  bool cancelEndsQueue = false;
+
   bool get busy => _current != null;
 
   @override
