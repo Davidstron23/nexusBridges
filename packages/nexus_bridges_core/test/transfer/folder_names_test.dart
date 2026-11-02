@@ -117,4 +117,51 @@ void main() {
       });
     }
   });
+
+  group(
+    'B-2, RF-306: isDriveRoot with the root of an administrative share',
+    () {
+      for (final path in [
+        r'\\x\D$',
+        r'\\x\D$\',
+        r'\\localhost\C$',
+        r'\\localhost\c$\',
+        r'\\127.0.0.1\C$',
+        r'\\SOBREMESA\E$',
+        r'//localhost/C$',
+        r'//localhost/C$/',
+        r'\\?\UNC\localhost\C$',
+        r'\\?\UNC\localhost\C$\',
+        r'\\?\unc\localhost\C$',
+        r'\\.\UNC\localhost\C$',
+        r'\\.\UNC\localhost\C$\',
+      ]) {
+        test('"$path" is a drive root', () {
+          expect(isDriveRoot(path), isTrue);
+        });
+      }
+
+      for (final path in [
+        r'\\x\D$\folder',
+        r'\\x\D$\folder\',
+        r'\\localhost\C$\Users',
+        r'\\localhost\C$\Users\David\AppData\Local\NexusBridges',
+        r'//localhost/C$/Users',
+        r'\\?\UNC\localhost\C$\Users',
+        r'\\.\UNC\localhost\C$\Users',
+        r'\\server\share',
+        r'\\server\share\',
+        r'\\server\share\D$',
+        r'\\server',
+        r'\\server\',
+        r'\\?\UNC\server\share',
+        r'\\.\UNC\server\share',
+        r'C:\x\D$',
+      ]) {
+        test('"$path" is not a drive root', () {
+          expect(isDriveRoot(path), isFalse);
+        });
+      }
+    },
+  );
 }
