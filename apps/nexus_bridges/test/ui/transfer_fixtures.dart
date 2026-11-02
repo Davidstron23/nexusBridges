@@ -65,6 +65,7 @@ IncomingTransferView incomingView({
   bool withoutMark = false,
   FolderQuestionView? folder,
   int received = 0,
+  bool? canCancel,
 }) {
   return IncomingTransferView(
     sessionId: id,
@@ -77,6 +78,7 @@ IncomingTransferView incomingView({
     withoutMark: withoutMark,
     folder: folder,
     receivedBytes: received,
+    canCancel: canCancel ?? stage != IncomingStage.verifying,
   );
 }
 

@@ -156,7 +156,8 @@ Widget _app(
           builder: (context, state, _) => FlowDiagram(
             state: state,
             hovered: host.hovered,
-            onSend: host.sent.add,
+            onSendFiles: (fp) => host.sent.add('files $fp'),
+            onSendFolders: (fp) => host.sent.add('folders $fp'),
             onShowDevices: () => host.showDevices++,
           ),
         ),
@@ -217,7 +218,7 @@ Finder _inDiagram(Finder matching) =>
 Finder _popover() => _inDiagram(find.byType(Card));
 
 Finder _sendButton(AppStrings strings) => find.ancestor(
-  of: find.text(strings.sendFileButton),
+  of: find.text(strings.sendEllipsis),
   matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
 );
 
@@ -745,7 +746,12 @@ void main() {
         );
         await tester.tap(_sendButton(strings));
         await tester.pump();
-        expect(host.sent, [_fp('A')]);
+        await tester.pump(const Duration(milliseconds: 240));
+        expect(find.text(strings.sendFilesOption), findsOneWidget);
+        expect(find.text(strings.sendFoldersOption), findsOneWidget);
+        await tester.tap(find.text(strings.sendFoldersOption));
+        await tester.pump();
+        expect(host.sent, ['folders ${_fp('A')}']);
         expect(_popover(), findsNothing);
         expect(tester.takeException(), isNull);
       });
@@ -826,7 +832,7 @@ void main() {
         final host = _Host(_state(_devices(3)));
         await _mount(tester, host, code: code);
         await _open(tester, 'B');
-        expect(find.text(strings.sendFileButton), findsOneWidget);
+        expect(find.text(strings.sendEllipsis), findsOneWidget);
         await tester.tapAt(const Offset(6, 580));
         await tester.pump();
         expect(_popover(), findsNothing);
@@ -967,7 +973,7 @@ void main() {
       ]);
       await tester.pump();
       expect(_popover(), findsNothing);
-      expect(find.text(strings.sendFileButton), findsNothing);
+      expect(find.text(strings.sendEllipsis), findsNothing);
       host.state.value = _state(_devices(3));
       await tester.pump();
       expect(_popover(), findsNothing);

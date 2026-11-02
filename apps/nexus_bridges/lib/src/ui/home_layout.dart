@@ -23,6 +23,7 @@ bool _isActive(IncomingStage stage) =>
 bool hasActivity(NodeState state) {
   final incoming = state.incoming;
   return state.outgoing != null ||
+      state.queues != null ||
       (incoming != null && _isActive(incoming.stage)) ||
       state.lastSent != null ||
       state.lastReceived != null;
@@ -35,6 +36,12 @@ bool shouldShowActivity(NodeState? before, NodeState after) {
       (previousOutgoing == null ||
           previousOutgoing.peerFingerprint != outgoing.peerFingerprint ||
           previousOutgoing.fileName != outgoing.fileName)) {
+    return true;
+  }
+  final queues = after.queues;
+  if (queues != null &&
+      (before?.queues == null ||
+          before?.queues?.selectionId != queues.selectionId)) {
     return true;
   }
   final incoming = after.incoming;

@@ -225,7 +225,7 @@ void main() {
       });
 
       testWidgets('Send file in the diagram popover, not the one of a row, '
-          'calls sendFile for that device', (tester) async {
+          'calls sendFolders for that device through its menu', (tester) async {
         _window(tester, const Size(800, 600));
         final controller = FakeAppController(
           state: NodeState(entries: _threeEntries),
@@ -236,14 +236,17 @@ void main() {
         await tester.pumpAndSettle();
         final popoverSend = find.descendant(
           of: find.byType(FlowDiagram),
-          matching: find.text(strings.sendFileButton),
+          matching: find.text(strings.sendEllipsis),
         );
         expect(popoverSend, findsOneWidget);
-        expect(find.text(strings.sendFileButton), findsNWidgets(3));
+        expect(find.text(strings.sendEllipsis), findsNWidgets(3));
         await tester.tap(popoverSend);
         await tester.pump();
+        await tester.pump(const Duration(milliseconds: 240));
+        await tester.tap(find.text(strings.sendFoldersOption));
+        await tester.pump();
 
-        expect(controller.calls, ['sendFile $_fpB']);
+        expect(controller.calls, ['sendFolders $_fpB']);
         await tester.pumpAndSettle();
         expect(popoverSend, findsNothing);
         expect(find.byType(SnackBar), findsNothing);

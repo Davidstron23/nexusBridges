@@ -5,9 +5,9 @@ import '../app_controller.dart';
 import '../l10n/app_strings.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
-import 'soft_button.dart';
 import 'row_menu.dart';
 import 'send_action.dart';
+import 'send_menu.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -57,6 +57,7 @@ class DeviceList extends StatelessWidget {
     Widget rowOf(DeviceEntry entry) => DeviceRow(
       key: ValueKey(entry.fingerprint),
       controller: controller,
+      state: state,
       entry: entry,
       tone: discToneFor(state, entry),
       hovered: hovered,
@@ -107,6 +108,7 @@ const Duration rowHoverFade = Duration(milliseconds: 250);
 class DeviceRow extends StatefulWidget {
   const DeviceRow({
     required this.controller,
+    required this.state,
     required this.entry,
     required this.tone,
     required this.hovered,
@@ -114,6 +116,7 @@ class DeviceRow extends StatefulWidget {
   });
 
   final AppController controller;
+  final NodeState state;
   final DeviceEntry entry;
   final DiscTone tone;
   final ValueNotifier<String?> hovered;
@@ -160,11 +163,7 @@ class _DeviceRowState extends State<DeviceRow> {
     final caption = NbText.caption.copyWith(color: colors.textWeak);
     final bodySm = NbText.bodySm.copyWith(color: colors.text);
     final possiblyReplaces = entry.possiblyReplaces;
-    final explanation = !entry.paired || entry.canSendFile
-        ? null
-        : entry.mismatch
-        ? strings.sendNeedsPairAgain
-        : strings.sendNeedsVisible;
+    final explanation = sendExplanation(strings, widget.state, entry);
     final (String chipLabel, ChipTone chipTone) = entry.paired
         ? (
             entry.mine ? strings.chipMine : strings.chipForeign,
@@ -176,12 +175,12 @@ class _DeviceRowState extends State<DeviceRow> {
           );
     final actions = <Widget>[
       if (entry.paired)
-        SoftButton(
-          glyph: Glyphs.send,
-          label: strings.sendFileButton,
-          onPressed: entry.canSendFile
-              ? () => startSend(context, controller, entry.fingerprint)
-              : null,
+        SendMenuButton(
+          enabled: widget.state.canSendTo(entry.fingerprint),
+          onOpenChanged: (open) => setState(() => _menuOpen = open),
+          onFiles: () => startSendFiles(context, controller, entry.fingerprint),
+          onFolders: () =>
+              startSendFolders(context, controller, entry.fingerprint),
         ),
       if (entry.paired && entry.mismatch) ...[
         OutlinedButton(

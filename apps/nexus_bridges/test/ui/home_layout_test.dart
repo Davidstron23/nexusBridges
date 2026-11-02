@@ -50,6 +50,20 @@ TransferResultView _result(
   canReveal: true,
 );
 
+SendQueuesView _queues({int selectionId = 1}) => SendQueuesView(
+  selectionId: selectionId,
+  peerFingerprint: _peerA,
+  peerName: 'Peer',
+  loose: const [],
+  bundles: const [],
+  finished: false,
+  delivered: 0,
+  total: 0,
+  completedBytes: 0,
+  pendingKnownBytes: 0,
+  currentProbeSize: null,
+);
+
 const List<IncomingStage> _activeStages = [
   IncomingStage.waitingData,
   IncomingStage.receiving,
@@ -196,6 +210,24 @@ void main() {
         );
       });
     }
+  });
+
+  group('E545 queues in the activity tab', () {
+    test('hasActivity is true with queues even between two items', () {
+      expect(hasActivity(NodeState(queues: _queues())), isTrue);
+    });
+
+    test('shouldShowActivity: queues that appear or a new selection ask for '
+        'the tab, the same selection does not', () {
+      final none = const NodeState();
+      final first = NodeState(queues: _queues());
+      expect(shouldShowActivity(none, first), isTrue);
+      expect(shouldShowActivity(first, NodeState(queues: _queues())), isFalse);
+      expect(
+        shouldShowActivity(first, NodeState(queues: _queues(selectionId: 2))),
+        isTrue,
+      );
+    });
   });
 
   group('E266 shouldShowActivity', () {

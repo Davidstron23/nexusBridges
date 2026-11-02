@@ -350,9 +350,6 @@ final class AppStringsEs implements AppStrings {
   String noticePeerCancelledTransfer(String name) => '$name canceló el envío.';
 
   @override
-  String get sendFileButton => 'Enviar archivo';
-
-  @override
   String get sendNeedsVisible =>
       'Tiene que estar a la vista para enviarle archivos.';
 

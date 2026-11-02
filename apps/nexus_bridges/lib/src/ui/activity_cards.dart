@@ -6,7 +6,9 @@ import '../l10n/app_strings.dart';
 import 'armed.dart';
 import 'format.dart';
 import 'icons/file_icon.dart';
+import 'icons/folder_icon.dart';
 import 'icons/glyphs.dart';
+import 'queue_card.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -116,7 +118,7 @@ String fitFileName(
   return best;
 }
 
-String _peerLabel(String? name, String fingerprint) {
+String peerLabel(String? name, String fingerprint) {
   if (name != null && name.isNotEmpty) return name;
   return fingerprint.length > _shortFingerprintLength
       ? fingerprint.substring(0, _shortFingerprintLength)
@@ -128,61 +130,184 @@ bool _isActive(IncomingStage stage) =>
     stage == IncomingStage.receiving ||
     stage == IncomingStage.verifying;
 
+class FittedName extends StatelessWidget {
+  const FittedName({required this.name, required this.style, super.key});
+
+  final String name;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final textScaler = MediaQuery.textScalerOf(context);
+    final textDirection = Directionality.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final shown = fitFileName(
+          name,
+          style: style,
+          maxWidth: constraints.maxWidth,
+          textScaler: textScaler,
+          textDirection: textDirection,
+        );
+        return Text(
+          shown,
+          style: style,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.clip,
+        );
+      },
+    );
+  }
+}
+
+String outcomeLine(
+  AppStrings strings,
+  TransferOutcome outcome, {
+  required bool outgoing,
+  required bool isFolder,
+  String? problemPath,
+}) {
+  final path = problemPath == null || problemPath.isEmpty
+      ? null
+      : breakablePath(problemPath);
+  if (path != null) {
+    if (outcome == TransferOutcome.unreadable) {
+      return strings.outcomeUnreadableEntry(path);
+    }
+    if (outgoing && outcome == TransferOutcome.invalidName) {
+      return strings.outcomeInvalidNameEntry(path);
+    }
+  }
+  if (outgoing && isFolder && outcome == TransferOutcome.incompatible) {
+    return strings.outcomeFolderIncompatible;
+  }
+  return outgoing
+      ? strings.sentOutcome(outcome)
+      : strings.receivedOutcome(outcome);
+}
+
+class FolderSummaryLines extends StatelessWidget {
+  const FolderSummaryLines({
+    required this.summary,
+    this.showTotals = false,
+    this.topGap = 0,
+    super.key,
+  });
+
+  final FolderSummaryView summary;
+  final bool showTotals;
+  final double topGap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final strings = AppStringsDelegate.of(context);
+    final language = Localizations.localeOf(context).languageCode;
+    final style = NbText.caption.copyWith(color: colors.textWeak);
+    final lines = <String>[
+      if (showTotals)
+        strings.folderSummary(
+          summary.files,
+          formatSize(summary.totalBytes, language),
+        ),
+      if (summary.excludedFolders > 0)
+        strings.foldersLeftOut(
+          summary.excludedFolders,
+          summary.excludedBytesPartial
+              ? null
+              : formatSize(summary.excludedBytes, language),
+        ),
+      if (summary.linksOmitted > 0)
+        strings.linksNotFollowed(summary.linksOmitted),
+      if (summary.protectedOmitted > 0) strings.appDataLeftOut,
+      if (summary.blockedOmitted > 0)
+        strings.blockedLeftOut(summary.blockedOmitted),
+    ];
+    if (lines.isEmpty && !summary.containsPrograms) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: EdgeInsets.only(top: topGap),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final line in lines)
+            Text(
+              line,
+              style: style,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (summary.containsPrograms)
+            Text(
+              strings.containsPrograms,
+              style: NbText.label.copyWith(color: colors.text),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class FileRow extends StatelessWidget {
   const FileRow({
     required this.fileName,
     required this.isProgram,
     required this.detail,
+    this.isFolder = false,
+    this.containsGit = false,
+    this.extraDetails = const [],
     super.key,
   });
 
   final String fileName;
   final bool isProgram;
   final String detail;
+  final bool isFolder;
+  final bool containsGit;
+  final List<String> extraDetails;
 
   @override
   Widget build(BuildContext context) {
     final colors = NbColors.of(context);
     final strings = AppStringsDelegate.of(context);
     final nameStyle = NbText.bodyStrong.copyWith(color: colors.text);
-    final textScaler = MediaQuery.textScalerOf(context);
-    final textDirection = Directionality.of(context);
+    final captionStyle = NbText.caption.copyWith(color: colors.textWeak);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        FileIcon(fileName: fileName, isProgram: isProgram),
+        if (isFolder)
+          const FolderIcon()
+        else
+          FileIcon(fileName: fileName, isProgram: isProgram),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final shown = fitFileName(
-                    fileName,
-                    style: nameStyle,
-                    maxWidth: constraints.maxWidth,
-                    textScaler: textScaler,
-                    textDirection: textDirection,
-                  );
-                  return Text(
-                    shown,
-                    style: nameStyle,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.clip,
-                  );
-                },
-              ),
+              FittedName(name: fileName, style: nameStyle),
               Text(
                 detail,
-                style: NbText.caption.copyWith(color: colors.textWeak),
+                style: captionStyle,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
+              for (final extra in extraDetails)
+                Text(
+                  extra,
+                  style: captionStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               if (isProgram)
                 Text(
-                  strings.programLabel,
+                  isFolder ? strings.containsPrograms : strings.programLabel,
+                  style: NbText.label.copyWith(color: colors.text),
+                ),
+              if (containsGit)
+                Text(
+                  strings.containsGitRepository,
                   style: NbText.label.copyWith(color: colors.text),
                 ),
             ],
@@ -193,8 +318,12 @@ class FileRow extends StatelessWidget {
   }
 }
 
-class _CardHeader extends StatelessWidget {
-  const _CardHeader({required this.title, required this.chip});
+class ActivityCardHeader extends StatelessWidget {
+  const ActivityCardHeader({
+    required this.title,
+    required this.chip,
+    super.key,
+  });
 
   final String title;
   final Widget chip;
@@ -222,8 +351,8 @@ class _CardHeader extends StatelessWidget {
   }
 }
 
-class _CardFooter extends StatelessWidget {
-  const _CardFooter({this.note, this.action});
+class ActivityCardFooter extends StatelessWidget {
+  const ActivityCardFooter({this.note, this.action, super.key});
 
   final String? note;
   final Widget? action;
@@ -259,7 +388,7 @@ class _CardFooter extends StatelessWidget {
   }
 }
 
-Widget _buttonBar(List<Widget> children) {
+Widget buttonBar(List<Widget> children) {
   return OverflowBar(
     spacing: 8,
     overflowSpacing: 8,
@@ -268,8 +397,8 @@ Widget _buttonBar(List<Widget> children) {
   );
 }
 
-Widget _inlineButtonBar(List<Widget> children) {
-  return IntrinsicWidth(child: _buttonBar(children));
+Widget inlineButtonBar(List<Widget> children) {
+  return IntrinsicWidth(child: buttonBar(children));
 }
 
 class ActivityPanel extends StatelessWidget {
@@ -290,8 +419,16 @@ class ActivityPanel extends StatelessWidget {
     final incoming = state.incoming;
     final sent = state.lastSent;
     final received = state.lastReceived;
+    final queues = state.queues;
     final cards = <Widget>[
-      if (outgoing != null)
+      if (queues != null)
+        QueueCard(
+          key: const ValueKey('activity-queues'),
+          controller: controller,
+          state: state,
+          queues: queues,
+        )
+      else if (outgoing != null)
         _OutgoingCard(
           key: const ValueKey('activity-outgoing'),
           controller: controller,
@@ -303,7 +440,7 @@ class ActivityPanel extends StatelessWidget {
           controller: controller,
           view: incoming,
         ),
-      if (sent != null)
+      if (sent != null && queues == null)
         ResultCard(
           key: const ValueKey('activity-last-sent'),
           controller: controller,
@@ -349,16 +486,26 @@ class _OutgoingCard extends StatelessWidget {
     final colors = NbColors.of(context);
     final strings = AppStringsDelegate.of(context);
     final language = Localizations.localeOf(context).languageCode;
-    final name = _peerLabel(view.peerName, view.peerFingerprint);
+    final name = peerLabel(view.peerName, view.peerFingerprint);
     final phase = view.phase;
     final transferring =
         phase == OutgoingPhase.uploading || phase == OutgoingPhase.verifying;
+    final folder = view.isFolder;
+    final summary = view.summary;
+    final waitingDetail = summary != null
+        ? strings.folderSummary(
+            summary.files,
+            formatSize(summary.totalBytes, language),
+          )
+        : folder && view.fileCount > 0
+        ? strings.folderSummary(view.fileCount, formatSize(view.size, language))
+        : formatSize(view.size, language);
     final detail = switch (phase) {
-      OutgoingPhase.preparing => strings.preparingFile(
-        shortenFileName(view.fileName),
-      ),
-      OutgoingPhase.requesting ||
-      OutgoingPhase.waiting => formatSize(view.size, language),
+      OutgoingPhase.preparing =>
+        folder
+            ? strings.preparingItems(view.preparedEntries)
+            : strings.preparingFile(shortenFileName(view.fileName)),
+      OutgoingPhase.requesting || OutgoingPhase.waiting => waitingDetail,
       OutgoingPhase.uploading ||
       OutgoingPhase.verifying => strings.progressLine(
         percentOf(view.sentBytes, view.size),
@@ -366,6 +513,10 @@ class _OutgoingCard extends StatelessWidget {
         formatSize(view.size, language),
       ),
     };
+    final extraDetails = [
+      if (folder && transferring && view.fileCount > 0)
+        strings.filesProgress(view.sentFiles, view.fileCount),
+    ];
     final note = switch (phase) {
       OutgoingPhase.requesting => strings.contactingPeer(name),
       OutgoingPhase.waiting => strings.waitingAcceptance(name),
@@ -379,7 +530,7 @@ class _OutgoingCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _CardHeader(
+              ActivityCardHeader(
                 title: strings.sendingToTitle(name),
                 chip: StatusChip(
                   label: outgoingChipText(strings, phase),
@@ -389,9 +540,13 @@ class _OutgoingCard extends StatelessWidget {
               const SizedBox(height: 10),
               FileRow(
                 fileName: view.fileName,
-                isProgram: view.isProgram,
+                isProgram: view.isProgram && !folder,
+                isFolder: folder,
                 detail: detail,
+                extraDetails: extraDetails,
               ),
+              if (folder && summary != null)
+                FolderSummaryLines(summary: summary, topGap: 8),
               if (transferring) ...[
                 const SizedBox(height: 12),
                 NbProgressBar(
@@ -400,7 +555,7 @@ class _OutgoingCard extends StatelessWidget {
                       : percentOf(view.sentBytes, view.size) / 100,
                 ),
               ],
-              _CardFooter(
+              ActivityCardFooter(
                 note: note,
                 action: view.cancelling
                     ? Flexible(
@@ -413,7 +568,7 @@ class _OutgoingCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       )
-                    : _inlineButtonBar([
+                    : inlineButtonBar([
                         OutlinedButton(
                           style: smallButton,
                           onPressed: armed ? controller.cancelSending : null,
@@ -444,7 +599,7 @@ class _IncomingCard extends StatelessWidget {
     final strings = AppStringsDelegate.of(context);
     final language = Localizations.localeOf(context).languageCode;
     final id = view.sessionId;
-    final name = _peerLabel(view.peerName, view.peerFingerprint);
+    final name = peerLabel(view.peerName, view.peerFingerprint);
     final stage = view.stage;
     final transferring =
         stage == IncomingStage.receiving || stage == IncomingStage.verifying;
@@ -455,6 +610,10 @@ class _IncomingCard extends StatelessWidget {
             formatSize(view.size, language),
           )
         : formatSize(view.size, language);
+    final extraDetails = [
+      if (view.isFolder && transferring && view.fileCount > 0)
+        strings.filesProgress(view.receivedFiles, view.fileCount),
+    ];
     final note = switch (stage) {
       IncomingStage.waitingData => strings.waitingForData,
       IncomingStage.verifying => strings.checkingFile,
@@ -476,7 +635,7 @@ class _IncomingCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _CardHeader(
+              ActivityCardHeader(
                 title: strings.receivingFromTitle(name),
                 chip: StatusChip(
                   label: incomingChipText(strings, stage),
@@ -487,7 +646,9 @@ class _IncomingCard extends StatelessWidget {
               FileRow(
                 fileName: view.fileName,
                 isProgram: view.isProgram,
+                isFolder: view.isFolder,
                 detail: detail,
+                extraDetails: extraDetails,
               ),
               if (transferring) ...[
                 const SizedBox(height: 12),
@@ -497,11 +658,11 @@ class _IncomingCard extends StatelessWidget {
                       : percentOf(view.receivedBytes, view.size) / 100,
                 ),
               ],
-              _CardFooter(
+              ActivityCardFooter(
                 note: note,
-                action: stage == IncomingStage.verifying
+                action: !view.canCancel
                     ? null
-                    : _inlineButtonBar([
+                    : inlineButtonBar([
                         OutlinedButton(
                           style: smallButton,
                           onPressed: armed
@@ -548,8 +709,10 @@ class ResultCard extends StatelessWidget {
     final colors = NbColors.of(context);
     final strings = AppStringsDelegate.of(context);
     final outgoing = result.direction == TransferDirection.outgoing;
-    final name = _peerLabel(result.peerName, result.peerFingerprint);
+    final name = peerLabel(result.peerName, result.peerFingerprint);
+    final language = Localizations.localeOf(context).languageCode;
     final tone = resultTone(result.outcome.kind);
+    final folder = result.isFolder;
     final Widget? icon = switch (tone) {
       ChipTone.ok => const GlyphIcon(Glyphs.check, size: 12),
       ChipTone.fail => const GlyphIcon(Glyphs.ban, size: 12),
@@ -559,7 +722,7 @@ class ResultCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _CardHeader(
+          ActivityCardHeader(
             title: outgoing ? strings.lastSentTitle : strings.lastReceivedTitle,
             chip: StatusChip(
               label: resultChipText(strings, result),
@@ -571,18 +734,31 @@ class ResultCard extends StatelessWidget {
           FileRow(
             fileName: result.fileName,
             isProgram: result.isProgram,
+            isFolder: folder,
+            containsGit: result.containsGitRepository,
             detail: outgoing ? strings.toPeer(name) : strings.fromPeer(name),
+            extraDetails: [
+              if (folder && result.fileCount > 0)
+                strings.folderSummary(
+                  result.fileCount,
+                  formatSize(result.size, language),
+                ),
+            ],
           ),
           const SizedBox(height: 10),
           Text(
-            outgoing
-                ? strings.sentOutcome(result.outcome)
-                : strings.receivedOutcome(result.outcome),
+            outcomeLine(
+              strings,
+              result.outcome,
+              outgoing: outgoing,
+              isFolder: folder,
+              problemPath: result.problemPath,
+            ),
             style: NbText.bodySm.copyWith(color: colors.textWeak),
           ),
           if (result.canReveal) ...[
             const SizedBox(height: 8),
-            _buttonBar([
+            buttonBar([
               TextButton.icon(
                 style: smallButton,
                 onPressed: () => _reveal(context),

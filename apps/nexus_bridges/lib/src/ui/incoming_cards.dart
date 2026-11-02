@@ -196,6 +196,56 @@ class _Note extends StatelessWidget {
   }
 }
 
+class _FirstLevelList extends StatelessWidget {
+  const _FirstLevelList({required this.items, required this.more});
+
+  final List<FirstLevelItem> items;
+  final int more;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final strings = AppStringsDelegate.of(context);
+    final nameStyle = NbText.bodySm.copyWith(color: colors.text);
+    return Column(
+      key: const ValueKey('first-level-list'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final item in items)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                GlyphIcon(
+                  item.isFolder ? Glyphs.folder : Glyphs.files,
+                  size: 14,
+                  color: colors.textWeak,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    item.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: nameStyle,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (more > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, left: 22),
+            child: Text(
+              strings.firstLevelMore(more),
+              style: NbText.caption.copyWith(color: colors.textWeak),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _WarningCard extends StatelessWidget {
   const _WarningCard({
     required this.controller,
@@ -263,8 +313,22 @@ class _WarningCard extends StatelessWidget {
                   FileRow(
                     fileName: view.fileName,
                     isProgram: view.isProgram,
-                    detail: formatSize(view.size, language),
+                    isFolder: view.isFolder,
+                    containsGit: view.containsGitRepository,
+                    detail: view.isFolder
+                        ? strings.folderSummary(
+                            view.fileCount,
+                            formatSize(view.size, language),
+                          )
+                        : formatSize(view.size, language),
                   ),
+                  if (view.isFolder && view.firstLevel.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _FirstLevelList(
+                      items: view.firstLevel,
+                      more: view.moreFirstLevel,
+                    ),
+                  ],
                   if (view.withoutMark) ...[
                     const SizedBox(height: 8),
                     _Note(text: strings.withoutMarkNote),

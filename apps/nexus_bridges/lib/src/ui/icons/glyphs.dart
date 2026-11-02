@@ -258,6 +258,26 @@ abstract final class Glyphs {
     ],
   );
 
+  static const Glyph files = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M6 2.5h4.2L12.5 5v6.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z',
+        ),
+      ),
+      GlyphPart(SvgShape('M10 2.5V5h2.5')),
+      GlyphPart(SvgShape('M3.5 5v7.5a1 1 0 0 0 1 1h5')),
+    ],
+  );
+
+  static const Glyph chevronDown = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M3.5 6L8 10.5 12.5 6'))],
+  );
+
   static const Glyph more = Glyph(
     box: 16,
     strokeWidth: 1.5,

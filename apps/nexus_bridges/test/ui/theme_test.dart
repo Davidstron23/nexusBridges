@@ -341,7 +341,8 @@ List<String> _uiSources() => [
 bool _mayHoldColors(String path) {
   final normalized = path.replaceAll(r'\', '/');
   return normalized.endsWith('/theme/tokens.dart') ||
-      normalized.endsWith('/file_icon.dart');
+      normalized.endsWith('/file_icon.dart') ||
+      normalized.endsWith('/folder_icon.dart');
 }
 
 void main() {
@@ -1157,7 +1158,7 @@ void main() {
                 FilledButton(
                   key: const ValueKey('filled'),
                   onPressed: () {},
-                  child: Text(strings.sendFileButton),
+                  child: Text(strings.sendEllipsis),
                 ),
                 FilledButton.tonal(
                   key: const ValueKey('tonal'),
@@ -1210,7 +1211,7 @@ void main() {
               FilledButton(
                 key: const ValueKey('primary'),
                 onPressed: () {},
-                child: Text(strings.sendFileButton),
+                child: Text(strings.sendEllipsis),
               ),
               FilledButton.tonal(
                 key: const ValueKey('soft'),
@@ -1535,7 +1536,7 @@ void main() {
 
   group('E253: colors come only from the tokens', () {
     test('no file of lib/src/ui writes a color literal outside tokens.dart '
-        'and file_icon.dart (point 149)', () {
+        'and the icon files (point 149)', () {
       final sources = _uiSources();
       expect(sources, isNotEmpty);
       for (final path in sources) {

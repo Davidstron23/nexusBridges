@@ -8,8 +8,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../../l10n/app_strings.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
-import '../icons/glyphs.dart';
-import '../soft_button.dart';
+import '../send_menu.dart';
 import '../theme/app_theme.dart';
 import '../theme/components.dart';
 import '../theme/tokens.dart';
@@ -41,14 +40,16 @@ class FlowDiagram extends StatefulWidget {
   const FlowDiagram({
     required this.state,
     required this.hovered,
-    required this.onSend,
+    required this.onSendFiles,
+    required this.onSendFolders,
     required this.onShowDevices,
     super.key,
   });
 
   final NodeState state;
   final ValueNotifier<String?> hovered;
-  final void Function(String fingerprint) onSend;
+  final void Function(String fingerprint) onSendFiles;
+  final void Function(String fingerprint) onSendFolders;
   final VoidCallback onShowDevices;
 
   @override
@@ -295,10 +296,15 @@ class _FlowDiagramState extends State<FlowDiagram>
               reduceMotion: _reduceMotion,
               child: _FlowPopover(
                 entry: entry,
+                state: widget.state,
                 tone: discToneFor(widget.state, entry),
-                onSend: () {
+                onFiles: () {
                   _closePopover();
-                  widget.onSend(entry.fingerprint);
+                  widget.onSendFiles(entry.fingerprint);
+                },
+                onFolders: () {
+                  _closePopover();
+                  widget.onSendFolders(entry.fingerprint);
                 },
               ),
             ),
@@ -403,13 +409,17 @@ class _PopoverLayerState extends State<_PopoverLayer>
 class _FlowPopover extends StatelessWidget {
   const _FlowPopover({
     required this.entry,
+    required this.state,
     required this.tone,
-    required this.onSend,
+    required this.onFiles,
+    required this.onFolders,
   });
 
   final DeviceEntry entry;
+  final NodeState state;
   final DiscTone tone;
-  final VoidCallback onSend;
+  final VoidCallback onFiles;
+  final VoidCallback onFolders;
 
   @override
   Widget build(BuildContext context) {
@@ -417,11 +427,7 @@ class _FlowPopover extends StatelessWidget {
     final colors = NbColors.of(context);
     final radius = BorderRadius.circular(12);
     final caption = NbText.caption.copyWith(color: colors.textWeak);
-    final explanation = entry.canSendFile
-        ? null
-        : entry.mismatch
-        ? strings.sendNeedsPairAgain
-        : strings.sendNeedsVisible;
+    final explanation = sendExplanation(strings, state, entry);
 
     return SizedBox(
       width: _popoverWidth,
@@ -521,11 +527,11 @@ class _FlowPopover extends StatelessWidget {
                 const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
-                  child: SoftButton(
-                    glyph: Glyphs.send,
-                    label: strings.sendFileButton,
+                  child: SendMenuButton(
+                    enabled: state.canSendTo(entry.fingerprint),
                     height: 32,
-                    onPressed: entry.canSendFile ? onSend : null,
+                    onFiles: onFiles,
+                    onFolders: onFolders,
                   ),
                 ),
               ],

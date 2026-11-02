@@ -249,8 +249,10 @@ class _Body extends StatelessWidget {
                   child: FlowDiagram(
                     state: state,
                     hovered: hovered,
-                    onSend: (fingerprint) =>
-                        startSend(context, controller, fingerprint),
+                    onSendFiles: (fingerprint) =>
+                        startSendFiles(context, controller, fingerprint),
+                    onSendFolders: (fingerprint) =>
+                        startSendFolders(context, controller, fingerprint),
                     onShowDevices: () => tab.value = ColumnTab.devices,
                   ),
                 ),

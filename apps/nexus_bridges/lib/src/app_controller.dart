@@ -121,8 +121,6 @@ class AppController extends ChangeNotifier {
     return _node?.setMine(fingerprint, mine: mine) ?? Future<void>.value();
   }
 
-  Future<SendResult> sendFile(String fingerprint) => sendFiles(fingerprint);
-
   Future<SendResult> sendFiles(String fingerprint) async {
     final node = _node;
     if (node == null) return SendResult.unavailable;

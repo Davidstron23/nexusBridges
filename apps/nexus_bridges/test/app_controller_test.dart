@@ -634,11 +634,11 @@ void main() {
     final unknown = 'CD' * 32;
     const session = 'no-such-session';
 
-    test('without a node, sendFile and revealLastReceived are unavailable '
+    test('without a node, sendFiles and revealLastReceived are unavailable '
         'and the rest do nothing nor throw', () async {
       final controller = controllerFor();
 
-      expect(await controller.sendFile(unknown), SendResult.unavailable);
+      expect(await controller.sendFiles(unknown), SendResult.unavailable);
       expect(await controller.revealLastReceived(), RevealResult.unavailable);
       controller.cancelSending();
       controller.cancelReceiving(session);
@@ -691,7 +691,7 @@ void main() {
         await controller.init();
         expect(controller.startFailed, isTrue);
 
-        expect(await controller.sendFile(unknown), SendResult.unavailable);
+        expect(await controller.sendFiles(unknown), SendResult.unavailable);
         expect(await controller.revealLastReceived(), RevealResult.unavailable);
         await controller.useProposedFolder(session);
         await controller.chooseOtherFolder(session);
@@ -700,13 +700,13 @@ void main() {
       },
     );
 
-    test('with a node, sendFile of a device that is not in the list goes to '
+    test('with a node, sendFiles of a device that is not in the list goes to '
         'the node and is unavailable, without a send', () async {
       final controller = controllerFor();
       await controller.init();
 
       expect(
-        await controller.sendFile(unknown).timeout(const Duration(seconds: 5)),
+        await controller.sendFiles(unknown).timeout(const Duration(seconds: 5)),
         SendResult.unavailable,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -815,7 +815,7 @@ void main() {
       );
     });
 
-    test('after shutdown, sendFile and revealLastReceived are unavailable and '
+    test('after shutdown, sendFiles and revealLastReceived are unavailable and '
         'the rest do nothing', () async {
       final controller = controllerFor();
       await controller.init();
@@ -835,7 +835,7 @@ void main() {
       controller.removeFromTray('x');
       controller.clearTray();
       await controller.requestPortal(unknown);
-      expect(await controller.sendFile(unknown), SendResult.unavailable);
+      expect(await controller.sendFiles(unknown), SendResult.unavailable);
       expect(await controller.revealLastReceived(), RevealResult.unavailable);
       controller.cancelSending();
       controller.cancelReceiving(session);

@@ -348,9 +348,6 @@ final class AppStringsEn implements AppStrings {
       '$name cancelled the send.';
 
   @override
-  String get sendFileButton => 'Send file';
-
-  @override
   String get sendNeedsVisible => 'It has to be visible to send it files.';
 
   @override

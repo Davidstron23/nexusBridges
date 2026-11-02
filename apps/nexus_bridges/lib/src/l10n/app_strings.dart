@@ -104,7 +104,6 @@ abstract class AppStrings {
   String noticeReceiveFolderNotSaved(String path);
   String noticePeerCancelledTransfer(String name);
 
-  String get sendFileButton;
   String get sendNeedsVisible;
   String get sendNeedsPairAgain;
   String get alreadySending;

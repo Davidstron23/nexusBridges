@@ -11,7 +11,7 @@ void main() {
         'they got', () async {
       final fake = FakeAppController();
 
-      await fake.sendFile('FP1');
+      await fake.sendFiles('FP1');
       fake.cancelSending();
       fake.cancelReceiving('s1');
       fake.answerIncoming('s1', accept: true);
@@ -26,7 +26,7 @@ void main() {
       await fake.revealLastReceived();
 
       expect(fake.calls, [
-        'sendFile FP1',
+        'sendFiles FP1',
         'cancelSending',
         'cancelReceiving s1',
         'answerIncoming s1 true',
@@ -105,17 +105,6 @@ void main() {
       for (final result in TrayResult.values) {
         fake.addToTrayResult = result;
         expect(await fake.addToTray(['a']), result);
-      }
-    });
-
-    test('sendFile gives started by default and then whatever the test '
-        'sets', () async {
-      final fake = FakeAppController();
-      expect(await fake.sendFile('FP'), SendResult.started);
-
-      for (final result in SendResult.values) {
-        fake.sendFileResult = result;
-        expect(await fake.sendFile('FP'), result);
       }
     });
 

@@ -100,7 +100,6 @@ final Map<String, _Text> _texts = {
   'namesakeWarning': (s) => s.namesakeWarning(_sampleName),
   'noticeAttemptLost': (s) => s.noticeAttemptLost(_sampleShort),
   'noticeReplaceWithdrawn': (s) => s.noticeReplaceWithdrawn(_sampleOldName),
-  'sendFileButton': (s) => s.sendFileButton,
   'sendNeedsVisible': (s) => s.sendNeedsVisible,
   'sendNeedsPairAgain': (s) => s.sendNeedsPairAgain,
   'alreadySending': (s) => s.alreadySending,
@@ -321,7 +320,6 @@ final Map<String, String Function(AppStrings, String)> _byArgument = {
 };
 
 final Map<String, (String, String)> _expectedTransfer = {
-  'sendFileButton': ('Send file', 'Enviar archivo'),
   'sendNeedsVisible': (
     'It has to be visible to send it files.',
     'Tiene que estar a la vista para enviarle archivos.',
@@ -1123,11 +1121,11 @@ void main() {
   final spanish = AppStringsEs();
 
   group('RF-62: every text exists in both languages', () {
-    test('the table covers the 177 texts of the plans of 001 to 006: the 84 '
-        'of 001, 002 and 003, the 55 of the transfer (E145), the 24 of the '
+    test('the table covers the 176 texts of the plans of 001 to 006: the 84 '
+        'of 001, 002 and 003, the 54 of the transfer (E145), the 24 of the '
         'design (E256) and the 14 of the pairing design (E281)', () {
-      expect(_texts.length, 177);
-      expect(_expectedTransfer.length, 55);
+      expect(_texts.length, 176);
+      expect(_expectedTransfer.length, 54);
       expect(_expectedDesign.length, 24);
       expect(_expectedPairingDesign.length, 14);
       expect(

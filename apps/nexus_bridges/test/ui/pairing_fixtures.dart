@@ -180,7 +180,7 @@ Set<String> allowedTexts(
     s.chipMine,
     s.chipForeign,
     s.visibleLabel,
-    s.sendFileButton,
+    s.sendEllipsis,
     s.sendNeedsVisible,
     s.sendNeedsPairAgain,
     s.networkPromptTitle,

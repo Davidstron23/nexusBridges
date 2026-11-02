@@ -87,7 +87,7 @@ ButtonStyleButton _sendButton(
   String name,
 ) => tester.widget<ButtonStyleButton>(
   find.ancestor(
-    of: _inCard(name, find.text(strings.sendFileButton)),
+    of: _inCard(name, find.text(strings.sendEllipsis)),
     matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
   ),
 );
@@ -156,10 +156,10 @@ void main() {
             _mineName,
             strings.chipMine,
             strings.visibleLabel,
-            strings.sendFileButton,
+            strings.sendEllipsis,
           ]),
         );
-        expect(rowButtons(tester, _mineName), [strings.sendFileButton]);
+        expect(rowButtons(tester, _mineName), [strings.sendEllipsis]);
         expect(_sendButton(tester, strings, _mineName).onPressed, isNotNull);
         expect(_inCard(_mineName, _discWith(DeviceGlyph.pc)), findsOneWidget);
         expect(
@@ -200,10 +200,10 @@ void main() {
             _foreignName,
             strings.chipForeign,
             strings.visibleLabel,
-            strings.sendFileButton,
+            strings.sendEllipsis,
           ]),
         );
-        expect(rowButtons(tester, _foreignName), [strings.sendFileButton]);
+        expect(rowButtons(tester, _foreignName), [strings.sendEllipsis]);
 
         await _openMenu(tester, strings, _foreignName);
         expect(find.text(strings.markAsMine), findsOneWidget);
@@ -226,10 +226,10 @@ void main() {
             strings.chipMine,
             strings.notVisibleLabel,
             strings.sendNeedsVisible,
-            strings.sendFileButton,
+            strings.sendEllipsis,
           ]),
         );
-        expect(rowButtons(tester, _hiddenName), [strings.sendFileButton]);
+        expect(rowButtons(tester, _hiddenName), [strings.sendEllipsis]);
         expect(_sendButton(tester, strings, _hiddenName).onPressed, isNull);
         expect(_inCard(_hiddenName, _discWith(DeviceGlyph.pc)), findsOneWidget);
         expect(
@@ -305,7 +305,7 @@ void main() {
           findsOneWidget,
         );
         expect(rowButtons(tester, _mismatchName), [
-          strings.sendFileButton,
+          strings.sendEllipsis,
           strings.removeButton,
           strings.pairAgainButton,
         ]);
@@ -317,7 +317,7 @@ void main() {
             strings.visibleLabel,
             strings.sendNeedsPairAgain,
             strings.mismatchWarning,
-            strings.sendFileButton,
+            strings.sendEllipsis,
             strings.removeButton,
             strings.pairAgainButton,
           ]),

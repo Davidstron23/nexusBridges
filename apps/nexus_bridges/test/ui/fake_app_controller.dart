@@ -140,15 +140,8 @@ class FakeAppController extends AppController {
     calls.add('dismissNotice $id');
   }
 
-  SendResult sendFileResult = SendResult.started;
   RevealResult revealResult = RevealResult.shown;
   Future<void> Function() shutdownResult = () async {};
-
-  @override
-  Future<SendResult> sendFile(String fingerprint) async {
-    calls.add('sendFile $fingerprint');
-    return sendFileResult;
-  }
 
   SendResult sendFilesResult = SendResult.started;
   SendResult sendFoldersResult = SendResult.started;
