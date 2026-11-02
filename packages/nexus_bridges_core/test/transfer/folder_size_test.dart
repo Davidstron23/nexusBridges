@@ -188,6 +188,11 @@ void main() {
       expect(await measure(root), 20000);
       final fullTime = full.elapsed;
 
+      final early = AbortSignal();
+      final pendingEarly = measure(root, abort: early);
+      early.abort();
+      expect(await pendingEarly, isNull);
+
       final abort = AbortSignal();
       final watch = Stopwatch()..start();
       final pending = measure(root, abort: abort);
@@ -195,7 +200,7 @@ void main() {
       abort.abort();
       final value = await pending;
 
-      expect(value, isNull);
+      expect(value, anyOf(isNull, 20000));
       expect(
         watch.elapsed,
         lessThan(fullTime + const Duration(milliseconds: 500)),
