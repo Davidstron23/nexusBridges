@@ -534,7 +534,7 @@ class _ItemRow extends StatelessWidget {
     switch (item.state) {
       case QueueItemState.pending:
         detail = strings.queuePending;
-        trailing = _RemoveButton(
+        trailing = RemoveButton(
           label: '${strings.queueRemove}: ${item.name}',
           tooltip: strings.queueRemove,
           onPressed: () => controller.removeQueueItem(item.id),
@@ -720,11 +720,12 @@ class _Badge extends StatelessWidget {
   }
 }
 
-class _RemoveButton extends StatefulWidget {
-  const _RemoveButton({
+class RemoveButton extends StatefulWidget {
+  const RemoveButton({
     required this.label,
     required this.tooltip,
     required this.onPressed,
+    super.key,
   });
 
   final String label;
@@ -732,10 +733,10 @@ class _RemoveButton extends StatefulWidget {
   final VoidCallback onPressed;
 
   @override
-  State<_RemoveButton> createState() => _RemoveButtonState();
+  State<RemoveButton> createState() => _RemoveButtonState();
 }
 
-class _RemoveButtonState extends State<_RemoveButton> {
+class _RemoveButtonState extends State<RemoveButton> {
   bool _hovered = false;
   bool _focused = false;
 

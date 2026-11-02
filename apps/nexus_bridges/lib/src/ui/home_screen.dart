@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
+import '../drop/drop_controller.dart';
+import '../drop/drop_events.dart';
+import '../drop/drop_zone.dart';
 import '../l10n/app_strings.dart';
 import 'activity_cards.dart';
 import 'diagram/flow_diagram.dart';
@@ -15,13 +20,15 @@ import 'send_action.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
+import 'tray_panel.dart';
 
 const double _narrowHeader = 600;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen(this.controller, {super.key});
+  const HomeScreen(this.controller, {this.dropEvents, super.key});
 
   final AppController controller;
+  final DropEvents? dropEvents;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -30,14 +37,53 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ValueNotifier<ColumnTab> _tab = ValueNotifier(ColumnTab.devices);
   final ValueNotifier<String?> _hovered = ValueNotifier(null);
+  late final DropController _drop = DropController(
+    canSendTo: (fingerprint) =>
+        widget.controller.state?.canSendTo(fingerprint) ?? false,
+    isMine: _isMine,
+    onPortal: (fingerprint) =>
+        unawaited(widget.controller.requestPortal(fingerprint)),
+    onOutcome: (outcome) {
+      if (!mounted) return;
+      unawaited(applyDropOutcome(context, widget.controller, outcome));
+    },
+  );
+  StreamSubscription<DropEvent>? _dropSubscription;
   NodeState? _previous;
   bool _tabSet = false;
+  bool _dropHovering = false;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_syncTab);
     _syncTab();
+    _drop.addListener(_syncDropHover);
+    _dropSubscription = (widget.dropEvents ?? MethodChannelDropEvents()).events
+        .listen(_drop.handle);
+  }
+
+  bool _isMine(String fingerprint) {
+    final state = widget.controller.state;
+    if (state == null) return false;
+    for (final entry in state.entries) {
+      if (entry.fingerprint == fingerprint) return entry.mine;
+    }
+    return false;
+  }
+
+  void _syncDropHover() {
+    final hovered = _drop.dragging ? _drop.hovered : null;
+    final lit =
+        hovered != null &&
+        (widget.controller.state?.canSendTo(hovered) ?? false);
+    if (lit) {
+      _hovered.value = hovered;
+      _dropHovering = true;
+    } else if (_dropHovering) {
+      _hovered.value = null;
+      _dropHovering = false;
+    }
   }
 
   @override
@@ -51,6 +97,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    unawaited(_dropSubscription?.cancel());
+    _drop.removeListener(_syncDropHover);
+    _drop.dispose();
     widget.controller.removeListener(_syncTab);
     _tab.dispose();
     _hovered.dispose();
@@ -78,32 +127,36 @@ class _HomeScreenState extends State<HomeScreen> {
         final strings = AppStringsDelegate.of(context);
         final state = controller.state;
         final failure = _failureMessage(strings);
-        return SelectionProgressScope(
-          state: state,
-          child: Scaffold(
-            body: Column(
-              children: [
-                _Header(
-                  controller: controller,
-                  state: failure == null ? state : null,
-                ),
-                Expanded(
-                  child: failure != null
-                      ? _MessageWithRetry(
-                          message: failure,
-                          retryLabel: strings.retryButton,
-                          onRetry: controller.retry,
-                        )
-                      : _Body(
-                          strings: strings,
-                          controller: controller,
-                          state: state!,
-                          tab: _tab,
-                          hovered: _hovered,
-                          noticeText: (notice) => _noticeText(strings, notice),
-                        ),
-                ),
-              ],
+        return DropScope(
+          controller: _drop,
+          child: SelectionProgressScope(
+            state: state,
+            child: Scaffold(
+              body: Column(
+                children: [
+                  _Header(
+                    controller: controller,
+                    state: failure == null ? state : null,
+                  ),
+                  Expanded(
+                    child: failure != null
+                        ? _MessageWithRetry(
+                            message: failure,
+                            retryLabel: strings.retryButton,
+                            onRetry: controller.retry,
+                          )
+                        : _Body(
+                            strings: strings,
+                            controller: controller,
+                            state: state!,
+                            tab: _tab,
+                            hovered: _hovered,
+                            noticeText: (notice) =>
+                                _noticeText(strings, notice),
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -243,7 +296,23 @@ class _Body extends StatelessWidget {
             hovered: hovered,
             noticeText: noticeText,
           );
-          if (!showsDiagram(width)) return column;
+          if (!showsDiagram(width)) {
+            return Stack(
+              children: [
+                Positioned.fill(child: column),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: DragPill(
+                      visible: DropScope.maybeOf(context)?.dragging ?? false,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -337,10 +406,12 @@ class _SideColumn extends StatelessWidget {
     return ValueListenableBuilder<ColumnTab>(
       valueListenable: tab,
       builder: (context, current, _) {
-        final blocks = <Widget>[
+        final leading = <Widget>[
           if (hasIncomingCard(state))
             IncomingCards(controller: controller, state: state),
           ..._notices(),
+        ];
+        final blocks = <Widget>[
           _ColumnTabs(
             strings: strings,
             current: current,
@@ -356,6 +427,11 @@ class _SideColumn extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              for (final block in leading) ...[
+                block,
+                const SizedBox(height: 12),
+              ],
+              TrayHost(controller: controller, state: state),
               for (var i = 0; i < blocks.length; i++) ...[
                 if (i > 0) const SizedBox(height: 12),
                 blocks[i],

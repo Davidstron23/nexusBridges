@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/app_controller.dart';
+import 'package:nexus_bridges/src/drop/drop_events.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/network_prompt_dialog.dart';
@@ -280,6 +281,7 @@ Widget homeApp(
   AppController controller,
   String languageCode, {
   bool reduceMotion = false,
+  DropEvents? dropEvents,
 }) {
   return MaterialApp(
     locale: Locale(languageCode),
@@ -302,7 +304,10 @@ Widget homeApp(
         : null,
     home: NetworkPromptHost(
       controller: controller,
-      child: PairingHost(controller: controller, child: HomeScreen(controller)),
+      child: PairingHost(
+        controller: controller,
+        child: HomeScreen(controller, dropEvents: dropEvents),
+      ),
     ),
   );
 }
@@ -313,9 +318,15 @@ Future<void> pumpHome(
   String languageCode, {
   bool settle = true,
   bool reduceMotion = false,
+  DropEvents? dropEvents,
 }) async {
   await tester.pumpWidget(
-    homeApp(controller, languageCode, reduceMotion: reduceMotion),
+    homeApp(
+      controller,
+      languageCode,
+      reduceMotion: reduceMotion,
+      dropEvents: dropEvents,
+    ),
   );
   if (settle) {
     await tester.pumpAndSettle();

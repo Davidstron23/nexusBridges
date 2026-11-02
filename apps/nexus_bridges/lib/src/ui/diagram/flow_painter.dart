@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart' show DeviceType;
 
@@ -41,6 +42,10 @@ const double _headerLeft = 20;
 const double _headerTop = 14;
 const double _headerGap = 8;
 const List<double> _ringFactors = [0.32, 0.58, 0.84, 1.1];
+const double _dropRingGap = 8;
+const double _dropRingTravel = 48;
+const double _dimmedPeer = 0.26;
+const double _dimmedLine = 0.18;
 
 Path dashPath(Path source, List<double> pattern, {double phase = 0}) {
   final valid =
@@ -152,7 +157,20 @@ class FlowPainter extends CustomPainter {
     this.progress,
     this.iconFade,
     this.iconFrom = const {},
-  }) : super(repaint: Listenable.merge([clock, hover, ?progress, ?iconFade]));
+    this.dragFade,
+    this.dragSpin,
+    this.lit = const {},
+    this.hot,
+  }) : super(
+         repaint: Listenable.merge([
+           clock,
+           hover,
+           ?progress,
+           ?iconFade,
+           ?dragFade,
+           ?dragSpin,
+         ]),
+       );
 
   final FlowScene scene;
   final NbColors colors;
@@ -163,6 +181,10 @@ class FlowPainter extends CustomPainter {
   final ProgressTracker? progress;
   final Animation<double>? iconFade;
   final Map<String, TravelIcon> iconFrom;
+  final Animation<double>? dragFade;
+  final Animation<double>? dragSpin;
+  final Set<String> lit;
+  final String? hot;
 
   final Map<_TextKey, TextPainter> _texts = {};
 
@@ -229,14 +251,26 @@ class FlowPainter extends CustomPainter {
         ),
     ];
 
+    final fade = dragFade?.value ?? 0;
     for (var i = 0; i < peers.length; i++) {
-      _paintBaseLine(canvas, peers[i], curves[i]);
+      _paintBaseLine(
+        canvas,
+        peers[i],
+        curves[i],
+        _dimOf(peers[i], fade, _dimmedLine),
+      );
     }
     for (var i = 0; i < peers.length; i++) {
       _paintStateLine(canvas, peers[i], curves[i], elapsed);
     }
     for (var i = 0; i < peers.length; i++) {
-      _paintPeer(canvas, peers[i], layout.slots[i], elapsed);
+      final opacity = _dimOf(peers[i], fade, _dimmedPeer);
+      _inLayer(
+        canvas,
+        layout.slots[i],
+        opacity,
+        () => _paintPeer(canvas, peers[i], layout.slots[i], elapsed, fade),
+      );
     }
     for (final slot in layout.slots) {
       if (slot.overflow) _paintOverflow(canvas, slot);
@@ -244,19 +278,57 @@ class FlowPainter extends CustomPainter {
     _paintHub(canvas, layout);
     _paintHubLabel(canvas, layout);
     for (var i = 0; i < peers.length; i++) {
-      _paintPeerLabel(canvas, peers[i], layout.slots[i]);
+      _inLayer(
+        canvas,
+        layout.slots[i],
+        _dimOf(peers[i], fade, _dimmedPeer),
+        () => _paintPeerLabel(canvas, peers[i], layout.slots[i]),
+      );
     }
     _paintHeader(canvas);
   }
 
-  void _paintBaseLine(Canvas canvas, FlowPeer peer, Path curve) {
+  double _dimOf(FlowPeer peer, double fade, double floor) {
+    if (fade <= 0 || lit.contains(peer.fingerprint)) return 1;
+    return 1 - (1 - floor) * fade;
+  }
+
+  void _inLayer(
+    Canvas canvas,
+    FlowSlot slot,
+    double opacity,
+    VoidCallback paint,
+  ) {
+    if (opacity >= 1) {
+      paint();
+      return;
+    }
+    canvas.saveLayer(
+      Rect.fromLTWH(
+        slot.center.dx - scene.layout.peerRadius - 24,
+        slot.center.dy - scene.layout.peerRadius - 24,
+        scene.layout.size.width,
+        2 * scene.layout.peerRadius + 48,
+      ),
+      Paint()..color = colors.card.withValues(alpha: opacity),
+    );
+    paint();
+    canvas.restore();
+  }
+
+  void _paintBaseLine(
+    Canvas canvas,
+    FlowPeer peer,
+    Path curve,
+    double opacity,
+  ) {
     canvas.drawPath(
       peer.visible ? curve : dashPath(curve, const [2, 6]),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
         ..strokeCap = StrokeCap.round
-        ..color = colors.border,
+        ..color = colors.border.withValues(alpha: colors.border.a * opacity),
     );
   }
 
@@ -446,7 +518,42 @@ class FlowPainter extends CustomPainter {
     );
   }
 
-  void _paintPeer(Canvas canvas, FlowPeer peer, FlowSlot slot, double elapsed) {
+  void _paintDropRing(
+    Canvas canvas,
+    FlowPeer peer,
+    FlowSlot slot,
+    double fade,
+  ) {
+    final isHot = peer.fingerprint == hot;
+    final circle = Path()
+      ..addOval(
+        Rect.fromCircle(
+          center: slot.center,
+          radius: scene.layout.peerRadius + _dropRingGap,
+        ),
+      );
+    final travel = reduceMotion
+        ? 0.0
+        : (dragSpin?.value ?? 0) * _dropRingTravel;
+    canvas.drawPath(
+      isHot ? circle : dashPath(circle, const [3, 5], phase: -travel),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = isHot ? 2 : 1.5
+        ..strokeCap = StrokeCap.round
+        ..color = colors.primary.withValues(
+          alpha: colors.primary.a * (isHot ? 1 : 0.85) * fade,
+        ),
+    );
+  }
+
+  void _paintPeer(
+    Canvas canvas,
+    FlowPeer peer,
+    FlowSlot slot,
+    double elapsed,
+    double fade,
+  ) {
     final center = slot.center;
     final radius = scene.layout.peerRadius;
     final state = peer.link.state;
@@ -523,8 +630,20 @@ class FlowPainter extends CustomPainter {
     if (halo != null) {
       canvas.drawCircle(center, radius + _haloExtra, Paint()..color = halo);
     }
+    final lifted = fade > 0 && lit.contains(peer.fingerprint);
+    if (lifted && peer.fingerprint == hot) {
+      canvas.drawCircle(
+        center,
+        radius + _dropRingGap,
+        Paint()
+          ..color = colors.primaryWeak.withValues(
+            alpha: colors.primaryWeak.a * fade,
+          ),
+      );
+    }
     _paintNodeDisc(canvas, center, radius, ring, ringWidth);
     _paintPeerGlyph(canvas, peer, center, ink);
+    if (lifted) _paintDropRing(canvas, peer, slot, fade);
 
     if (state == LinkState.done) {
       final badge = center + Offset(radius, -radius) * _badgeOffset;
@@ -764,5 +883,9 @@ class FlowPainter extends CustomPainter {
       oldDelegate.textDirection != textDirection ||
       !identical(oldDelegate.progress, progress) ||
       !identical(oldDelegate.iconFade, iconFade) ||
-      !identical(oldDelegate.iconFrom, iconFrom);
+      !identical(oldDelegate.iconFrom, iconFrom) ||
+      !identical(oldDelegate.dragFade, dragFade) ||
+      !identical(oldDelegate.dragSpin, dragSpin) ||
+      !setEquals(oldDelegate.lit, lit) ||
+      oldDelegate.hot != hot;
 }
