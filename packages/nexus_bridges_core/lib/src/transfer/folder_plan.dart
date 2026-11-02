@@ -12,6 +12,8 @@ import 'names.dart' show isProgram, windowsExtension;
 import 'transfer.dart' show FolderSummaryView, TransferOutcome;
 import 'windows_folder_io.dart';
 
+const Duration _cancelGrace = Duration(milliseconds: 500);
+
 final class FolderPlan {
   const FolderPlan({
     required this.rootPath,
@@ -62,8 +64,12 @@ final class _PlanRequest {
     required this.dataDirRealPath,
     required this.port,
     required this.flagAddress,
+    required this.cancelSlot,
+    required this.cancelMutex,
   });
 
+  final int cancelSlot;
+  final int cancelMutex;
   final String rootRealPath;
   final String name;
   final List<String> exclusions;
@@ -133,11 +139,26 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
     request.port.send(<int>[entries, hashed]);
   }
 
+  final dataScanPath = request.dataDirRealPath.isEmpty
+      ? request.dataDirPath
+      : request.dataDirRealPath;
+  final protectedIds = dataScanPath.isEmpty
+      ? const <(int, int)>{}
+      : fileIdsUnder(dataScanPath, includeFolders: true);
+  if (protectedIds == null) {
+    return const PlanStopped(TransferOutcome.protectedData);
+  }
+  bool isProtected(int volume, int index) =>
+      protectedIds.contains((volume, index));
+
   final walk = walkFolder(
     lister: const WindowsFolderLister(),
     rootPath: request.rootRealPath,
     exclusions: request.exclusions.map((name) => name.toUpperCase()).toSet(),
     dataDirRealPath: request.dataDirRealPath,
+    isDataFolder: protectedIds.isEmpty
+        ? null
+        : (path) => pathHasIdentityIn(path, protectedIds),
     isCancelled: cancelled,
     onProgress: report,
   );
@@ -146,16 +167,6 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
   if (stopped != null) return PlanStopped(stopped, walk.problemPath);
   if (walk.excludedPaths.isNotEmpty) {
     request.port.send(_ExcludedFound(List<String>.of(walk.excludedPaths)));
-  }
-
-  final dataScanPath = request.dataDirRealPath.isEmpty
-      ? request.dataDirPath
-      : request.dataDirRealPath;
-  Set<(int, int)>? protectedIds;
-  bool isProtected(int volume, int index, int links) {
-    if (links <= 1 || dataScanPath.isEmpty) return false;
-    protectedIds ??= fileIdsUnder(dataScanPath);
-    return protectedIds!.contains((volume, index));
   }
 
   final builder = walk.builder;
@@ -174,6 +185,7 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
         buffer: buffer,
         isCancelled: cancelled,
         isProtected: isProtected,
+        cancelPort: ReadCancelPort(request.cancelSlot, request.cancelMutex),
       );
       switch (result) {
         case FileHashCancelled():
@@ -251,13 +263,16 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
 final class FolderPlanJob {
   FolderPlanJob._(this._onProgress)
     : _flag = calloc<Uint8>(),
+      _gate = ReadCancelGate.create(),
       _port = ReceivePort() {
     _port.listen(_onMessage);
   }
 
   final void Function(int entries, int hashed)? _onProgress;
   final Pointer<Uint8> _flag;
+  final ReadCancelGate _gate;
   final ReceivePort _port;
+  Timer? _hardKillTimer;
   final Completer<PlanResult> _result = Completer<PlanResult>();
   final Completer<FolderMeasure> _excluded = Completer<FolderMeasure>();
   Isolate? _isolate;
@@ -287,6 +302,8 @@ final class FolderPlanJob {
       dataDirRealPath: dataDirRealPath,
       port: job._port.sendPort,
       flagAddress: job._flag.address,
+      cancelSlot: job._gate.slotAddress,
+      cancelMutex: job._gate.mutexAddress,
     );
     job._launch(request);
     return job;
@@ -320,8 +337,11 @@ final class FolderPlanJob {
 
   void _scheduleKill() {
     _killTimer ??= Timer(Limits.workerStopGrace, () {
-      _isolate?.kill(priority: Isolate.immediate);
+      _gate.cancelPending();
       _finish(const PlanCancelled());
+      _hardKillTimer ??= Timer(_cancelGrace, () {
+        _isolate?.kill(priority: Isolate.immediate);
+      });
     });
   }
 
@@ -404,8 +424,10 @@ final class FolderPlanJob {
     if (_released || !_planExited || _measureActive) return;
     _released = true;
     _killTimer?.cancel();
+    _hardKillTimer?.cancel();
     _measureKillTimer?.cancel();
     _port.close();
     calloc.free(_flag);
+    _gate.dispose();
   }
 }

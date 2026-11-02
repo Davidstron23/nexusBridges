@@ -285,8 +285,16 @@ final RegExp _driveRootPattern = RegExp(
   r'^(?:[A-Za-z]:\\?|\\\\\?\\[A-Za-z]:\\?|\\\\\?\\Volume\{[0-9A-Fa-f-]+\}\\?)$',
 );
 
-bool isDriveRoot(String path) =>
-    _driveRootPattern.hasMatch(path.replaceAll('/', r'\'));
+final RegExp _shareRootPattern = RegExp(
+  r'^(?:\\\\\?\\UNC\\|\\\\\.\\UNC\\|\\\\)[^\\]+\\[^\\]*\$\\?$',
+  caseSensitive: false,
+);
+
+bool isDriveRoot(String path) {
+  final normalized = path.replaceAll('/', r'\');
+  return _driveRootPattern.hasMatch(normalized) ||
+      _shareRootPattern.hasMatch(normalized);
+}
 
 bool isShortcutName(String name) => name.toLowerCase().endsWith('.lnk');
 

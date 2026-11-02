@@ -55,6 +55,7 @@ WalkResult walkFolder({
   required String rootPath,
   required Set<String> exclusions,
   required String dataDirRealPath,
+  bool Function(String path)? isDataFolder,
   bool Function()? isCancelled,
   void Function(int entries)? onProgress,
 }) {
@@ -103,7 +104,8 @@ WalkResult walkFolder({
         final childPath = _join(folder.path, entry.name);
         if (isAppReservedName(entry.name) ||
             (dataDirRealPath.isNotEmpty &&
-                isSameOrInside(childPath, dataDirRealPath))) {
+                isSameOrInside(childPath, dataDirRealPath)) ||
+            (isDataFolder != null && isDataFolder(childPath))) {
           result.protectedOmitted++;
           continue;
         }

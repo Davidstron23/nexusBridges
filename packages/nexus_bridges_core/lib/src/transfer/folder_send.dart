@@ -12,8 +12,11 @@ import '../transport/transport.dart' show AbortSignal;
 import 'folder_plan.dart' show FolderPlan;
 import 'folder_stream.dart' show encodeFrameHeader;
 import 'hashing.dart' show startSha256;
-import 'manifest.dart' show FolderManifest;
-import 'windows_folder_io.dart' show openFileForSend;
+import 'manifest.dart' show FolderManifest, ManifestBuilder;
+import 'windows_folder_io.dart'
+    show ReadCancelGate, ReadCancelPort, openFileForSend;
+
+const Duration _cancelGrace = Duration(milliseconds: 500);
 
 const int _flushBytes = 65536;
 const int _readBytes = 262144;
@@ -58,13 +61,19 @@ final class _ReadRequest {
     required this.manifest,
     required this.volumes,
     required this.indexes,
+    required this.strict,
+    required this.cancelSlot,
+    required this.cancelMutex,
   });
 
+  final int cancelSlot;
+  final int cancelMutex;
   final SendPort port;
   final String rootPath;
   final FolderManifest manifest;
   final Uint32List volumes;
   final Uint64List indexes;
+  final bool strict;
 }
 
 Future<bool> _readEntry({
@@ -82,7 +91,8 @@ Future<bool> _readEntry({
     path: _join(request.rootPath, manifest.relativePath(entry)),
     volume: request.volumes[ordinal],
     index: request.indexes[ordinal],
-    size: expected,
+    size: request.strict ? expected : null,
+    cancelPort: ReadCancelPort(request.cancelSlot, request.cancelMutex),
   );
   if (reader == null) return false;
   final digest = startSha256();
@@ -102,6 +112,7 @@ Future<bool> _readEntry({
       ]);
       remaining -= count;
     }
+    if (!request.strict) return true;
     if (reader.read(buffer, 1) != 0) return false;
     final hex = digest.close();
     return hex != null && hex == manifest.hashHexOf(entry);
@@ -179,11 +190,21 @@ Future<void> _readerMain(_ReadRequest request) async {
 }
 
 final class FolderReadJob {
-  FolderReadJob._() : _port = ReceivePort() {
+  FolderReadJob._()
+    : _port = ReceivePort(),
+      _exit = ReceivePort(),
+      _gate = ReadCancelGate.create() {
     _port.listen(_onMessage);
+    _exit.listen((_) {
+      _markDead();
+      _releaseGate();
+    });
   }
 
   final ReceivePort _port;
+  final ReceivePort _exit;
+  final ReadCancelGate _gate;
+  bool _gateReleased = false;
   final Queue<FolderReadEvent> _events = Queue<FolderReadEvent>();
   final List<List<Object>> _early = [];
   SendPort? _commands;
@@ -194,22 +215,67 @@ final class FolderReadJob {
   bool _closed = false;
   bool _portClosed = false;
 
-  static FolderReadJob start(FolderPlan plan) {
-    final job = FolderReadJob._();
-    final request = _ReadRequest(
-      port: job._port.sendPort,
+  static FolderReadJob start(FolderPlan plan) => _launch(
+    (port, gate) => _ReadRequest(
+      port: port,
       rootPath: plan.rootPath,
       manifest: plan.manifest,
       volumes: plan.fileVolumes,
       indexes: plan.fileIndexes,
+      strict: true,
+      cancelSlot: gate.slotAddress,
+      cancelMutex: gate.mutexAddress,
+    ),
+  );
+
+  static FolderReadJob startFile({
+    required String path,
+    required int volume,
+    required int index,
+    required int size,
+  }) {
+    final cut = path.lastIndexOf(r'\');
+    final builder = ManifestBuilder();
+    builder
+      ..addFile(0, path.substring(cut + 1), size)
+      ..setFile(1, size, Uint8List(32));
+    return _launch(
+      (port, gate) => _ReadRequest(
+        port: port,
+        rootPath: path.substring(0, cut),
+        manifest: builder.build(),
+        volumes: Uint32List.fromList([volume]),
+        indexes: Uint64List.fromList([index]),
+        strict: false,
+        cancelSlot: gate.slotAddress,
+        cancelMutex: gate.mutexAddress,
+      ),
     );
-    Isolate.spawn(_readerMain, request, onExit: job._port.sendPort).then((
-      isolate,
-    ) {
-      job._isolate = isolate;
-      if (job._closed) job._scheduleKill();
-    }, onError: (Object _) => job._markDead());
+  }
+
+  static FolderReadJob _launch(
+    _ReadRequest Function(SendPort port, ReadCancelGate gate) build,
+  ) {
+    final job = FolderReadJob._();
+    final request = build(job._port.sendPort, job._gate);
+    Isolate.spawn(_readerMain, request, onExit: job._exit.sendPort).then(
+      (isolate) {
+        job._isolate = isolate;
+        if (job._closed) job._scheduleKill();
+      },
+      onError: (Object _) {
+        job._markDead();
+        job._releaseGate();
+      },
+    );
     return job;
+  }
+
+  void _releaseGate() {
+    if (_gateReleased) return;
+    _gateReleased = true;
+    _exit.close();
+    _gate.dispose();
   }
 
   void open(int entry, int ordinal) {
@@ -251,8 +317,11 @@ final class FolderReadJob {
 
   void _scheduleKill() {
     _killTimer ??= Timer(Limits.workerStopGrace, () {
-      _isolate?.kill(priority: Isolate.immediate);
-      _markDead();
+      _gate.cancelPending();
+      _killTimer = Timer(_cancelGrace, () {
+        _isolate?.kill(priority: Isolate.immediate);
+        _markDead();
+      });
     });
   }
 

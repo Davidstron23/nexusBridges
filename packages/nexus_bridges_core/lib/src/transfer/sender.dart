@@ -17,9 +17,9 @@ import '../transport/transport.dart'
 import 'folder_plan.dart';
 import 'folder_send.dart';
 import 'folder_stream.dart';
-import 'folders.dart' show isInsideTempFolder, isSameOrInside;
-import 'hashing.dart';
+import 'folders.dart' show isAdminShare, isInsideTempFolder, isSameOrInside;
 import 'link.dart';
+import 'loose_file.dart';
 import 'messages.dart';
 import 'names.dart'
     show
@@ -32,7 +32,15 @@ import 'names.dart'
         visibleFileName;
 import 'platform.dart';
 import 'transfer.dart';
-import 'windows_folder_io.dart' show fileIsLinkedUnder;
+import 'windows_folder_io.dart'
+    show
+        DataCheck,
+        FileHashCancelled,
+        FileHashResult,
+        FileHashed,
+        FileHashFailed,
+        FileHashSkipped,
+        checkAgainstData;
 
 const Duration _pollMargin = Duration(seconds: 3);
 
@@ -51,8 +59,8 @@ Stream<List<int>> _slices(Uint8List data) async* {
   }
 }
 
-Future<bool> _linkedToData(String filePath, String dataPath) =>
-    Isolate.run(() => fileIsLinkedUnder(filePath, dataPath));
+Future<DataCheck> _checkData(String path, String dataPath) =>
+    Isolate.run(() => checkAgainstData(path, dataPath));
 
 String _randomHex32() {
   final random = Random.secure();
@@ -79,6 +87,12 @@ final class _OutSession {
   final bool isFolder;
 
   final String? realPath;
+
+  String? sourcePath;
+
+  int sourceVolume = 0;
+
+  int sourceIndex = 0;
 
   final Completer<TransferResultView?> completion =
       Completer<TransferResultView?>();
@@ -516,10 +530,22 @@ final class TransferSender {
       record(TransferOutcome.protectedData);
       return null;
     }
-    final isFolder = kind == FileSystemEntityType.directory;
-    if (!isFolder && dataReal != null && await _linkedToData(real, dataReal)) {
+    if (isAdminShare(path) || isAdminShare(real)) {
       record(TransferOutcome.protectedData);
       return null;
+    }
+    final isFolder = kind == FileSystemEntityType.directory;
+    if (dataReal != null) {
+      switch (await _checkData(real, dataReal)) {
+        case DataCheck.clear:
+          break;
+        case DataCheck.inData:
+          record(TransferOutcome.protectedData);
+          return null;
+        case DataCheck.unreadable:
+          record(TransferOutcome.unreadable);
+          return null;
+      }
     }
     if (_closed) return null;
     if (!isValidFileName(name)) {
@@ -798,32 +824,62 @@ final class TransferSender {
         _onChanged();
       }),
     );
-    FileDigest? digest;
+    final source = session.realPath ?? await _fs.realPath(path);
+    if (session.done) return;
+    if (source == null) {
+      await _conclude(session, TransferOutcome.unreadable);
+      return;
+    }
+    final dataReal = _dataDirPath.isEmpty
+        ? ''
+        : await _fs.realPath(_dataDirPath) ?? _dataDirPath;
+    if (session.done) return;
+    final FileHashResult hashed;
     try {
-      digest = await hashFile(path, abort: session.abort);
-    } on FileSystemException catch (e) {
+      hashed = await hashLooseFile(
+        path: source,
+        dataPath: dataReal,
+        abort: session.abort,
+      );
+    } catch (e) {
       _log('send source unreadable: ${e.runtimeType}');
       await _conclude(session, TransferOutcome.unreadable);
       return;
     }
     if (session.done) return;
-    if (digest == null) {
-      await _conclude(session, TransferOutcome.cancelledHere);
-      return;
+    switch (hashed) {
+      case FileHashCancelled():
+        await _conclude(session, TransferOutcome.cancelledHere);
+        return;
+      case FileHashSkipped():
+        await _conclude(session, TransferOutcome.protectedData);
+        return;
+      case FileHashFailed():
+        _log(
+          'send source unreadable: ${const FileSystemException().runtimeType}',
+        );
+        await _conclude(session, TransferOutcome.unreadable);
+        return;
+      case FileHashed():
+        break;
     }
+    session
+      ..sourcePath = source
+      ..sourceVolume = hashed.volume
+      ..sourceIndex = hashed.index;
     session.isProgram = await session.typeCheck;
     if (session.done) return;
     final id = _randomHex32();
     session
       ..id = id
-      ..size = digest.size
+      ..size = hashed.size
       ..phase = OutgoingPhase.requesting;
     _onChanged();
     final offer = OfferRequest(
       transfer: id,
       name: session.name,
-      size: digest.size,
-      sha256: digest.sha256,
+      size: hashed.size,
+      sha256: hexOfDigest(hashed.sha256),
     );
     final reply = await session.link.post(
       ApiPaths.transferOffer,
@@ -946,7 +1002,13 @@ final class TransferSender {
     }
     final plan = session.plan;
     final layout = session.layout;
-    final result = session.isFolder && plan != null && layout != null
+    final source = session.sourcePath;
+    final folderBody = session.isFolder && plan != null && layout != null;
+    if (!folderBody && source == null) {
+      _finish(session, TransferOutcome.unreadable);
+      return;
+    }
+    final result = folderBody
         ? await session.link.uploadFolder(
             transfer: id,
             permit: permit,
@@ -965,11 +1027,17 @@ final class TransferSender {
             answerTimeout: Limits.transferConfirmCap,
             abort: session.abort,
           )
-        : await session.link.upload(
+        : await session.link.uploadFolder(
             transfer: id,
             permit: permit,
-            filePath: session.path,
-            size: session.size,
+            body: looseFileStream(
+              path: source!,
+              volume: session.sourceVolume,
+              index: session.sourceIndex,
+              size: session.size,
+              abort: session.abort,
+            ),
+            contentLength: session.size,
             onProgress: (sent) => _progress(session, sent),
             onBodySent: () => _bodySent(session),
             idleTimeout: _idleTimeout,
