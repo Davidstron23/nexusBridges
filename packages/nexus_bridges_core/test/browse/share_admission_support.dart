@@ -161,6 +161,7 @@ final class AdmissionPlace {
   final File sharesFile;
   final List<String> logs = [];
   Duration now = const Duration(hours: 5);
+  DateTime wall = DateTime.utc(2026, 11, 3, 10);
   late ShareService service;
 
   String get dataDir => '$base\\data';
@@ -181,6 +182,7 @@ final class AdmissionPlace {
       fileSystem: fs,
       dataDirPath: dataDir,
       clock: () => now,
+      now: () => wall,
       log: logs.add,
     );
     addTearDown(service.close);

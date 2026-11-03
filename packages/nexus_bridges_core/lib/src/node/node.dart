@@ -1341,6 +1341,7 @@ final class NexusNode {
       fileSystem: shareFs,
       dataDirPath: dir.path,
       clock: _clock,
+      now: _now,
       log: _log,
     );
     try {

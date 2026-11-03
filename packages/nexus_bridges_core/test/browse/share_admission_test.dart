@@ -351,6 +351,48 @@ void main() {
     });
   });
 
+  group('Review fixes on the share service', () {
+    test('B-menor addedAt comes from the injected clock', () async {
+      final place = await admissionPlace();
+      expect(
+        await place.service.addPath(mine.fingerprint, place.folder('uno')),
+        addedSaved(true),
+      );
+      place.wall = DateTime.utc(2027, 1, 2, 3, 4, 5);
+      expect(
+        await place.service.addPath(mine.fingerprint, place.folder('dos')),
+        addedSaved(true),
+      );
+      expect(place.service.rootsFor(mine.fingerprint).map((r) => r.addedAt), [
+        DateTime.utc(2026, 11, 3, 10),
+        DateTime.utc(2027, 1, 2, 3, 4, 5),
+      ]);
+      expect(await place.reopen(), SharesLoadResult.loaded);
+      expect(place.service.rootsFor(mine.fingerprint).map((r) => r.addedAt), [
+        DateTime.utc(2026, 11, 3, 10),
+        DateTime.utc(2027, 1, 2, 3, 4, 5),
+      ]);
+    });
+
+    test('B-menor forget drops the pendings of a peer that has no roots '
+        'yet', () async {
+      final place = await admissionPlace();
+      place.platform.noMarkSupport = true;
+      final asked = await place.service.addPath(
+        mine.fingerprint,
+        place.folder('p'),
+      ) as ShareNeedsConfirmation;
+      expect(place.service.rootsFor(mine.fingerprint), isEmpty);
+      expect(await place.service.forget(mine.fingerprint), isTrue);
+      expect(
+        await place.service.confirm(mine.fingerprint, asked.pendingId),
+        refusedWith(ShareRefusal.missing),
+      );
+      expect(place.service.viewsFor(mine.fingerprint), isEmpty);
+      expect(place.sharesFile.existsSync(), isFalse);
+    });
+  });
+
   group('E716 limits and labels (RF-400, RF-402)', () {
     test('E716 the 17th root is full', () async {
       final place = await admissionPlace();

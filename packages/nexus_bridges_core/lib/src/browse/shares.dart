@@ -244,6 +244,7 @@ final class ShareService implements ShareReader, SharedFolders {
     required ShareWriteFileSystem fileSystem,
     required this._dataDirPath,
     this._clock = monotonicClock,
+    this._now = DateTime.now,
     this._log = _noLog,
   }) : _fs = fileSystem;
 
@@ -252,6 +253,7 @@ final class ShareService implements ShareReader, SharedFolders {
   final ShareWriteFileSystem _fs;
   final String _dataDirPath;
   final Duration Function() _clock;
+  final DateTime Function() _now;
   final void Function(String) _log;
   final StreamController<void> _changes = StreamController<void>.broadcast();
   final StreamController<void> _saveStatus = StreamController<void>.broadcast();
@@ -556,7 +558,7 @@ final class ShareService implements ShareReader, SharedFolders {
       label: label,
       home: probe.home,
       drive: drive,
-      addedAt: DateTime.now().toUtc(),
+      addedAt: _now().toUtc(),
     );
     _shares = {
       ..._shares,
@@ -584,12 +586,12 @@ final class ShareService implements ShareReader, SharedFolders {
 
   Future<bool> forget(String fingerprint) {
     final current = _roots(fingerprint);
+    _pending.removeWhere((_, pending) => pending.fingerprint == fingerprint);
     if (current.isEmpty) return Future<bool>.value(true);
     _replaceRoots(fingerprint, const []);
     for (final root in current) {
       _availability.remove(root.id);
     }
-    _pending.removeWhere((_, pending) => pending.fingerprint == fingerprint);
     _log('shares forget ${current.length}');
     return _afterRemoval();
   }

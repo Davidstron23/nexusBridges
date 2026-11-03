@@ -29,7 +29,8 @@ export 'folders.dart'
         isSameOrInside,
         loadForbiddenFolders,
         samePath,
-        tempFolderName;
+        tempFolderName,
+        tempPrefix;
 export 'journal.dart' show TempJournal;
 export 'messages.dart' show DestinationRequest;
 export 'names.dart'

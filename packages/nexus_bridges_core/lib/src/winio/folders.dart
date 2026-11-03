@@ -17,11 +17,13 @@ const int _shareRead = 1;
 const int _shareWrite = 2;
 const int _shareDelete = 4;
 const int _fileOpen = 1;
+const int _fileCreate = 2;
 const int _fileOpenIf = 3;
 const int _fileCreated = 2;
 const int _optionDirectory = 0x00000001;
 const int _optionNonDirectory = 0x00000040;
 const int _optionSynchronous = 0x00000020;
+const int _optionDeleteOnClose = 0x00001000;
 const int _optionReparse = 0x00200000;
 const int _fileRenameInformation = 10;
 const int _fileDispositionInformation = 13;
@@ -305,6 +307,20 @@ FolderOpen openFolderRelativeSync(
     opened.handle,
     created: create && opened.information == _fileCreated,
   );
+}
+
+int? createWitnessFileSync(int parent, String name) {
+  if (!_isSingleName(name)) return null;
+  final opened = _ntOpenRelative(
+    parent,
+    name,
+    access: _deleteAccess | _fileReadAttributes | _synchronize,
+    share: 0,
+    disposition: _fileCreate,
+    options: _optionNonDirectory | _optionSynchronous | _optionDeleteOnClose,
+    attributes: _attributeHidden,
+  );
+  return opened.code >= _ntFailure ? null : opened.handle;
 }
 
 enum DeleteStatus { deleted, notEmpty, busy, mismatch, failed }

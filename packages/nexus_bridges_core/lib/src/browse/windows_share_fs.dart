@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math';
 
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
@@ -27,12 +28,14 @@ import '../transfer/transfer.dart'
         isValidFolderName,
         loadForbiddenFolders,
         samePath,
-        tempFolderName;
+        tempFolderName,
+        tempPrefix;
 import '../winio/winio.dart';
 import 'enumerate.dart';
 import 'share_fs.dart';
 import 'shares_store.dart';
 
+const String _witnessSuffix = '.hold';
 const int _pathChars = 32768;
 const int _maxNameAttempts = 9999;
 
@@ -66,6 +69,16 @@ final class _Chain {
   }
 }
 
+String _witnessName() {
+  final random = Random.secure();
+  final buffer = StringBuffer(tempPrefix);
+  for (var i = 0; i < 8; i++) {
+    buffer.write(random.nextInt(256).toRadixString(16).padLeft(2, '0'));
+  }
+  buffer.write(_witnessSuffix);
+  return buffer.toString();
+}
+
 bool _strictlyInside(String path, String ancestor) =>
     isSameOrInside(path, ancestor) && !samePath(path, ancestor);
 
@@ -94,7 +107,7 @@ enum _Walk { ok, missing, unavailable }
   String rootPath,
   String rootVolume,
   List<String> components,
-  ForbiddenFolders? forbidden, {
+  ForbiddenFolders forbidden, {
   required bool lock,
 }) {
   final chain = _Chain();
@@ -109,10 +122,11 @@ enum _Walk { ok, missing, unavailable }
         rootFacts.volumeId != rootVolume) {
       return (_Walk.unavailable, null);
     }
-    chain.facts.add(rootFacts);
-    if (components.isNotEmpty && forbidden == null) {
+    if (isForbiddenFolder(rootFacts.finalPath, forbidden) ||
+        isInsideTempFolder(rootFacts.finalPath)) {
       return (_Walk.unavailable, null);
     }
+    chain.facts.add(rootFacts);
     for (final name in components) {
       final child = openFolderRelativeSync(
         chain.handles.last,
@@ -121,7 +135,8 @@ enum _Walk { ok, missing, unavailable }
       );
       if (child is FolderOpenFailed) {
         return (
-          child.reason == FolderOpenFailure.notFound
+          child.reason == FolderOpenFailure.notFound ||
+                  child.reason == FolderOpenFailure.notAFolder
               ? _Walk.missing
               : _Walk.unavailable,
           null,
@@ -131,7 +146,7 @@ enum _Walk { ok, missing, unavailable }
       chain.handles.add(child.handle);
       final facts = folderFactsSync(child.handle);
       if (facts == null ||
-          !_acceptable(facts, name, rootFacts.finalPath, forbidden!)) {
+          !_acceptable(facts, name, rootFacts.finalPath, forbidden)) {
         return (_Walk.unavailable, null);
       }
       chain.facts.add(facts);
@@ -149,7 +164,7 @@ _Chain? _openChain(
   String rootPath,
   String rootVolume,
   List<String> components,
-  ForbiddenFolders? forbidden, {
+  ForbiddenFolders forbidden, {
   required bool lock,
 }) {
   final (status, chain) = _walk(
@@ -213,7 +228,6 @@ final class _LevelZeroJob {
     required this.checks,
     required this.forbiddenTrees,
     required this.forbiddenExact,
-    required this.hasForbidden,
   });
 
   final SendPort port;
@@ -221,19 +235,19 @@ final class _LevelZeroJob {
   final List<(String, String, List<String>)> checks;
   final List<String> forbiddenTrees;
   final List<String> forbiddenExact;
-  final bool hasForbidden;
 }
 
 const int _kindRoot = 0;
 const int _kindCheck = 1;
 
 void _levelZeroEntry(_LevelZeroJob job) {
-  final forbidden = job.hasForbidden
-      ? ForbiddenFolders(trees: job.forbiddenTrees, exact: job.forbiddenExact)
-      : null;
+  final forbidden = ForbiddenFolders(
+    trees: job.forbiddenTrees,
+    exact: job.forbiddenExact,
+  );
   for (var i = 0; i < job.roots.length; i++) {
     final (path, volume) = job.roots[i];
-    final chain = _openChain(path, volume, const [], null, lock: false);
+    final chain = _openChain(path, volume, const [], forbidden, lock: false);
     final ok = chain != null;
     chain?.closeAll();
     job.port.send((_kindRoot, i, ok));
@@ -361,14 +375,11 @@ _OpenReply _openChainSync(
   String? newFolder,
   List<String> forbiddenTrees,
   List<String> forbiddenExact,
-  bool hasForbidden,
 ) {
-  final forbidden = hasForbidden
-      ? ForbiddenFolders(trees: forbiddenTrees, exact: forbiddenExact)
-      : null;
-  if ((components.isNotEmpty || newFolder != null) && forbidden == null) {
-    return const _OpenReply(_Walk.unavailable);
-  }
+  final forbidden = ForbiddenFolders(
+    trees: forbiddenTrees,
+    exact: forbiddenExact,
+  );
   final (status, chain) = _walk(
     rootPath,
     rootVolume,
@@ -395,7 +406,7 @@ _OpenReply _openChainSync(
                   facts,
                   newFolder,
                   chain.facts.first.finalPath,
-                  forbidden!,
+                  forbidden,
                 )) {
               return const _OpenReply(_Walk.unavailable);
             }
@@ -434,6 +445,7 @@ final class _PrepareReply {
     this.newFinalPath,
     this.createdNew = false,
     this.incomingHandle,
+    this.witnessHandle,
     this.incomingPath,
     this.createdIncoming = false,
     this.folderPath,
@@ -444,6 +456,7 @@ final class _PrepareReply {
   final String? newFinalPath;
   final bool createdNew;
   final int? incomingHandle;
+  final int? witnessHandle;
   final String? incomingPath;
   final bool createdIncoming;
   final String? folderPath;
@@ -510,10 +523,12 @@ _PrepareReply _prepareSync(ChainHandles chain) {
       return const _PrepareReply(ok: false);
     }
     final expected = _join(destinationFinal, tempFolderName);
-    final facts = folderFactsSync(incoming.handle);
+    final witness = createWitnessFileSync(incoming.handle, _witnessName());
+    final facts = witness == null ? null : folderFactsSync(incoming.handle);
     if (facts == null ||
         facts.reparseTag != null ||
         !samePath(facts.finalPath, expected)) {
+      if (witness != null) closeHandleSync(witness);
       closeHandleSync(incoming.handle);
       if (incoming.created) {
         deleteEmptyFolderRelativeSync(
@@ -531,6 +546,7 @@ _PrepareReply _prepareSync(ChainHandles chain) {
       newFinalPath: newFinal,
       createdNew: createdNew,
       incomingHandle: incoming.handle,
+      witnessHandle: witness,
       incomingPath: facts.finalPath,
       createdIncoming: incoming.created,
       folderPath: destinationFinal,
@@ -613,6 +629,7 @@ FreeNameMove _recheckAndMoveSync(
         return const MoveFailed();
       }
       sleep(_moveWaits[attempt++]);
+      if (!_stillTheSameChain(chain)) return const DestinationChanged();
     }
     try {
       final taken = childNameKeysSync(destination, key: folderKey).toSet();
@@ -648,6 +665,7 @@ FreeNameMove _recheckAndMoveSync(
                 return const MoveFailed();
               }
               sleep(_moveWaits[busy++]);
+              if (!_stillTheSameChain(chain)) return const DestinationChanged();
             case RenameStatus.failed:
               return const MoveFailed();
           }
@@ -666,6 +684,10 @@ void _releaseSync(ChainHandles chain, bool saved) {
   final handles = List<int>.of(chain.handles);
   final incoming = chain.incomingHandle;
   final incomingPath = chain.incomingPath;
+  final witness = chain.witnessHandle;
+  try {
+    if (witness != null) closeHandleSync(witness);
+  } catch (_) {}
   try {
     if (incoming != null) {
       closeHandleSync(incoming);
@@ -758,9 +780,13 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
     if (roots.isEmpty && checks.isEmpty) {
       return LevelZeroFacts(available: available, checks: checked);
     }
-    final forbidden = checks.isEmpty
-        ? null
-        : await forbiddenFolders().timeout(budget, onTimeout: () => null);
+    final forbidden = await forbiddenFolders().timeout(
+      budget,
+      onTimeout: () => null,
+    );
+    if (forbidden == null) {
+      return LevelZeroFacts(available: available, checks: checked);
+    }
     final results = ReceivePort();
     final exitPort = ReceivePort();
     final exited = Completer<void>();
@@ -795,9 +821,8 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
             for (final (root, path) in checks)
               (root.path, root.volumeId, List<String>.of(path)),
           ],
-          forbiddenTrees: List<String>.of(forbidden?.trees ?? const []),
-          forbiddenExact: List<String>.of(forbidden?.exact ?? const []),
-          hasForbidden: forbidden != null,
+          forbiddenTrees: List<String>.of(forbidden.trees),
+          forbiddenExact: List<String>.of(forbidden.exact),
         ),
         onExit: exitPort.sendPort,
       );
@@ -914,15 +939,12 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
     String? newFolder,
   }) async {
     final forbidden = await forbiddenFolders();
-    if ((path.isNotEmpty || newFolder != null) && forbidden == null) {
-      return const ChainUnavailable();
-    }
+    if (forbidden == null) return const ChainUnavailable();
     final rootPath = root.path;
     final rootVolume = root.volumeId;
     final components = List<String>.of(path);
-    final trees = List<String>.of(forbidden?.trees ?? const []);
-    final exact = List<String>.of(forbidden?.exact ?? const []);
-    final hasForbidden = forbidden != null;
+    final trees = List<String>.of(forbidden.trees);
+    final exact = List<String>.of(forbidden.exact);
     final _OpenReply reply;
     try {
       reply = await Isolate.run(
@@ -933,7 +955,6 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
           newFolder,
           trees,
           exact,
-          hasForbidden,
         ),
       );
     } catch (_) {
@@ -998,6 +1019,7 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
     }
     chain
       ..incomingHandle = reply.incomingHandle
+      ..witnessHandle = reply.witnessHandle
       ..incomingPath = reply.incomingPath
       ..createdIncoming = reply.createdIncoming;
     final folderPath = reply.folderPath;
@@ -1034,7 +1056,11 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
     try {
       await Isolate.run(() => _releaseSync(chain, saved));
     } catch (_) {
-      for (final handle in [?chain.incomingHandle, ...chain.handles.reversed]) {
+      for (final handle in [
+        ?chain.witnessHandle,
+        ?chain.incomingHandle,
+        ...chain.handles.reversed,
+      ]) {
         try {
           closeHandleSync(handle);
         } catch (_) {

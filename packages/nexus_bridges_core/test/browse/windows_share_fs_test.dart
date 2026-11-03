@@ -270,11 +270,18 @@ void main() {
             await tree.fs.openChain(tree.root, ['falta'], newFolder: 'nueva'),
             isA<ChainMissing>(),
           );
+          expect(
+            await tree.fs.openChain(tree.root, ['f']),
+            isA<ChainMissing>(),
+          );
+          expect(
+            await tree.fs.openChain(tree.root, ['sub', 'archivo']),
+            isA<ChainMissing>(),
+          );
           for (final trap in [
             ['union'],
             ['Oculta'],
             ['Inicio'],
-            ['f'],
             ['CON'],
             ['x.'],
             [tempFolderName],

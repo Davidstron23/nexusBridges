@@ -84,6 +84,7 @@ final class ChainHandles {
   final int? freeBytes;
   String folderPath;
   int? incomingHandle;
+  int? witnessHandle;
   String? incomingPath;
   bool createdNew = false;
   bool createdIncoming = false;

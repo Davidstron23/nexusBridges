@@ -1699,9 +1699,12 @@ final class TransferReceiver {
         if (_gone(session)) return _destinationUnavailable;
         final refusal = _limitReply(session, session.target!);
         if (refusal != null) return refusal;
-        final prepared = await lease.prepare();
+        final prepared = await _race(
+          lease.prepare(),
+          _clock() + Limits.transferFolderCheckTimeout,
+        );
         if (_gone(session)) return _destinationUnavailable;
-        if (!prepared) {
+        if (prepared.expired || prepared.value != true) {
           _end(session, TransferOutcome.cancelledByPeer, register: false);
           return _destinationUnavailable;
         }
