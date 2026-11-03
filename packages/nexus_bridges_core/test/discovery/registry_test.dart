@@ -953,4 +953,136 @@ void main() {
       expect(registry.devices, isEmpty);
     });
   });
+  group('S11: a known device with another name is verified first (RF-507, '
+      'DA-9, clarify point 5)', () {
+    late Duration clock;
+    late DiscoveryRegistry renames;
+
+    setUp(() {
+      clock = Duration.zero;
+      renames = DiscoveryRegistry(
+        selfFingerprint: _fingerprint(self),
+        isPaired: paired.contains,
+        now: () => now,
+        clock: () => clock,
+      );
+    });
+
+    void known(DeviceInfo info, [String address = '192.168.1.10']) {
+      expect(renames.onVerified(info, _ip(address), 'eth'), isTrue);
+    }
+
+    RegistryAction hello(DeviceInfo info, [String address = '192.168.1.10']) =>
+        renames.onAnnouncement(_hello(info), _ip(address), 'eth');
+
+    String? nameOf(int seed) => renames.devices
+        .singleWhere((d) => d.info.fingerprint == _fingerprint(seed))
+        .info
+        .name;
+
+    test('a hello with another name from the same address asks for a rename '
+        'check against the known address and the known port, never the port '
+        'of the hello, and the name does not change yet', () {
+      known(_info(1, name: 'Laptop', port: 40000));
+
+      final action = hello(_info(1, name: 'Forged', port: 9));
+
+      expect(
+        action,
+        isA<Verify>()
+            .having((v) => v.rename, 'rename', isTrue)
+            .having((v) => v.address.address, 'address', '192.168.1.10')
+            .having((v) => v.interfaceId, 'interfaceId', 'eth')
+            .having((v) => v.info.port, 'port', 40000)
+            .having((v) => v.info.fingerprint, 'fp', _fingerprint(1)),
+      );
+      expect(nameOf(1), 'Laptop');
+    });
+
+    test('a second hello with another name within 5 s is only a refresh, at '
+        '5 s it asks again', () {
+      known(_info(1, name: 'Laptop'));
+      expect(hello(_info(1, name: 'One')), isA<Verify>());
+
+      clock = const Duration(milliseconds: 4999);
+      expect(hello(_info(1, name: 'Two')), isA<Refreshed>());
+      expect(nameOf(1), 'Laptop');
+
+      clock = const Duration(seconds: 5);
+      expect(
+        hello(_info(1, name: 'Three')),
+        isA<Verify>().having((v) => v.rename, 'rename', isTrue),
+      );
+    });
+
+    test('20 hellos with other names within 5 s ask for a single check', () {
+      known(_info(1, name: 'Laptop'));
+      var checks = 0;
+      for (var i = 0; i < 20; i++) {
+        clock = Duration(milliseconds: 240 * i);
+        if (hello(_info(1, name: 'Forged $i')) is Verify) checks++;
+      }
+
+      expect(checks, 1);
+      expect(nameOf(1), 'Laptop');
+    });
+
+    test('the limit is per fingerprint', () {
+      known(_info(1, name: 'Laptop'));
+      known(_info(2, name: 'Desk'), '192.168.1.11');
+
+      expect(hello(_info(1, name: 'One')), isA<Verify>());
+      expect(hello(_info(2, name: 'Two'), '192.168.1.11'), isA<Verify>());
+      expect(hello(_info(1, name: 'Again')), isA<Refreshed>());
+    });
+
+    test('a hello with the same name is a refresh and does not use up the '
+        'check', () {
+      known(_info(1, name: 'Laptop'));
+
+      expect(hello(_info(1, name: 'Laptop')), isA<Refreshed>());
+      expect(hello(_info(1, name: 'Laptop')), isA<Refreshed>());
+      expect(
+        hello(_info(1, name: 'New')),
+        isA<Verify>().having((v) => v.rename, 'rename', isTrue),
+      );
+    });
+
+    test('the verified data replaces the entry, so the new name shows', () {
+      known(_info(1, name: 'Laptop', port: 40000));
+      expect(
+        hello(_info(1, name: 'Laptop Renamed', port: 40000)),
+        isA<Verify>(),
+      );
+
+      known(_info(1, name: 'Laptop Renamed', port: 40000));
+
+      expect(nameOf(1), 'Laptop Renamed');
+      expect(hello(_info(1, name: 'Laptop Renamed')), isA<Refreshed>());
+    });
+
+    test('a hello with another name from another address is the normal '
+        'verification of RF-48, not a rename check', () {
+      known(_info(1, name: 'Laptop'));
+
+      expect(
+        hello(_info(1, name: 'Other', port: 9), '192.168.1.11'),
+        isA<Verify>()
+            .having((v) => v.rename, 'rename', isFalse)
+            .having((v) => v.address.address, 'address', '192.168.1.11')
+            .having((v) => v.info.port, 'port', 9),
+      );
+    });
+
+    test('a hello of an unknown device is a normal verification', () {
+      expect(
+        hello(_info(1, name: 'New')),
+        isA<Verify>().having((v) => v.rename, 'rename', isFalse),
+      );
+    });
+
+    test('Verify defaults to rename false', () {
+      expect(Verify(_info(1), _ip('192.168.1.10'), 'eth').rename, isFalse);
+    });
+  });
 }

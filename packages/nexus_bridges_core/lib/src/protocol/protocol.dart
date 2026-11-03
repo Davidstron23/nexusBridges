@@ -126,6 +126,7 @@ abstract final class Limits {
   static const int maxRelaxedConnections = 2;
   static const Duration replaceAfterAbsence = Duration(minutes: 2);
   static const Duration goodbyeCheckInterval = Duration(seconds: 5);
+  static const Duration renameCheckInterval = Duration(seconds: 5);
   static const int maxCombiningMarks = 4;
   static const int maxFolderEntries = 100000;
   static const int maxFolderDepth = 64;
@@ -178,6 +179,14 @@ final RegExp _invisibleCharacters = RegExp(
   unicode: true,
 );
 final RegExp _combiningMark = RegExp(r'^\p{M}$', unicode: true);
+final RegExp _formatCharacter = RegExp(r'\p{Cf}', unicode: true);
+
+bool _hasUnsafeNameCharacter(String name) {
+  for (final rune in name.runes) {
+    if (rune >= 0xD800 && rune <= 0xDFFF) return true;
+  }
+  return _formatCharacter.hasMatch(name);
+}
 
 const Set<String> _deviceInfoKeys = {
   'name',
@@ -280,6 +289,20 @@ String? sanitizeDisplayName(String raw) {
     cleaned.runes.take(Limits.maxNameLength),
   );
   return truncated.isEmpty ? null : truncated;
+}
+
+enum DeviceNameProblem { empty, tooLong, invalidCharacters }
+
+DeviceNameProblem? deviceNameProblem(String trimmed) {
+  if (trimmed.isEmpty) return DeviceNameProblem.empty;
+  if (trimmed.runes.length > Limits.maxNameLength) {
+    return DeviceNameProblem.tooLong;
+  }
+  if (sanitizeDisplayName(trimmed) != trimmed ||
+      _hasUnsafeNameCharacter(trimmed)) {
+    return DeviceNameProblem.invalidCharacters;
+  }
+  return null;
 }
 
 enum AnnouncementKind { hello, bye }

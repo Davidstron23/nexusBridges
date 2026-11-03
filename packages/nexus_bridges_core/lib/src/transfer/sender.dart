@@ -319,6 +319,16 @@ final class TransferSender {
     }
   }
 
+  int sessionsVia(Set<String> interfaceIds) {
+    final session = _active;
+    if (session == null ||
+        session.done ||
+        !interfaceIds.contains(session.target.interfaceId)) {
+      return 0;
+    }
+    return 1;
+  }
+
   void interfacesChanged(Set<String> activeInterfaceIds) {
     final session = _active;
     if (session == null ||

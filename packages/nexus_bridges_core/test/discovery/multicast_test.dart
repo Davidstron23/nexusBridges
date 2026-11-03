@@ -480,6 +480,44 @@ void main() {
     });
   });
 
+  group('B-2: the origin is checked before the datagram is decoded', () {
+    test('B-2: a valid hello and garbage from an origin that no interface '
+        'admits are dropped without a trace, and the origin that is admitted '
+        'keeps working, also after a malformed datagram of its own', () async {
+      final f = await _Fixture.create();
+      await f.channel.syncInterfaces([
+        _loopback('127.0.0.1', prefixLength: 32),
+      ]);
+      final outside = await _socketOn(_second);
+      final own = await _socketOn(_first);
+
+      await f.inject(outside, _bytes(_wire(1)));
+      await f.inject(outside, utf8.encode('{"kind":'));
+      await f.inject(outside, Uint8List.fromList([0xFF, 0xFE, 0x00]));
+      await f.inject(own, utf8.encode('{"kind":'));
+      await f.inject(own, _bytes(_wire(2)));
+      await f.waitFor(1);
+      await _quiet();
+
+      expect(f.fingerprints, [_fingerprint(2)]);
+      expect(f.logs, isEmpty);
+    });
+
+    test('B-2: after the last interface is removed, a valid hello is not '
+        'emitted and nothing is logged', () async {
+      final f = await _Fixture.create();
+      await f.channel.syncInterfaces([_loopback('127.0.0.1')]);
+      await f.channel.syncInterfaces([]);
+      final own = await _socketOn(_first);
+
+      await f.inject(own, _bytes(_wire(1)));
+      await _quiet();
+
+      expect(f.received, isEmpty);
+      expect(f.logs, isEmpty);
+    });
+  });
+
   group('no active interfaces (RF-18)', () {
     test('an open channel without interfaces emits nothing, also after '
         'syncInterfaces([])', () async {

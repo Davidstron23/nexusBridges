@@ -26,6 +26,7 @@ final class SubnetScanner {
     required List<ActiveInterface> active,
     required DeviceInfo self,
     AbortSignal? abort,
+    AbortSignal Function(ActiveInterface iface)? abortOf,
   }) {
     var cancelled = false;
     final controller = StreamController<_ScanResult>(
@@ -39,6 +40,7 @@ final class SubnetScanner {
           active,
           self,
           abort,
+          abortOf,
         ),
       );
     };
@@ -51,6 +53,7 @@ final class SubnetScanner {
     List<ActiveInterface> active,
     DeviceInfo self,
     AbortSignal? abort,
+    AbortSignal Function(ActiveInterface iface)? abortOf,
   ) async {
     try {
       final targets = <(ActiveInterface, InternetAddress)>[];
@@ -67,13 +70,15 @@ final class SubnetScanner {
       Future<void> worker() async {
         while (!stopped() && next < targets.length) {
           final (iface, host) = targets[next++];
+          final ifaceAbort = abortOf?.call(iface) ?? abort;
+          if (ifaceAbort != null && ifaceAbort.aborted) continue;
           final info = await _verifier.register(
             address: host,
             port: _port,
             expectedFingerprint: null,
             self: self,
             timeout: Limits.scanConnectTimeout,
-            abort: abort,
+            abort: ifaceAbort,
           );
           if (info != null && !stopped()) sink.add((info, host, iface));
         }

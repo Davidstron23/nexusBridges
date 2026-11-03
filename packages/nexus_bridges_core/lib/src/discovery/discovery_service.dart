@@ -60,6 +60,7 @@ final class DiscoveryService {
   final Map<String, DateTime> _lastReplies = {};
   final Map<String, DateTime> _goodbyeChecks = {};
   final Set<String> _presenting = {};
+  final Set<String> _presentAgain = {};
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
 
@@ -123,6 +124,14 @@ final class DiscoveryService {
     }
   }
 
+  void sayGoodbye(Set<String> interfaceIds) {
+    if (_stopped) return;
+    for (final id in interfaceIds) {
+      final iface = _active[id];
+      if (iface != null) _send(AnnouncementKind.bye, iface);
+    }
+  }
+
   void announceNow() {
     if (_stopped) return;
     for (final iface in _active.values.toList()) {
@@ -149,15 +158,20 @@ final class DiscoveryService {
     final targets = _active.values.toList();
     final signals = {for (final iface in targets) iface.id: _aborts[iface.id]!};
     final scanAbort = AbortSignal();
+    final perInterface = {for (final iface in targets) iface.id: AbortSignal()};
     final removers = [
       _globalAbort.onAbort(scanAbort.abort),
-      for (final signal in signals.values) signal.onAbort(scanAbort.abort),
+      for (final MapEntry(:key, :value) in perInterface.entries) ...[
+        _globalAbort.onAbort(value.abort),
+        signals[key]!.onAbort(value.abort),
+      ],
     ];
     try {
       await for (final (info, address, iface) in _scanner.scan(
         active: targets,
         self: _selfInfo(),
         abort: scanAbort,
+        abortOf: (iface) => perInterface[iface.id] ?? scanAbort,
       )) {
         final signal = signals[iface.id];
         if (_stopped || signal == null || signal.aborted) continue;
@@ -235,8 +249,13 @@ final class DiscoveryService {
           if (!reverse && announcement.kind == AnnouncementKind.hello) {
             _replyTo(announcement.info.fingerprint, from, via.id);
           }
-        case Verify(:final info, :final address, :final interfaceId):
-          _submit(info, address, interfaceId, reverse: reverse);
+        case Verify(
+          :final info,
+          :final address,
+          :final interfaceId,
+          :final rename,
+        ):
+          _submit(info, address, interfaceId, reverse: reverse, rename: rename);
         case VerifyGoodbye(:final info, :final address, :final interfaceId):
           _submitGoodbye(info, address, interfaceId);
       }
@@ -250,6 +269,7 @@ final class DiscoveryService {
     InternetAddress address,
     String interfaceId, {
     required bool reverse,
+    required bool rename,
   }) {
     final abort = _aborts[interfaceId];
     if (abort == null) return;
@@ -260,7 +280,8 @@ final class DiscoveryService {
       interfaceId: interfaceId,
       reverse: reverse,
       port: port,
-      job: () => _verify(info, address, interfaceId, abort, reverse, port),
+      job: () =>
+          _verify(info, address, interfaceId, abort, reverse, port, rename),
     );
   }
 
@@ -275,14 +296,14 @@ final class DiscoveryService {
     final now = _now();
     final last = _goodbyeChecks[fingerprint];
     if (last != null && !_goodbyeExpired(now, last)) return;
-    _goodbyeChecks[fingerprint] = now;
-    _gate.submit(
+    final queued = _gate.submit(
       fingerprint: fingerprint,
       ip: address.address,
       interfaceId: interfaceId,
       port: info.port,
       job: () => _verifyGoodbye(info, address, interfaceId, abort),
     );
+    if (queued) _goodbyeChecks[fingerprint] = now;
   }
 
   Future<void> _verifyGoodbye(
@@ -324,6 +345,7 @@ final class DiscoveryService {
     AbortSignal abort,
     bool reverse,
     int? port,
+    bool rename,
   ) async {
     DeviceInfo? verified;
     try {
@@ -346,6 +368,7 @@ final class DiscoveryService {
       if (changed) _emitIfChanged();
       return;
     }
+    if (rename) return;
     _gate.markFailed(
       info.fingerprint,
       address.address,
@@ -373,7 +396,32 @@ final class DiscoveryService {
     }
   }
 
-  Future<void> _present(DiscoveredDevice device, AbortSignal abort) async {
+  void presentNow() {
+    if (_stopped) return;
+    try {
+      for (final device in _registry.devices) {
+        final fingerprint = device.info.fingerprint;
+        final abort = _aborts[device.interfaceId];
+        if (abort == null || !_active.containsKey(device.interfaceId)) {
+          continue;
+        }
+        if (_presenting.contains(fingerprint)) {
+          _presentAgain.add(fingerprint);
+          continue;
+        }
+        _presenting.add(fingerprint);
+        unawaited(_present(device, abort, fromScan: false));
+      }
+    } catch (e) {
+      _log('presentation failed: ${e.runtimeType}');
+    }
+  }
+
+  Future<void> _present(
+    DiscoveredDevice device,
+    AbortSignal abort, {
+    bool fromScan = true,
+  }) async {
     final fingerprint = device.info.fingerprint;
     try {
       final verified = await _verifier.register(
@@ -391,7 +439,7 @@ final class DiscoveryService {
           verified,
           device.address,
           device.interfaceId,
-          fromScan: true,
+          fromScan: fromScan,
         );
         _gate.clearFailures(fingerprint);
         if (changed) _emitIfChanged();
@@ -400,6 +448,28 @@ final class DiscoveryService {
       _log('presentation failed: ${e.runtimeType}');
     } finally {
       _presenting.remove(fingerprint);
+      if (_presentAgain.remove(fingerprint)) _presentAgainTo(fingerprint);
+    }
+  }
+
+  void _presentAgainTo(String fingerprint) {
+    if (_stopped) return;
+    try {
+      for (final device in _registry.devices) {
+        if (device.info.fingerprint != fingerprint) continue;
+        final abort = _aborts[device.interfaceId];
+        if (abort == null ||
+            abort.aborted ||
+            !_active.containsKey(device.interfaceId) ||
+            _presenting.contains(fingerprint)) {
+          return;
+        }
+        _presenting.add(fingerprint);
+        unawaited(_present(device, abort, fromScan: false));
+        return;
+      }
+    } catch (e) {
+      _log('presentation failed: ${e.runtimeType}');
     }
   }
 

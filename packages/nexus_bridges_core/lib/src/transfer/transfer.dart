@@ -18,7 +18,7 @@ import 'writer.dart' show writeAllBytes;
 export '../transport/transport.dart' show AbortSignal;
 export 'folder_size.dart' show measureFolderSize;
 export 'journal.dart' show TempJournal;
-export 'names.dart' show visibleFileName;
+export 'names.dart' show visibleFileName, isValidFileName;
 export 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
 export 'windows_file_system.dart' show WindowsFileSystemPlatform;
 export 'windows_shell.dart' show WindowsFilePicker;
@@ -568,6 +568,45 @@ final class PeerCancelledTransfer extends TransferEvent {
   final String? peerName;
 }
 
+sealed class FolderChangeResult {
+  const FolderChangeResult();
+}
+
+final class FolderChanged extends FolderChangeResult {
+  const FolderChanged(this.path);
+
+  final String path;
+}
+
+final class FolderUnchanged extends FolderChangeResult {
+  const FolderUnchanged();
+}
+
+final class FolderChangeBlocked extends FolderChangeResult {
+  const FolderChangeBlocked();
+}
+
+final class FolderChangeRefused extends FolderChangeResult {
+  const FolderChangeRefused(this.problem, this.path);
+
+  final FolderProblem problem;
+  final String path;
+}
+
+final class FolderChangeNeedsConfirmation extends FolderChangeResult {
+  const FolderChangeNeedsConfirmation({
+    required this.changeId,
+    required this.path,
+    required this.noMark,
+    required this.remote,
+  });
+
+  final String changeId;
+  final String path;
+  final bool noMark;
+  final bool remote;
+}
+
 final class TransferCoordinator {
   TransferCoordinator({
     required DeviceIdentity identity,
@@ -666,8 +705,10 @@ final class TransferCoordinator {
     TransferResultView?,
     bool,
     bool,
+    bool,
+    String?,
   )?
-  _lastNotified = (null, null, null, null, false, false);
+  _lastNotified = (null, null, null, null, false, false, false, null);
 
   List<ApiRoute> get routes => _receiver.routes;
 
@@ -681,6 +722,10 @@ final class TransferCoordinator {
 
   bool get pickerOpen => _pickers.isOpen;
 
+  bool get receiveFolderLocked => _receiver.receiveFolderLocked;
+
+  String? get receiveFolderPath => _receiver.receiveFolderPath;
+
   Stream<void> get changes => _changes.stream;
 
   Stream<TransferEvent> get events => _events.stream;
@@ -688,7 +733,7 @@ final class TransferCoordinator {
   void start() {
     if (_closed || _timer != null) return;
     _timer = Timer.periodic(_tickInterval, (_) => _tick());
-    _receiver.start();
+    unawaited(_receiver.start().then((_) => _syncFolderPath()));
   }
 
   Future<void> cleanupAtStart() => _receiver.cleanupAtStart();
@@ -719,10 +764,22 @@ final class TransferCoordinator {
   void dismissFolderPanel(String sessionId) =>
       _receiver.dismissFolderPanel(sessionId);
 
+  Future<FolderChangeResult> changeReceiveFolder() =>
+      _receiver.changeReceiveFolder();
+
+  Future<FolderChangeResult> confirmReceiveFolder(String changeId) =>
+      _receiver.confirmReceiveFolder(changeId);
+
+  void cancelReceiveFolderChange(String changeId) =>
+      _receiver.cancelReceiveFolderChange(changeId);
+
   void interfacesChanged(Set<String> activeInterfaceIds) {
     _receiver.interfacesChanged(activeInterfaceIds);
     _sender.interfacesChanged(activeInterfaceIds);
   }
+
+  int sessionsVia(Set<String> interfaceIds) =>
+      _receiver.sessionsVia(interfaceIds) + _sender.sessionsVia(interfaceIds);
 
   void pairedChanged() {
     _receiver.pairedChanged();
@@ -763,10 +820,27 @@ final class TransferCoordinator {
       lastSent,
       busy,
       pickerOpen,
+      receiveFolderLocked,
+      receiveFolderPath,
     );
     if (current == _lastNotified) return;
     _lastNotified = current;
     _changes.add(null);
+  }
+
+  void _syncFolderPath() {
+    final last = _lastNotified;
+    if (_closed || last == null) return;
+    _lastNotified = (
+      last.$1,
+      last.$2,
+      last.$3,
+      last.$4,
+      last.$5,
+      last.$6,
+      last.$7,
+      receiveFolderPath,
+    );
   }
 
   void _emit(TransferEvent event) {

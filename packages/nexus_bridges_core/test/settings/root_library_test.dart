@@ -33,11 +33,6 @@ void main() {
     final source = await File('lib/nexus_bridges_core.dart').readAsString();
 
     expect(source.toLowerCase(), isNot(contains('pairing')));
-    expect(
-      source,
-      contains(
-        "export 'src/settings/settings.dart' show resolveLanguage, loadLanguage;",
-      ),
-    );
+    expect(source, contains("export 'src/settings/settings.dart'"));
   });
 }

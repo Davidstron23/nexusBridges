@@ -427,6 +427,14 @@ final class TransferReceiver {
 
   Future<ReceiveFolder?>? _rememberedLoad;
 
+  ReceiveFolder? _rememberedNow;
+
+  bool _rememberedWritten = false;
+
+  bool _settingsPickerOpen = false;
+
+  ({String id, ReceiveTarget target, bool createdNow})? _pendingChange;
+
   _InSession? _panel;
 
   _FolderAsk? _folderPickerAsk;
@@ -487,6 +495,18 @@ final class TransferReceiver {
   ]);
 
   bool get busy => _active != null || _folderPickerAsk != null;
+
+  String? get receiveFolderPath => _rememberedNow?.path;
+
+  bool get receiveFolderLocked {
+    final session = _active;
+    if (session != null &&
+        session.exposed &&
+        session.phase == _InPhase.folderQuestion) {
+      return true;
+    }
+    return _folderPickerAsk != null || (_panel?.ask?.pickerOpen ?? false);
+  }
 
   TransferResultView? get lastReceived => _lastReceived;
 
@@ -549,10 +569,10 @@ final class TransferReceiver {
     );
   }
 
-  void start() {
-    if (_closed) return;
-    unawaited(_rememberedFolder());
+  Future<void> start() {
+    if (_closed) return Future<void>.value();
     unawaited(_forbiddenFolders());
+    return _rememberedFolder().then<void>((_) {});
   }
 
   void answerWarning(String sessionId, {required bool accept}) {
@@ -615,6 +635,17 @@ final class TransferReceiver {
           _InPhase.ended:
         break;
     }
+  }
+
+  int sessionsVia(Set<String> interfaceIds) {
+    final session = _active;
+    if (_closed ||
+        session == null ||
+        session.phase == _InPhase.ended ||
+        !interfaceIds.contains(session.via)) {
+      return 0;
+    }
+    return 1;
   }
 
   void interfacesChanged(Set<String> activeInterfaceIds) {
@@ -700,6 +731,7 @@ final class TransferReceiver {
     for (final deadline in List<_Deadline>.of(_deadlines)) {
       deadline.expire();
     }
+    _discardPendingChange();
     final panel = _panel;
     if (panel != null) _dropPanel(panel);
     if (finishing != null) {
@@ -847,6 +879,106 @@ final class TransferReceiver {
       return;
     }
     await _probe(session, ask, chosen);
+  }
+
+  Future<FolderChangeResult> changeReceiveFolder() async {
+    if (_closed ||
+        receiveFolderLocked ||
+        _pickers.isOpen ||
+        _settingsPickerOpen) {
+      return const FolderChangeBlocked();
+    }
+    _discardPendingChange();
+    _settingsPickerOpen = true;
+    _pickers.open();
+    _onChanged();
+    String? chosen;
+    try {
+      chosen = await _picker.pickFolder(startIn: _rememberedNow?.path);
+    } catch (e) {
+      _log('folder picker failed: ${e.runtimeType}');
+    } finally {
+      _settingsPickerOpen = false;
+      _pickers.close();
+    }
+    if (_closed || chosen == null) return const FolderUnchanged();
+    if (receiveFolderLocked) return const FolderChangeBlocked();
+    final current = _rememberedNow;
+    if (current != null && samePath(chosen, current.path)) {
+      return const FolderUnchanged();
+    }
+    final result = await _inspectBounded(chosen);
+    if (_closed) {
+      _discardCreated(result);
+      return const FolderUnchanged();
+    }
+    switch (result) {
+      case FolderRefused(:final reason):
+        return FolderChangeRefused(switch (reason) {
+          FolderRefusal.forbidden => FolderProblem.forbidden,
+          FolderRefusal.unknownVolume => FolderProblem.unknownVolume,
+          FolderRefusal.adminShare => FolderProblem.adminShare,
+          FolderRefusal.cannotUse ||
+          FolderRefusal.otherVolume => FolderProblem.cannotUse,
+        }, chosen);
+      case FolderUsable(:final target, :final createdNow):
+        if (target.remote || target.cloud || !target.supportsMark) {
+          final id = _randomHex32();
+          _pendingChange = (id: id, target: target, createdNow: createdNow);
+          return FolderChangeNeedsConfirmation(
+            changeId: id,
+            path: chosen,
+            noMark: !target.supportsMark,
+            remote: target.remote || target.cloud,
+          );
+        }
+        if (receiveFolderLocked) {
+          _discardCreated(result);
+          return const FolderChangeBlocked();
+        }
+        await _remember(target);
+        _onChanged();
+        return FolderChanged(target.path);
+    }
+  }
+
+  Future<FolderChangeResult> confirmReceiveFolder(String changeId) async {
+    final pending = _pendingChange;
+    if (_closed || pending == null || pending.id != changeId) {
+      return const FolderUnchanged();
+    }
+    _pendingChange = null;
+    if (receiveFolderLocked) {
+      _discardCreatedAt(pending.target.path, pending.createdNow);
+      return const FolderChangeBlocked();
+    }
+    await _remember(pending.target);
+    _onChanged();
+    return FolderChanged(pending.target.path);
+  }
+
+  void cancelReceiveFolderChange(String changeId) {
+    if (_pendingChange?.id != changeId) return;
+    _discardPendingChange();
+  }
+
+  void _discardPendingChange() {
+    final pending = _pendingChange;
+    if (pending == null) return;
+    _pendingChange = null;
+    _discardCreatedAt(pending.target.path, pending.createdNow);
+  }
+
+  void _discardCreatedAt(String path, bool createdNow) {
+    if (!createdNow || _isInUse(path)) return;
+    _track(() => _removeIfEmpty(path));
+  }
+
+  bool _isInUse(String path) {
+    final remembered = _rememberedNow;
+    if (remembered != null && samePath(path, remembered.path)) return true;
+    final target = _active?.target;
+    return target != null && samePath(path, target.path);
   }
 
   void useFolderAnyway(String sessionId) {
@@ -1070,6 +1202,8 @@ final class TransferReceiver {
       _log('receive folder save failed: ${e.runtimeType}');
     }
     _rememberedLoad = Future<ReceiveFolder?>.value(folder);
+    _rememberedNow = folder;
+    _rememberedWritten = true;
     if (!saved) _emit(ReceiveFolderNotSaved(target.path));
   }
 
@@ -2664,7 +2798,9 @@ final class TransferReceiver {
 
   Future<ReceiveFolder?> _loadRemembered() async {
     try {
-      return await _folders.load();
+      final loaded = await _folders.load();
+      if (!_rememberedWritten) _rememberedNow = loaded;
+      return loaded;
     } catch (e) {
       _log('receive folder load failed: ${e.runtimeType}');
       return null;

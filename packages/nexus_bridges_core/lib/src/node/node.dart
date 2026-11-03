@@ -20,12 +20,14 @@ import '../pairing/pairing.dart'
     show
         IgnoredDevicesStore,
         PairedDevicesStore,
+        PairedDevice,
         PairedLoadResult,
         PeerRelation;
 import '../pairing_flow/pairing_flow.dart';
 import '../protocol/protocol.dart';
 import '../server/server.dart' show ApiServer;
-import '../settings/settings.dart' show SavedReceiveFolder, SettingsStore;
+import '../settings/settings.dart'
+    show SavedReceiveFolder, SettingsSnapshot, SettingsStore, ThemeChoice;
 import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
 import '../transfer/transfer.dart'
     show
@@ -33,7 +35,10 @@ import '../transfer/transfer.dart'
         ExclusionSource,
         FilePicker,
         FileSystemPlatform,
+        FolderChangeBlocked,
+        FolderChangeResult,
         FolderRevealer,
+        FolderUnchanged,
         OutgoingPhase,
         PeerCancelledTransfer,
         ReceiveFolder,
@@ -49,11 +54,14 @@ import '../transfer/transfer.dart'
         TransferResultView,
         WindowsFileSystemPlatform,
         WindowsFilePicker,
+        defaultExclusions,
         measureFolderSize,
         writeAllBytes;
-import 'entries.dart';
+import 'entries.dart' hide namesakeOf;
+import 'entries.dart' as entries show namesakeOf;
 import 'node_state.dart';
 import 'reconcile.dart';
+import 'settings_rules.dart';
 
 export '../discovery/discovery.dart' show DiscoveredDevice;
 export '../identity/identity.dart' show SecretProtector;
@@ -62,11 +70,19 @@ export '../outbox/outbox.dart'
     show QueueItemState, QueueItemView, SendQueuesView, TrayItemView;
 export '../pairing_flow/pairing_flow.dart'
     show PairingView, PairingRole, PairingPhase, PairingOutcome, ReceiverAnswer;
-export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
+export '../protocol/protocol.dart'
+    show DeviceInfo, DeviceNameProblem, DeviceType, deviceNameProblem;
+export '../settings/settings.dart' show ThemeChoice;
 export '../transfer/transfer.dart'
     show
         FirstLevelItem,
         FolderSummaryView,
+        FolderChangeResult,
+        FolderChanged,
+        FolderUnchanged,
+        FolderChangeBlocked,
+        FolderChangeRefused,
+        FolderChangeNeedsConfirmation,
         OutgoingTransferView,
         OutgoingPhase,
         IncomingTransferView,
@@ -81,6 +97,7 @@ export '../transfer/transfer.dart'
         TransferResultKind,
         RevealResult;
 export 'node_state.dart';
+export 'settings_rules.dart' show ExclusionProblem, exclusionProblem;
 
 void _noLog(String message) {}
 
@@ -132,13 +149,13 @@ final class _SettingsReceiveFolders implements ReceiveFolderStore {
   }
 }
 
-final class _SettingsExclusions implements ExclusionSource {
-  _SettingsExclusions(this._settings);
+final class _MemoryExclusions implements ExclusionSource {
+  _MemoryExclusions(this._node);
 
-  final SettingsStore _settings;
+  final NexusNode _node;
 
   @override
-  Future<List<String>?> load() => _settings.readExclusions();
+  Future<List<String>?> load() async => List<String>.of(_node._exclusions);
 }
 
 Future<ElementProbe> _probeElement(String path) async {
@@ -202,7 +219,7 @@ final class NexusNode {
     required this._protector,
     required this._read,
     required this._port,
-    required this._deviceName,
+    required this._windowsName,
     required this._now,
     required this._monotonic,
     required this._presentInterval,
@@ -258,7 +275,7 @@ final class NexusNode {
       protector: protector ?? DpapiSecretProtector(),
       read: readNetworks ?? singleFlight(_readWindowsNetworks),
       port: port,
-      deviceName: _resolveDeviceName(deviceName),
+      windowsName: _resolveDeviceName(deviceName),
       now: now,
       monotonic: monotonic,
       presentInterval: presentInterval,
@@ -295,7 +312,7 @@ final class NexusNode {
   final SecretProtector _protector;
   final Future<List<AdapterInfo>> Function() _read;
   final int _port;
-  final String _deviceName;
+  final String _windowsName;
   final DateTime Function() _now;
   final Duration Function() _monotonic;
   final Duration _presentInterval;
@@ -320,7 +337,11 @@ final class NexusNode {
   final StreamController<NodeState> _states =
       StreamController<NodeState>.broadcast();
 
-  late NodeState _state = NodeState(paused: true, deviceName: _deviceName);
+  late NodeState _state = NodeState(
+    paused: true,
+    deviceName: _effectiveName,
+    settings: SettingsView(windowsName: _windowsName),
+  );
   NodeState? _lastEmitted;
 
   Future<void> _tail = Future<void>.value();
@@ -331,6 +352,10 @@ final class NexusNode {
   IdentityStatus _identityStatus = IdentityStatus.ok;
   String? _identityError;
   String _fingerprint = '';
+  String? _customName;
+  List<String> _exclusions = List<String>.of(defaultExclusions);
+  SettingsStore? _settings;
+  Timer? _renameTimer;
   int? _portInUse;
   List<DiscoveredDevice> _devices = const [];
   Map<String, String> _displayNames = const {};
@@ -348,6 +373,7 @@ final class NexusNode {
   final Set<String> _asking = {};
   Map<String, String> _activeNetworks = {};
   List<ActiveInterface> _listening = const [];
+  Set<String> _farewell = const {};
   List<DeviceEntry> _entries = const [];
   List<PairingQuestion> _questions = const [];
   List<Notice> _notices = const [];
@@ -390,6 +416,8 @@ final class NexusNode {
   StreamSubscription<void>? _ignoredSaveSubscription;
   Timer? _suggestTimer;
 
+  String get _effectiveName => _customName ?? _windowsName;
+
   NodeState get state => _state;
 
   Stream<NodeState> get states => _states.stream;
@@ -411,10 +439,89 @@ final class NexusNode {
         _log('decision save failed: ${e.runtimeType}');
       }
       _decisionNotSaved = !saved;
+      if (saved) _removeNotices(NoticeKind.networkStopNotSaved);
       _dismissed.remove(networkId);
       _asking.remove(networkId);
       await _reconcileLocked();
     });
+  }
+
+  Future<void> stopUsingNetwork(String networkId) {
+    return _run('stop using network', () async {
+      final trust = _trust;
+      if (trust == null) return;
+      final entry = trust.trustedEntry(networkId);
+      if (entry == null) return;
+      final ids = _interfaceIdsOf(networkId);
+      final saving = trust.setDecision(
+        networkId,
+        NetworkDecision.untrusted,
+        name: entry.name,
+      );
+      unawaited(saving.then<void>((_) {}, onError: (Object _) {}));
+      _farewell = ids;
+      try {
+        await _reconcileLocked();
+      } catch (e) {
+        _log('stop using network reconcile failed: ${e.runtimeType}');
+      } finally {
+        _farewell = const {};
+      }
+      var saved = false;
+      try {
+        saved = await saving;
+      } catch (e) {
+        _log('network save failed: ${e.runtimeType}');
+      }
+      if (saved) {
+        _decisionNotSaved = false;
+        _removeNotices(NoticeKind.networkStopNotSaved);
+      } else {
+        _addNotice(
+          NoticeKind.networkStopNotSaved,
+          detail: networkDisplayName(networkId, entry.name),
+        );
+      }
+      _emit();
+    });
+  }
+
+  Set<String> _interfaceIdsOf(String networkId) {
+    final adapters = _lastChange?.adapters ?? const <AdapterInfo>[];
+    final adapterIds = {
+      for (final adapter in adapters)
+        if (adapter.networkId == networkId) adapter.id,
+    };
+    return {
+      for (final iface in _listening)
+        if (adapterIds.contains(iface.adapterId)) iface.id,
+    };
+  }
+
+  List<TrustedNetworkView> _trustedNetworkViews() {
+    final trust = _trust;
+    if (trust == null) return const [];
+    final adapters = _lastChange?.adapters ?? const <AdapterInfo>[];
+    final connected = {
+      for (final adapter in adapters)
+        if (isUsableAdapter(adapter)) adapter.networkId!,
+    };
+    final transfers = _transfers;
+    final coordinator = _coordinator;
+    return trustedNetworkViews(
+      trusted: trust.trusted,
+      connected: connected,
+      transfersOn: (id) => transfers?.sessionsVia(_interfaceIdsOf(id)) ?? 0,
+      pairingOn: (id) =>
+          coordinator?.isPairingVia(_interfaceIdsOf(id)) ?? false,
+    );
+  }
+
+  void _removeNotices(NoticeKind kind) {
+    _notices = List.unmodifiable([
+      for (final notice in _notices)
+        if (notice.kind != kind) notice,
+    ]);
   }
 
   void dismissPrompt(String networkId) {
@@ -695,6 +802,45 @@ final class NexusNode {
     );
   }
 
+  Future<FolderChangeResult> changeReceiveFolder() {
+    return _folderChange(
+      'change receive folder',
+      (transfers) => transfers.changeReceiveFolder(),
+    );
+  }
+
+  Future<FolderChangeResult> confirmReceiveFolder(String changeId) {
+    return _folderChange(
+      'confirm receive folder',
+      (transfers) => transfers.confirmReceiveFolder(changeId),
+    );
+  }
+
+  void cancelReceiveFolderChange(String changeId) {
+    _callTransfers(
+      'cancel receive folder change',
+      (transfers) => transfers.cancelReceiveFolderChange(changeId),
+    );
+  }
+
+  Future<FolderChangeResult> _folderChange(
+    String what,
+    Future<FolderChangeResult> Function(TransferCoordinator) action,
+  ) async {
+    TransferCoordinator? transfers;
+    await _run(what, () async {
+      transfers = _transfers;
+    });
+    final active = transfers;
+    if (active == null || _closing) return const FolderChangeBlocked();
+    try {
+      return await action(active);
+    } catch (e) {
+      _log('$what failed: ${e.runtimeType}');
+      return const FolderUnchanged();
+    }
+  }
+
   Future<RevealResult> revealLastReceived() async {
     Future<RevealResult>? pending;
     await _run('reveal last received', () async {
@@ -791,14 +937,189 @@ final class NexusNode {
     });
   }
 
+  Future<DeviceNameResult> setDeviceName(String? name) async {
+    var result = const DeviceNameResult();
+    await _run('set device name', () async {
+      final String? next;
+      if (name == null) {
+        next = null;
+      } else {
+        next = name.trim();
+        final problem = deviceNameProblem(next);
+        if (problem != null) {
+          result = DeviceNameResult(problem: problem);
+          return;
+        }
+      }
+      if (next == _customName) return;
+      _customName = next;
+      _emit();
+      final discovery = _discovery;
+      discovery?.announceNow();
+      discovery?.presentNow();
+      _renameTimer?.cancel();
+      _renameTimer = Timer(Limits.renameCheckInterval, () {
+        if (_closing) return;
+        final discovery = _discovery;
+        discovery?.announceNow();
+        discovery?.presentNow();
+      });
+      var saved = false;
+      try {
+        saved = await _settings?.writeDeviceName(next) ?? false;
+      } catch (e) {
+        _log('device name save failed: ${e.runtimeType}');
+      }
+      if (!saved) {
+        _addNotice(NoticeKind.settingNotSaved);
+        result = const DeviceNameResult(saved: false);
+      }
+      _emit();
+    });
+    return result;
+  }
+
+  String? namesakeOf(String candidate) {
+    for (final device in _devices) {
+      final name = device.info.name;
+      if (device.info.fingerprint != _fingerprint &&
+          sameName(candidate, name)) {
+        return sanitizeDisplayName(name!);
+      }
+    }
+    for (final device in _paired?.devices ?? const <PairedDevice>[]) {
+      if (device.fingerprint != _fingerprint &&
+          sameName(candidate, device.name)) {
+        return sanitizeDisplayName(device.name);
+      }
+    }
+    return null;
+  }
+
+  Future<void> saveLanguage(String code) {
+    return _saveSetting(
+      'save language',
+      (settings) => settings.writeLanguage(code),
+    );
+  }
+
+  Future<void> saveTheme(ThemeChoice theme) {
+    return _saveSetting('save theme', (settings) => settings.writeTheme(theme));
+  }
+
+  Future<void> saveCloseToTray(bool enabled) {
+    return _saveSetting(
+      'save close to tray',
+      (settings) => settings.writeCloseToTray(enabled),
+    );
+  }
+
+  Future<void> saveTrayHintShown() {
+    return _saveSetting(
+      'save tray hint',
+      (settings) => settings.writeTrayHintShown(),
+      notice: false,
+    );
+  }
+
+  Future<ExclusionOutcome> addExclusion(String raw) async {
+    var outcome = const ExclusionOutcome();
+    await _run('add exclusion', () async {
+      final trimmed = raw.trim();
+      final problem = exclusionProblem(trimmed, _exclusions);
+      if (problem != null) {
+        outcome = ExclusionOutcome(problem: problem);
+        return;
+      }
+      _exclusions = [..._exclusions, trimmed];
+      _emit();
+      if (!await _writeExclusions()) {
+        outcome = const ExclusionOutcome(saved: false);
+      }
+    });
+    return outcome;
+  }
+
+  Future<void> removeExclusion(String name) {
+    return _run('remove exclusion', () async {
+      final upper = name.toUpperCase();
+      final remaining = [
+        for (final kept in _exclusions)
+          if (kept.toUpperCase() != upper) kept,
+      ];
+      if (remaining.length == _exclusions.length) return;
+      _exclusions = remaining;
+      _emit();
+      await _writeExclusions();
+    });
+  }
+
+  Future<void> restoreExclusions() {
+    return _run('restore exclusions', () async {
+      if (isDefaultExclusionList(_exclusions)) return;
+      _exclusions = List<String>.of(defaultExclusions);
+      _emit();
+      await _writeExclusions();
+    });
+  }
+
+  Future<bool> _writeExclusions() async {
+    var saved = false;
+    try {
+      saved = await _settings?.writeExclusions(_exclusions) ?? false;
+    } catch (e) {
+      _log('exclusions save failed: ${e.runtimeType}');
+    }
+    if (!saved) {
+      _addNotice(NoticeKind.settingNotSaved);
+      _emit();
+    }
+    return saved;
+  }
+
+  Future<void> _saveSetting(
+    String what,
+    Future<bool> Function(SettingsStore settings) write, {
+    bool notice = true,
+  }) {
+    return _run(what, () async {
+      final settings = _settings;
+      if (settings == null) return;
+      var saved = false;
+      try {
+        saved = await write(settings);
+      } catch (e) {
+        _log('$what failed: ${e.runtimeType}');
+      }
+      if (!saved && notice) {
+        _addNotice(NoticeKind.settingNotSaved);
+        _emit();
+      }
+    });
+  }
+
   Future<void> retrySave() {
     return _run('retry save', () async {
       final paired = _paired;
       final ignored = _ignored;
+      final trust = _trust;
       if (paired == null || ignored == null) return;
       final pairedSaved = await paired.retrySave();
       final ignoredSaved = await ignored.retrySave();
-      if (pairedSaved && ignoredSaved) {
+      var trustSaved = true;
+      if (trust != null && trust.hasUnsavedChanges) {
+        try {
+          trustSaved = await trust.retrySave();
+        } catch (e) {
+          _log('network retry failed: ${e.runtimeType}');
+          trustSaved = false;
+        }
+        if (trustSaved) {
+          _decisionNotSaved = false;
+          _removeNotices(NoticeKind.networkStopNotSaved);
+        }
+      }
+      if (pairedSaved && ignoredSaved && trustSaved) {
         _notices = List.unmodifiable([
           for (final notice in _notices)
             if (!notice.canRetry) notice,
@@ -836,6 +1157,8 @@ final class NexusNode {
     _closing = true;
     _suggestTimer?.cancel();
     _suggestTimer = null;
+    _renameTimer?.cancel();
+    _renameTimer = null;
     return _exclusive(() async {
       await _closeResourcesLocked(sayGoodbye: true);
       if (!_states.isClosed) await _states.close();
@@ -971,7 +1294,14 @@ final class NexusNode {
     }
     final settings = SettingsStore(
       JsonFileStore(_fileIn(dir, 'settings.json')),
+      now: _now,
     );
+    var snapshot = const SettingsSnapshot();
+    try {
+      snapshot = await settings.load();
+    } catch (e) {
+      _log('settings load failed: ${e.runtimeType}');
+    }
     final journal = TempJournal(
       JsonFileStore(_fileIn(dir, 'cleanup.json')),
       log: _log,
@@ -991,13 +1321,19 @@ final class NexusNode {
       _identityStatus = IdentityStatus.reset;
     }
     _fingerprint = identity.fingerprint;
+    _settings = settings;
+    final savedName = snapshot.deviceName;
+    _customName = savedName != null && deviceNameProblem(savedName) == null
+        ? savedName
+        : null;
+    _exclusions = effectiveExclusions(snapshot.exclusions);
 
     final channel =
         _injectedChannel ?? MulticastChannel(port: _port, log: _log);
     final verifier = DeviceVerifier(identity: identity);
     final scanner = SubnetScanner(verifier: verifier, port: _port);
     DeviceInfo selfInfo() => DeviceInfo(
-      name: _deviceName,
+      name: _effectiveName,
       fingerprint: identity.fingerprint,
       port: _server?.boundPort ?? _port,
       protocol: protocolVersion,
@@ -1026,7 +1362,7 @@ final class NexusNode {
       pollHold: _pairingPollHold,
       log: _log,
     );
-    final exclusions = _SettingsExclusions(settings);
+    final exclusions = _MemoryExclusions(this);
     final transfers = TransferCoordinator(
       identity: identity,
       paired: paired,
@@ -1299,21 +1635,30 @@ final class NexusNode {
     DiscoveryService discovery,
   ) async {
     final wanted = {for (final iface in active) iface.id};
+    final before = {for (final iface in _listening) iface.id};
     _notifyInterfaces(wanted);
-    await server.syncInterfaces(active);
-    final open = server.openInterfaceIds;
-    final listening = [
-      for (final iface in active)
-        if (open.contains(iface.id)) iface,
-    ];
-    _listening = listening;
-    _discoveringSince = listening.isEmpty
-        ? null
-        : (_discoveringSince ?? _now());
-    await channel.syncInterfaces(listening);
-    await discovery.syncInterfaces(listening);
-    final bound = {for (final iface in listening) iface.id};
-    if (bound.length != wanted.length) _notifyInterfaces(bound);
+    try {
+      await server.syncInterfaces(active);
+    } finally {
+      final open = server.openInterfaceIds;
+      final listening = [
+        for (final iface in active)
+          if (open.contains(iface.id)) iface,
+      ];
+      _listening = listening;
+      _discoveringSince = listening.isEmpty
+          ? null
+          : (_discoveringSince ?? _now());
+      final farewell = _farewell.intersection(before).difference({
+        for (final iface in listening) iface.id,
+      });
+      _farewell = const {};
+      if (farewell.isNotEmpty) discovery.sayGoodbye(farewell);
+      await channel.syncInterfaces(listening);
+      await discovery.syncInterfaces(listening);
+      final bound = {for (final iface in listening) iface.id};
+      if (bound.length != wanted.length) _notifyInterfaces(bound);
+    }
   }
 
   void _notifyInterfaces(Set<String> ids) {
@@ -1355,6 +1700,9 @@ final class NexusNode {
   }
 
   Future<void> _closeResourcesLocked({required bool sayGoodbye}) async {
+    _renameTimer?.cancel();
+    _renameTimer = null;
+    _settings = null;
     final monitor = _monitor;
     final discovery = _discovery;
     final server = _server;
@@ -2042,13 +2390,20 @@ final class NexusNode {
       suggestRescan: _suggestRescan,
       portInUse: _portInUse,
       decisionNotSaved: _decisionNotSaved,
-      deviceName: _deviceName,
+      deviceName: _effectiveName,
+      settings: SettingsView(
+        customName: _customName,
+        windowsName: _windowsName,
+        exclusions: List<String>.unmodifiable(_exclusions),
+        receiveFolder: transfers?.receiveFolderPath,
+        receiveFolderLocked: transfers?.receiveFolderLocked ?? false,
+      ),
       fingerprint: _fingerprint,
       entries: _entries,
       pairing: view,
       pairingNamesake: view == null || paired == null
           ? null
-          : namesakeOf(
+          : entries.namesakeOf(
               name: view.peerName,
               excluding: view.peerFingerprint,
               paired: paired.devices,
@@ -2068,7 +2423,7 @@ final class NexusNode {
       pickerOpen: transfers?.pickerOpen ?? false,
       incomingNamesake: incoming == null || paired == null
           ? null
-          : namesakeOf(
+          : entries.namesakeOf(
               name: incoming.peerName,
               excluding: incoming.peerFingerprint,
               paired: paired.devices,
@@ -2078,6 +2433,8 @@ final class NexusNode {
       tray: _tray?.items ?? const [],
       sendingTo: _sendingTo(),
       selectionProgress: _selectionProgress(queuesView),
+      ignoredDevices: ignoredDeviceViews(_ignored?.devices ?? const []),
+      trustedNetworks: _trustedNetworkViews(),
     );
     _state = next;
     final last = _lastEmitted;
@@ -2095,6 +2452,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.portInUse == b.portInUse &&
       a.decisionNotSaved == b.decisionNotSaved &&
       a.deviceName == b.deviceName &&
+      a.settings == b.settings &&
       a.fingerprint == b.fingerprint &&
       a.unsavedChanges == b.unsavedChanges &&
       a.scanning == b.scanning &&
@@ -2112,6 +2470,8 @@ bool _sameState(NodeState a, NodeState b) {
       a.sendingTo == b.sendingTo &&
       a.selectionProgress == b.selectionProgress &&
       _sameList(a.tray, b.tray, (x, y) => x == y) &&
+      _sameList(a.ignoredDevices, b.ignoredDevices, (x, y) => x == y) &&
+      _sameList(a.trustedNetworks, b.trustedNetworks, (x, y) => x == y) &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&
       _sameList(a.questions, b.questions, (x, y) => x == y) &&
       _sameList(a.notices, b.notices, (x, y) => x == y) &&

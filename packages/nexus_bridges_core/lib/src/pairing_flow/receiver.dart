@@ -283,6 +283,14 @@ final class PairingReceiver {
     _finishedView = null;
   }
 
+  bool isPairingVia(Set<String> interfaceIds) {
+    final session = _active;
+    return !_closed &&
+        session != null &&
+        session.inProgress &&
+        interfaceIds.contains(session.viaId);
+  }
+
   void interfacesChanged(Set<String> activeInterfaceIds) {
     final session = _active;
     if (_closed || session == null) return;

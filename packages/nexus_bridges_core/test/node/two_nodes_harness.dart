@@ -176,6 +176,9 @@ final class TestNode {
   Duration pollHold = const Duration(milliseconds: 300);
   SecretProtector protector = XorProtector();
   Directory? dataDirOverride;
+  List<ActiveInterface> Function(List<InterfaceState> states, String loopback)?
+  activeOfOverride;
+  MulticastChannel? channel;
   NexusNode? _node;
 
   static Future<TestNode> create(
@@ -218,6 +221,7 @@ final class TestNode {
   Future<NexusNode> boot() async {
     final loopback = await loopbackName();
     final udp = udpPort = await freePort();
+    final channel = this.channel = MulticastChannel(port: udp, log: logs.add);
     final node = await zone.run(
       () => NexusNode.start(
         dataDir: dataDir,
@@ -229,18 +233,20 @@ final class TestNode {
         monotonic: monotonic,
         presentInterval: presentInterval,
         log: logs.add,
-        activeOf: (states) => [
-          for (final state in states)
-            if (state.status == InterfaceStatus.active)
-              ActiveInterface(
-                id: ifaceId,
-                adapterId: state.adapter.id,
-                friendlyName: loopback,
-                subnet: Ipv4Subnet(address, 30),
-              ),
-        ],
+        activeOf: (states) =>
+            activeOfOverride?.call(states, loopback) ??
+            [
+              for (final state in states)
+                if (state.status == InterfaceStatus.active)
+                  ActiveInterface(
+                    id: ifaceId,
+                    adapterId: state.adapter.id,
+                    friendlyName: loopback,
+                    subnet: Ipv4Subnet(address, 30),
+                  ),
+            ],
         pollInterval: pollInterval,
-        channel: MulticastChannel(port: udp, log: logs.add),
+        channel: channel,
         pairingTickInterval: const Duration(milliseconds: 20),
         pairingPollHold: pollHold,
       ),

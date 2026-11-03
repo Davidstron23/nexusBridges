@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/transfer/manifest.dart';
 import 'package:nexus_bridges_core/src/transfer/messages.dart';
-import 'package:nexus_bridges_core/src/transfer/names.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:test/test.dart';
 

@@ -232,12 +232,15 @@ void main() {
       expect(root['src/node/node.dart'], isNull);
     });
 
-    test('the root library shows only the language helpers of settings', () {
+    test('the root library shows only the startup helpers of settings', () {
       final root = _exportsOf(_read('lib/nexus_bridges_core.dart'));
 
       expect(root['src/settings/settings.dart'], {
         'resolveLanguage',
         'loadLanguage',
+        'loadStartupSettings',
+        'StartupSettings',
+        'ThemeChoice',
       });
     });
 
@@ -245,11 +248,32 @@ void main() {
       expect(exports['../discovery/discovery.dart'], {'DiscoveredDevice'});
     });
 
-    test('from protocol it only shows DeviceInfo and DeviceType', () {
+    test('from protocol it only shows DeviceInfo, DeviceType and the device '
+        'name rule (spec 008, T1)', () {
       expect(exports['../protocol/protocol.dart'], {
         'DeviceInfo',
         'DeviceType',
+        'DeviceNameProblem',
+        'deviceNameProblem',
       });
+    });
+
+    test('the root library gives the app the device name rule and the '
+        'settings view types (spec 008, T1)', () {
+      const view = SettingsView(customName: 'PC David', windowsName: 'DESK');
+      const result = DeviceNameResult(problem: DeviceNameProblem.tooLong);
+      const state = NodeState(settings: view);
+
+      expect(deviceNameProblem(''), DeviceNameProblem.empty);
+      expect(deviceNameProblem('PC David'), isNull);
+      expect(result.saved, isTrue);
+      expect(state.settings.customName, 'PC David');
+      expect(DeviceNameProblem.values, [
+        DeviceNameProblem.empty,
+        DeviceNameProblem.tooLong,
+        DeviceNameProblem.invalidCharacters,
+      ]);
+      expect(NoticeKind.values, contains(NoticeKind.settingNotSaved));
     });
 
     test('from network it only shows NetworkDecision, AdapterInfo and '
@@ -279,6 +303,7 @@ void main() {
       expect(exports.keys.where((uri) => uri.startsWith('../')).toSet(), {
         '../discovery/discovery.dart',
         '../protocol/protocol.dart',
+        '../settings/settings.dart',
         '../network/network.dart',
         '../identity/identity.dart',
         '../outbox/outbox.dart',
@@ -289,6 +314,12 @@ void main() {
 
     test('from transfer it only shows the view types of the app', () {
       expect(exports['../transfer/transfer.dart'], {
+        'FolderChangeResult',
+        'FolderChanged',
+        'FolderUnchanged',
+        'FolderChangeBlocked',
+        'FolderChangeRefused',
+        'FolderChangeNeedsConfirmation',
         'FirstLevelItem',
         'FolderSummaryView',
         'OutgoingTransferView',
