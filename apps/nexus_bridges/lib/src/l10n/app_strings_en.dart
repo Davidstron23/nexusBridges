@@ -348,6 +348,23 @@ final class AppStringsEn implements AppStrings {
       '$name cancelled the send.';
 
   @override
+  String get noticeSharesNotSaved =>
+      'The folder change could not be saved; after restarting it would be '
+      'open again.';
+
+  @override
+  String get noticeShareAddNotSaved =>
+      'The folder was added but will not be remembered after restarting.';
+
+  @override
+  String get noticeSharesReset =>
+      'The shared folders file was damaged; no folder is open now.';
+
+  @override
+  String get noticeSharesPartlyReset =>
+      'Folders of devices that are no longer paired were removed.';
+
+  @override
   String get sendNeedsVisible => 'It has to be visible to send it files.';
 
   @override
@@ -595,6 +612,18 @@ final class AppStringsEn implements AppStrings {
       'The folder is too big for the other device.',
     TransferOutcome.unexpectedData =>
       "The other device sent data it hadn't announced.",
+    TransferOutcome.defaultFolderOnly =>
+      'The other device only accepts transfers to its default folder.',
+    TransferOutcome.destinationUnavailable =>
+      'That folder is no longer available on the other device.',
+    TransferOutcome.destinationMissing =>
+      'That folder no longer exists on the other device.',
+    TransferOutcome.destinationLost =>
+      'That folder stopped being available on the other device.',
+    TransferOutcome.shareRemoved =>
+      'You removed that folder from the ones the other device can use.',
+    TransferOutcome.peerMarkedForeign =>
+      "You marked the other device as someone else's.",
   };
 
   @override
@@ -667,6 +696,18 @@ final class AppStringsEn implements AppStrings {
       'It was rejected because the folder is too big.',
     TransferOutcome.unexpectedData =>
       "It was cut because data arrived that hadn't been announced.",
+    TransferOutcome.defaultFolderOnly =>
+      'The other device only accepts transfers to its default folder.',
+    TransferOutcome.destinationUnavailable =>
+      'That folder is no longer available on the other device.',
+    TransferOutcome.destinationMissing =>
+      'That folder no longer exists on the other device.',
+    TransferOutcome.destinationLost =>
+      'That folder stopped being available on the other device.',
+    TransferOutcome.shareRemoved =>
+      'You removed that folder from the ones the other device can use.',
+    TransferOutcome.peerMarkedForeign =>
+      "You marked the other device as someone else's.",
   };
 
   @override

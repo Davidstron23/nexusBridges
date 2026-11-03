@@ -26,6 +26,7 @@ abstract final class ApiPaths {
   static const String transferCancel = '$apiPrefix/transfer/cancel';
   static const String transferUpload = '$apiPrefix/transfer/upload';
   static const String transferManifest = '$apiPrefix/transfer/manifest';
+  static const String browse = '$apiPrefix/browse';
   static const Set<String> anonymous = {
     register,
     pairStart,
@@ -149,11 +150,44 @@ abstract final class Limits {
   static const int manifestMinBytesPerSecond = 262144;
   static const Duration folderMeasureCap = Duration(seconds: 10);
   static const int folderMeasureMaxEntries = 500000;
+  static const int maxSharesPerPeer = 16;
+  static const int maxBrowseEntries = 1000;
+  static const Duration browseEnumerationCap = Duration(seconds: 5);
+  static const int browseRequestsPerWindow = 20;
+  static const Duration browseWindow = Duration(seconds: 10);
+  static const int browseRequestsPerMinutePerIp = 240;
+  static const int maxBrowseConcurrent = 4;
+  static const int maxBrowseConcurrentPerPeer = 2;
+  static const int maxBrowseChecks = 16;
+  static const int maxBrowseScanEntries = 200000;
+  static const int maxRelativeDepth = 32;
+  static const int maxShareFolderChars = 236;
+  static const int maxBrowseBodyBytes = 8192;
+  static const int maxBrowseResponseBytes = 1048576;
+  static const Duration browseRootsTimeout = Duration(seconds: 2);
+  static const Duration browseFoldersTimeout = Duration(seconds: 8);
+  static const Duration shareCheckTimeout = Duration(milliseconds: 1500);
+  static const Duration pendingShareTimeout = Duration(seconds: 60);
+  static const int maxFavoritesPerPeer = 8;
+  static const int maxRecentPerPeer = 5;
+  static const int maxHistoryPerPeer = 50;
+  static const Duration peerNotesWriteDelay = Duration(milliseconds: 500);
+  static const Duration shareMoveRetryBudget = Duration(seconds: 4);
 }
 
 final Stopwatch _monotonicWatch = Stopwatch()..start();
 
 Duration monotonicClock() => _monotonicWatch.elapsed;
+
+String folderKey(String name) {
+  final key = StringBuffer();
+  for (var i = 0; i < name.length; i++) {
+    final unit = name[i];
+    final upper = unit.toUpperCase();
+    key.write(upper.length == 1 ? upper : unit);
+  }
+  return key.toString();
+}
 
 final class PortInUseException implements Exception {
   const PortInUseException(this.port);

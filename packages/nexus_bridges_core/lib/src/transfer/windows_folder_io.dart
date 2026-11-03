@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
-import 'folder_walk.dart'
-    show DataFolderKind, FolderLister, ListedEntry, isLinkTag;
+import '../winio/winio.dart';
+import 'folder_walk.dart' show DataFolderKind, FolderLister, ListedEntry;
 import 'hashing.dart' show startSha256;
 
 const int _genericRead = 0x80000000;
@@ -45,195 +45,9 @@ const int _finalPathChars = 32768;
 const int _readChunkBytes = 1048576;
 const String _zoneIdentifierText = '[ZoneTransfer]\r\nZoneId=3\r\n';
 
-final class _UnicodeString extends Struct {
-  @Uint16()
-  external int length;
-
-  @Uint16()
-  external int maximumLength;
-
-  external Pointer<Uint16> buffer;
-}
-
-final class _ObjectAttributes extends Struct {
-  @Uint32()
-  external int length;
-
-  external Pointer<Void> rootDirectory;
-
-  external Pointer<_UnicodeString> objectName;
-
-  @Uint32()
-  external int attributes;
-
-  external Pointer<Void> securityDescriptor;
-
-  external Pointer<Void> securityQualityOfService;
-}
-
-final class _IoStatusBlock extends Struct {
-  @IntPtr()
-  external int status;
-
-  @IntPtr()
-  external int information;
-}
-
-typedef _NtCreateFileNative = Int32 Function(
-  Pointer<Pointer<Void>>,
-  Uint32,
-  Pointer<_ObjectAttributes>,
-  Pointer<_IoStatusBlock>,
-  Pointer<Int64>,
-  Uint32,
-  Uint32,
-  Uint32,
-  Uint32,
-  Pointer<Void>,
-  Uint32,
-);
-
-typedef _NtCreateFile = int Function(
-  Pointer<Pointer<Void>>,
-  int,
-  Pointer<_ObjectAttributes>,
-  Pointer<_IoStatusBlock>,
-  Pointer<Int64>,
-  int,
-  int,
-  int,
-  int,
-  Pointer<Void>,
-  int,
-);
-
 typedef _AssocIsDangerousNative = Int32 Function(Pointer<Utf16>);
 
 typedef _AssocIsDangerous = int Function(Pointer<Utf16>);
-
-typedef _NtQueryDirectoryFileNative = Int32 Function(
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<_IoStatusBlock>,
-  Pointer<Void>,
-  Uint32,
-  Int32,
-  Uint8,
-  Pointer<Void>,
-  Uint8,
-);
-
-typedef _NtQueryDirectoryFile = int Function(
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<_IoStatusBlock>,
-  Pointer<Void>,
-  int,
-  int,
-  int,
-  Pointer<Void>,
-  int,
-);
-
-typedef _NtWriteFileNative = Int32 Function(
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<_IoStatusBlock>,
-  Pointer<Void>,
-  Uint32,
-  Pointer<Int64>,
-  Pointer<Uint32>,
-);
-
-typedef _NtWriteFile = int Function(
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<Void>,
-  Pointer<_IoStatusBlock>,
-  Pointer<Void>,
-  int,
-  Pointer<Int64>,
-  Pointer<Uint32>,
-);
-
-typedef _GetFileInformationByHandleExNative = Int32 Function(
-  Pointer<Void>,
-  Int32,
-  Pointer<Void>,
-  Uint32,
-);
-
-typedef _GetFileInformationByHandleEx = int Function(
-  Pointer<Void>,
-  int,
-  Pointer<Void>,
-  int,
-);
-
-_GetFileInformationByHandleEx? _getFileInformationByHandleEx;
-
-_GetFileInformationByHandleEx _loadGetFileInformationByHandleEx() {
-  final cached = _getFileInformationByHandleEx;
-  if (cached != null) return cached;
-  final library = DynamicLibrary.open('kernel32.dll');
-  return _getFileInformationByHandleEx = library
-      .lookupFunction<
-        _GetFileInformationByHandleExNative,
-        _GetFileInformationByHandleEx
-      >('GetFileInformationByHandleEx');
-}
-
-_NtQueryDirectoryFile? _ntQueryDirectoryFile;
-
-_NtQueryDirectoryFile _loadNtQueryDirectoryFile() {
-  final cached = _ntQueryDirectoryFile;
-  if (cached != null) return cached;
-  final library = DynamicLibrary.open('ntdll.dll');
-  return _ntQueryDirectoryFile = library
-      .lookupFunction<_NtQueryDirectoryFileNative, _NtQueryDirectoryFile>(
-        'NtQueryDirectoryFile',
-      );
-}
-
-_NtWriteFile? _ntWriteFile;
-
-_NtWriteFile _loadNtWriteFile() {
-  final cached = _ntWriteFile;
-  if (cached != null) return cached;
-  final library = DynamicLibrary.open('ntdll.dll');
-  return _ntWriteFile = library
-      .lookupFunction<_NtWriteFileNative, _NtWriteFile>('NtWriteFile');
-}
-
-_NtCreateFile? _ntCreateFile;
-
-_NtCreateFile _loadNtCreateFile() {
-  final cached = _ntCreateFile;
-  if (cached != null) return cached;
-  final library = DynamicLibrary.open('ntdll.dll');
-  return _ntCreateFile = library
-      .lookupFunction<_NtCreateFileNative, _NtCreateFile>('NtCreateFile');
-}
-
-String extendedPath(String path) {
-  final normal = path.replaceAll('/', r'\');
-  if (normal.startsWith(r'\\?\')) return normal;
-  if (normal.startsWith(r'\\')) return r'\\?\UNC\' + normal.substring(2);
-  return r'\\?\' + normal;
-}
-
-String stripExtendedPrefix(String path) {
-  if (path.startsWith(r'\\?\UNC\')) return r'\\' + path.substring(8);
-  if (path.startsWith(r'\\?\')) return path.substring(4);
-  return path;
-}
 
 bool isDangerousTypeSync(String extension) {
   try {
@@ -266,22 +80,6 @@ Set<String> dangerousExtensionsSync(Set<String> extensions) {
   }
 }
 
-final class RawEntry {
-  const RawEntry({
-    required this.name,
-    required this.attributes,
-    required this.reparseTag,
-    required this.size,
-  });
-
-  final String name;
-  final int attributes;
-  final int? reparseTag;
-  final int size;
-
-  bool get isDirectory => (attributes & _attributeDirectory) != 0;
-}
-
 int? _folderReparseTag(Arena arena, HANDLE handle) {
   final info = arena<BY_HANDLE_FILE_INFORMATION>();
   final Win32Result(value: informed) = GetFileInformationByHandle(handle, info);
@@ -290,7 +88,7 @@ int? _folderReparseTag(Arena arena, HANDLE handle) {
     return _noReparseTag;
   }
   final tagInfo = arena<Uint32>(2);
-  final ok = _loadGetFileInformationByHandleEx()(
+  final ok = loadGetFileInformationByHandleEx()(
     handle.cast<Void>(),
     _fileAttributeTagInfo,
     tagInfo.cast<Void>(),
@@ -349,9 +147,9 @@ List<RawEntry> listDirectorySync(
           throw const FileSystemException('The folder could not be listed');
         }
       }
-      final query = _loadNtQueryDirectoryFile();
+      final query = loadNtQueryDirectoryFile();
       final buffer = arena<Uint8>(_listBufferBytes);
-      final status = arena<_IoStatusBlock>();
+      final status = arena<IoStatusBlock>();
       final entries = <RawEntry>[];
       var restart = 1;
       while (true) {
@@ -893,22 +691,6 @@ Pointer<Uint8> allocateReadBuffer() => calloc<Uint8>(_readChunkBytes);
 
 void freeReadBuffer(Pointer<Uint8> buffer) => calloc.free(buffer);
 
-sealed class NodeResult {
-  const NodeResult();
-}
-
-final class NodeCreated extends NodeResult {
-  const NodeCreated(this.handle);
-
-  final HANDLE handle;
-}
-
-final class NodeFailed extends NodeResult {
-  const NodeFailed({required this.diskFull});
-
-  final bool diskFull;
-}
-
 NodeResult _createRelative(
   HANDLE? parent,
   String name, {
@@ -920,23 +702,23 @@ NodeResult _createRelative(
 }) {
   return using((arena) {
     final text = name.toNativeUtf16(allocator: arena);
-    final unicode = arena<_UnicodeString>();
+    final unicode = arena<UnicodeString>();
     unicode.ref
       ..length = name.length * 2
       ..maximumLength = name.length * 2 + 2
       ..buffer = text.cast<Uint16>();
-    final object = arena<_ObjectAttributes>();
+    final object = arena<ObjectAttributes>();
     object.ref
-      ..length = sizeOf<_ObjectAttributes>()
+      ..length = sizeOf<ObjectAttributes>()
       ..rootDirectory = parent?.cast<Void>() ?? nullptr
       ..objectName = unicode
       ..attributes = _objCaseInsensitive
       ..securityDescriptor = nullptr
       ..securityQualityOfService = nullptr;
     final out = arena<Pointer<Void>>();
-    final status = arena<_IoStatusBlock>();
+    final status = arena<IoStatusBlock>();
     final code =
-        _loadNtCreateFile()(
+        loadNtCreateFile()(
           out,
           access,
           object,
@@ -964,20 +746,6 @@ bool _isReparse(Arena arena, HANDLE handle) {
   final Win32Result(:value) = GetFileInformationByHandle(handle, info);
   if (!value) return true;
   return (info.ref.dwFileAttributes & _attributeReparse) != 0;
-}
-
-bool deleteByHandle(HANDLE handle) {
-  return using((arena) {
-    final flag = arena<Uint8>(4);
-    flag.value = 1;
-    final Win32Result(:value) = SetFileInformationByHandle(
-      handle,
-      FileDispositionInfo,
-      flag,
-      1,
-    );
-    return value;
-  });
 }
 
 NodeResult createFolderExclusive(
@@ -1043,8 +811,8 @@ NodeResult createFileExclusive(
 
 int writeAllSync(HANDLE file, Pointer<Uint8> data, int length) {
   return using((arena) {
-    final write = _loadNtWriteFile();
-    final status = arena<_IoStatusBlock>();
+    final write = loadNtWriteFile();
+    final status = arena<IoStatusBlock>();
     var offset = 0;
     while (offset < length) {
       final code =

@@ -6,7 +6,12 @@ import '../protocol/protocol.dart' show Limits;
 import 'folders.dart' show tempFolderName;
 import 'messages.dart' show FolderOfferRequest;
 import 'names.dart'
-    show isAppReservedName, isBlockedType, isValidFileName, visibleFileName;
+    show
+        isAppReservedName,
+        isBlockedType,
+        isValidFileName,
+        isValidFolderName,
+        visibleFileName;
 import 'transfer.dart' show FirstLevelItem;
 
 const int _hashBytes = 32;
@@ -455,11 +460,17 @@ final class ManifestReader {
     }
     final name = decoded[1];
     if (name is! String) return ManifestRefusal.incompatible;
-    if (!isValidFileName(name) || isAppReservedName(name)) {
-      return ManifestRefusal.invalidName;
-    }
     final isFile = decoded.length == 4;
-    if (isBlockedType(name)) return ManifestRefusal.blockedType;
+    if (isFile) {
+      if (!isValidFileName(name) || isAppReservedName(name)) {
+        return ManifestRefusal.invalidName;
+      }
+      if (isBlockedType(name)) return ManifestRefusal.blockedType;
+    } else if (!isValidFolderName(name)) {
+      return isValidFileName(name) && !isAppReservedName(name)
+          ? ManifestRefusal.blockedType
+          : ManifestRefusal.invalidName;
+    }
     var size = 0;
     String? hex;
     if (isFile) {

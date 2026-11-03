@@ -791,17 +791,22 @@ void main() {
         NoticeKind.peerCancelledTransfer,
         NoticeKind.settingNotSaved,
         NoticeKind.networkStopNotSaved,
+        NoticeKind.sharesNotSaved,
+        NoticeKind.shareAddNotSaved,
+        NoticeKind.sharesReset,
+        NoticeKind.sharesPartlyReset,
       ]);
     });
 
-    test('only unpairNotSaved, changeNotSaved and networkStopNotSaved can be '
-        'retried', () {
+    test('only unpairNotSaved, changeNotSaved, networkStopNotSaved and '
+        'sharesNotSaved can be retried', () {
       for (final kind in NoticeKind.values) {
         expect(
           Notice(id: 1, kind: kind).canRetry,
           kind == NoticeKind.unpairNotSaved ||
               kind == NoticeKind.changeNotSaved ||
-              kind == NoticeKind.networkStopNotSaved,
+              kind == NoticeKind.networkStopNotSaved ||
+              kind == NoticeKind.sharesNotSaved,
           reason: kind.name,
         );
       }

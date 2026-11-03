@@ -654,6 +654,30 @@ final Map<TransferOutcome, (String, String)> _expectedSent = {
     "The other device sent data it hadn't announced.",
     'El otro equipo mandó datos que no había anunciado.',
   ),
+  TransferOutcome.defaultFolderOnly: (
+    'The other device only accepts transfers to its default folder.',
+    'El otro equipo solo admite envíos a su carpeta por defecto.',
+  ),
+  TransferOutcome.destinationUnavailable: (
+    'That folder is no longer available on the other device.',
+    'Esa carpeta ya no está disponible en el otro equipo.',
+  ),
+  TransferOutcome.destinationMissing: (
+    'That folder no longer exists on the other device.',
+    'Esa carpeta ya no existe en el otro equipo.',
+  ),
+  TransferOutcome.destinationLost: (
+    'That folder stopped being available on the other device.',
+    'Esa carpeta dejó de estar disponible en el otro equipo.',
+  ),
+  TransferOutcome.shareRemoved: (
+    'You removed that folder from the ones the other device can use.',
+    'Quitaste esa carpeta de las que puede usar el otro equipo.',
+  ),
+  TransferOutcome.peerMarkedForeign: (
+    "You marked the other device as someone else's.",
+    'Marcaste al otro equipo como ajeno.',
+  ),
 };
 
 final Map<TransferOutcome, (String, String)> _expectedReceived = {
@@ -800,6 +824,30 @@ final Map<TransferOutcome, (String, String)> _expectedReceived = {
   TransferOutcome.unexpectedData: (
     "It was cut because data arrived that hadn't been announced.",
     'Se cortó porque llegaron datos que no se habían anunciado.',
+  ),
+  TransferOutcome.defaultFolderOnly: (
+    'The other device only accepts transfers to its default folder.',
+    'El otro equipo solo admite envíos a su carpeta por defecto.',
+  ),
+  TransferOutcome.destinationUnavailable: (
+    'That folder is no longer available on the other device.',
+    'Esa carpeta ya no está disponible en el otro equipo.',
+  ),
+  TransferOutcome.destinationMissing: (
+    'That folder no longer exists on the other device.',
+    'Esa carpeta ya no existe en el otro equipo.',
+  ),
+  TransferOutcome.destinationLost: (
+    'That folder stopped being available on the other device.',
+    'Esa carpeta dejó de estar disponible en el otro equipo.',
+  ),
+  TransferOutcome.shareRemoved: (
+    'You removed that folder from the ones the other device can use.',
+    'Quitaste esa carpeta de las que puede usar el otro equipo.',
+  ),
+  TransferOutcome.peerMarkedForeign: (
+    "You marked the other device as someone else's.",
+    'Marcaste al otro equipo como ajeno.',
   ),
 };
 
@@ -1736,8 +1784,8 @@ void main() {
   });
 
   group('E145: sentOutcome and receivedOutcome', () {
-    test('the plan tables cover the 36 values of TransferOutcome', () {
-      expect(TransferOutcome.values, hasLength(36));
+    test('the plan tables cover the 42 values of TransferOutcome', () {
+      expect(TransferOutcome.values, hasLength(42));
       expect(_expectedSent.keys.toSet(), TransferOutcome.values.toSet());
       expect(_expectedReceived.keys.toSet(), TransferOutcome.values.toSet());
     });
@@ -1788,10 +1836,10 @@ void main() {
       for (final strings in [english, spanish]) {
         expect({
           for (final o in TransferOutcome.values) strings.sentOutcome(o),
-        }, hasLength(36));
+        }, hasLength(42));
         expect({
           for (final o in TransferOutcome.values) strings.receivedOutcome(o),
-        }, hasLength(36));
+        }, hasLength(42));
       }
     });
 

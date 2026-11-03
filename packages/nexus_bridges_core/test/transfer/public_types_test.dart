@@ -104,6 +104,12 @@ void main() {
       TransferOutcome.tooDeep: TransferResultKind.rejected,
       TransferOutcome.tooLargeForPeer: TransferResultKind.rejected,
       TransferOutcome.unexpectedData: TransferResultKind.failed,
+      TransferOutcome.defaultFolderOnly: TransferResultKind.rejected,
+      TransferOutcome.destinationUnavailable: TransferResultKind.rejected,
+      TransferOutcome.destinationMissing: TransferResultKind.rejected,
+      TransferOutcome.destinationLost: TransferResultKind.failed,
+      TransferOutcome.shareRemoved: TransferResultKind.cancelled,
+      TransferOutcome.peerMarkedForeign: TransferResultKind.cancelled,
     };
 
     test('the table covers every outcome of the plan, in its order', () {

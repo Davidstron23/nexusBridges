@@ -16,7 +16,6 @@ import '../transport/transport.dart'
 import 'folder_plan.dart';
 import 'folder_send.dart';
 import 'folder_stream.dart';
-import 'folders.dart' show isInsideTempFolder, isSameOrInside;
 import 'link.dart';
 import 'loose_file.dart';
 import 'manifest.dart' show encodeManifestChunks;
@@ -52,6 +51,15 @@ const Duration _retryDelay = Duration(seconds: 1);
 Future<DataCheck> _checkData(String path, String dataPath) =>
     Isolate.run(() => checkAgainstData(path, dataPath));
 
+DestinationRequest? _requestOf(SharedFolderDestination? destination) =>
+    destination == null
+    ? null
+    : DestinationRequest(
+        rootId: destination.rootId,
+        path: destination.path,
+        newFolder: destination.newFolder,
+      );
+
 String _randomHex32() {
   final random = Random.secure();
   final buffer = StringBuffer();
@@ -72,7 +80,10 @@ final class _OutSession {
     required this.typeCheck,
     this.isFolder = false,
     this.realPath,
+    this.destination,
   });
+
+  final SharedFolderDestination? destination;
 
   final bool isFolder;
 
@@ -169,10 +180,13 @@ final class TransferSender {
     required this._onChanged,
     required this._log,
     this._onFilePicker,
+    this._onResult,
     this._dataDirPath = '',
     this._exclusions = const NoExclusionSource(),
     this._beforeStreamEntry,
   });
+
+  final void Function(TransferResultView result)? _onResult;
 
   final String _dataDirPath;
 
@@ -238,6 +252,7 @@ final class TransferSender {
       preparedEntries: session.preparedEntries,
       preparedFiles: session.preparedFiles,
       summary: session.summary,
+      destination: session.destination?.label,
     );
   }
 
@@ -251,8 +266,9 @@ final class TransferSender {
     _starting = true;
     _cancelWhileStarting = false;
     _OutSession? session;
+    final shared = destination is SharedFolderDestination ? destination : null;
     try {
-      session = await _beginElement(target, path, refresh);
+      session = await _beginElement(target, path, refresh, shared);
     } catch (e) {
       _log('send element failed: ${e.runtimeType}');
       _record(
@@ -260,6 +276,7 @@ final class TransferSender {
         null,
         baseName(path),
         TransferOutcome.noContact,
+        destination: shared,
       );
     } finally {
       _starting = false;
@@ -469,6 +486,7 @@ final class TransferSender {
     SendTarget target,
     String path,
     SendTarget? Function() refresh,
+    SharedFolderDestination? destination,
   ) async {
     final name = baseName(path);
     final device = _paired.deviceOf(target.fingerprint);
@@ -490,6 +508,7 @@ final class TransferSender {
         name,
         outcome,
         problemPath: problemPath,
+        destination: destination,
       );
     }
 
@@ -598,6 +617,7 @@ final class TransferSender {
           : isProgramHere(name, _fs),
       isFolder: isFolder,
       realPath: real,
+      destination: destination,
     );
     _active = session;
     _onChanged();
@@ -611,8 +631,9 @@ final class TransferSender {
     String name,
     TransferOutcome outcome, {
     String? problemPath,
+    SharedFolderDestination? destination,
   }) {
-    _lastSent = TransferResultView(
+    final result = TransferResultView(
       direction: TransferDirection.outgoing,
       peerFingerprint: fingerprint,
       peerName: peerName,
@@ -621,7 +642,10 @@ final class TransferSender {
       outcome: outcome,
       canReveal: false,
       problemPath: problemPath == null ? null : visibleFileName(problemPath),
+      destination: destination?.label,
     );
+    _lastSent = result;
+    _onResult?.call(result);
     _onChanged();
   }
 
@@ -735,6 +759,7 @@ final class TransferSender {
       depth: manifest.depth,
       longest: manifest.longest,
       manifestBytes: plan.encodedLength,
+      destination: _requestOf(session.destination),
     );
     final reply = await session.link.post(
       ApiPaths.transferOffer,
@@ -908,6 +933,7 @@ final class TransferSender {
       name: session.name,
       size: hashed.size,
       sha256: hexOfDigest(hashed.sha256),
+      destination: _requestOf(session.destination),
     );
     final reply = await session.link.post(
       ApiPaths.transferOffer,
@@ -1381,8 +1407,10 @@ final class TransferSender {
           ? null
           : visibleFileName(session.problemPath!),
       size: session.size,
+      destination: session.destination?.label,
     );
     _lastSent = result;
+    _onResult?.call(result);
     _onChanged();
     _completeAfterCancels(session, result);
   }

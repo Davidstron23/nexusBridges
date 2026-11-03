@@ -7,7 +7,6 @@ import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/settings/settings.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
-import 'package:nexus_bridges_core/src/transfer/folders.dart';
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:test/test.dart';

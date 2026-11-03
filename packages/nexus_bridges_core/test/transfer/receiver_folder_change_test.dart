@@ -7,8 +7,6 @@ import 'dart:io';
 
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
-import 'package:nexus_bridges_core/src/transfer/folders.dart'
-    show samePath, tempFolderName;
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:test/test.dart';

@@ -10,6 +10,7 @@ import 'package:nexus_bridges_core/src/transfer/folder_stream.dart';
 import 'package:nexus_bridges_core/src/transfer/folder_writer.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_folder_io.dart';
+import 'package:nexus_bridges_core/src/winio/winio.dart';
 import 'package:test/test.dart';
 import 'package:win32/win32.dart';
 

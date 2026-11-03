@@ -99,7 +99,7 @@ void main() {
     });
 
     test('the protocol version stays at 1.0 (D9)', () {
-      expect(protocolVersion, '1.1');
+      expect(protocolVersion, '1.2');
     });
   });
 }

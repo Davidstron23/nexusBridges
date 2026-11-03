@@ -271,6 +271,10 @@ Set<String> allowedTexts(
       s.noticeReplaceWithdrawn(n),
       s.noticeReceiveFolderNotSaved(n),
       s.noticePeerCancelledTransfer(n),
+      s.noticeSharesNotSaved,
+      s.noticeShareAddNotSaved,
+      s.noticeSharesReset,
+      s.noticeSharesPartlyReset,
       s.namesakeWarning(n),
     ],
   };

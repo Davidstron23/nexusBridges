@@ -1,3 +1,4 @@
+import '../browse/browse.dart' show ShareView;
 import '../discovery/discovery.dart';
 import '../outbox/outbox.dart' show SendQueuesView, TrayItemView;
 import '../pairing_flow/pairing_flow.dart' show PairingView;
@@ -46,6 +47,10 @@ enum NoticeKind {
   peerCancelledTransfer,
   settingNotSaved,
   networkStopNotSaved,
+  sharesNotSaved,
+  shareAddNotSaved,
+  sharesReset,
+  sharesPartlyReset,
 }
 
 final class NetworkPrompt {
@@ -118,6 +123,46 @@ final class DeviceEntry {
   );
 }
 
+final class PeerSettingsView {
+  const PeerSettingsView({
+    required this.fingerprint,
+    required this.realName,
+    required this.mine,
+    required this.visible,
+    this.shares = const [],
+    this.sharesUnsaved = false,
+  });
+
+  final String fingerprint;
+  final String realName;
+  final bool mine;
+  final bool visible;
+  final List<ShareView> shares;
+  final bool sharesUnsaved;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PeerSettingsView &&
+      other.fingerprint == fingerprint &&
+      other.realName == realName &&
+      other.mine == mine &&
+      other.visible == visible &&
+      other.sharesUnsaved == sharesUnsaved &&
+      other.shares.length == shares.length &&
+      Iterable<int>.generate(shares.length)
+          .every((i) => other.shares[i] == shares[i]);
+
+  @override
+  int get hashCode => Object.hash(
+    fingerprint,
+    realName,
+    mine,
+    visible,
+    sharesUnsaved,
+    Object.hashAll(shares),
+  );
+}
+
 final class Notice {
   const Notice({
     required this.id,
@@ -136,7 +181,8 @@ final class Notice {
   bool get canRetry =>
       kind == NoticeKind.unpairNotSaved ||
       kind == NoticeKind.changeNotSaved ||
-      kind == NoticeKind.networkStopNotSaved;
+      kind == NoticeKind.networkStopNotSaved ||
+      kind == NoticeKind.sharesNotSaved;
 
   @override
   bool operator ==(Object other) =>
@@ -415,6 +461,7 @@ final class NodeState {
     this.selectionProgress,
     this.ignoredDevices = const [],
     this.trustedNetworks = const [],
+    this.peers = const {},
   });
 
   final IdentityStatus identityStatus;
@@ -452,6 +499,7 @@ final class NodeState {
   final SelectionProgress? selectionProgress;
   final List<IgnoredDeviceView> ignoredDevices;
   final List<TrustedNetworkView> trustedNetworks;
+  final Map<String, PeerSettingsView> peers;
 
   bool canSendTo(String fingerprint) {
     for (final entry in entries) {

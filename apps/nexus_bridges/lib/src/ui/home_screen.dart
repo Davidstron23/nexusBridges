@@ -208,6 +208,10 @@ String _noticeText(AppStrings strings, Notice notice) {
     NoticeKind.peerCancelledTransfer => strings.noticePeerCancelledTransfer(
       notice.detail ?? '',
     ),
+    NoticeKind.sharesNotSaved => strings.noticeSharesNotSaved,
+    NoticeKind.shareAddNotSaved => strings.noticeShareAddNotSaved,
+    NoticeKind.sharesReset => strings.noticeSharesReset,
+    NoticeKind.sharesPartlyReset => strings.noticeSharesPartlyReset,
   };
 }
 
