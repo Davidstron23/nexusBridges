@@ -176,6 +176,7 @@ final class TestNode {
   Duration pollHold = const Duration(milliseconds: 300);
   SecretProtector protector = XorProtector();
   Directory? dataDirOverride;
+  MulticastChannel? channel;
   NexusNode? _node;
 
   static Future<TestNode> create(
@@ -218,6 +219,7 @@ final class TestNode {
   Future<NexusNode> boot() async {
     final loopback = await loopbackName();
     final udp = udpPort = await freePort();
+    final channel = this.channel = MulticastChannel(port: udp, log: logs.add);
     final node = await zone.run(
       () => NexusNode.start(
         dataDir: dataDir,
@@ -240,7 +242,7 @@ final class TestNode {
               ),
         ],
         pollInterval: pollInterval,
-        channel: MulticastChannel(port: udp, log: logs.add),
+        channel: channel,
         pairingTickInterval: const Duration(milliseconds: 20),
         pairingPollHold: pollHold,
       ),

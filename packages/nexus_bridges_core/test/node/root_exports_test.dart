@@ -245,11 +245,32 @@ void main() {
       expect(exports['../discovery/discovery.dart'], {'DiscoveredDevice'});
     });
 
-    test('from protocol it only shows DeviceInfo and DeviceType', () {
+    test('from protocol it only shows DeviceInfo, DeviceType and the device '
+        'name rule (spec 008, T1)', () {
       expect(exports['../protocol/protocol.dart'], {
         'DeviceInfo',
         'DeviceType',
+        'DeviceNameProblem',
+        'deviceNameProblem',
       });
+    });
+
+    test('the root library gives the app the device name rule and the '
+        'settings view types (spec 008, T1)', () {
+      const view = SettingsView(customName: 'PC David', windowsName: 'DESK');
+      const result = DeviceNameResult(problem: DeviceNameProblem.tooLong);
+      const state = NodeState(settings: view);
+
+      expect(deviceNameProblem(''), DeviceNameProblem.empty);
+      expect(deviceNameProblem('PC David'), isNull);
+      expect(result.saved, isTrue);
+      expect(state.settings.customName, 'PC David');
+      expect(DeviceNameProblem.values, [
+        DeviceNameProblem.empty,
+        DeviceNameProblem.tooLong,
+        DeviceNameProblem.invalidCharacters,
+      ]);
+      expect(NoticeKind.values, contains(NoticeKind.settingNotSaved));
     });
 
     test('from network it only shows NetworkDecision, AdapterInfo and '

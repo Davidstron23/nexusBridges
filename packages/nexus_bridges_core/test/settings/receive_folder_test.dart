@@ -118,6 +118,10 @@ void main() {
       'broken JSON': '{"version":1,"language":"es"',
       'a JSON array': '["es"]',
       'plain text': 'es',
+      'no version': '{"language":"es"}',
+      'version "1" as text': '{"version":"1","language":"es"}',
+      'version 1.0': '{"version":1.0,"language":"es"}',
+      'version 0': '{"version":0,"language":"es"}',
     }.entries) {
       test('$label is quarantined and the folder is written', () async {
         await settingsFile.writeAsString(content);
@@ -146,9 +150,7 @@ void main() {
 
     for (final MapEntry(key: label, value: content) in {
       'version 2 with language': '{"version":2,"language":"es"}',
-      'no version': '{"language":"es"}',
-      'version "1" as text': '{"version":"1","language":"es"}',
-      'version 1.0': '{"version":1.0,"language":"es"}',
+      'version 7 with language': '{"version":7,"language":"es"}',
     }.entries) {
       test('$label gives false and the file stays byte for byte', () async {
         await settingsFile.writeAsBytes(utf8.encode(content));

@@ -789,6 +789,7 @@ void main() {
         NoticeKind.replaceWithdrawn,
         NoticeKind.receiveFolderNotSaved,
         NoticeKind.peerCancelledTransfer,
+        NoticeKind.settingNotSaved,
       ]);
     });
 

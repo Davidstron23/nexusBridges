@@ -647,6 +647,45 @@ final class _Knocks {
   }
 }
 
+final class _RenamablePeer {
+  _RenamablePeer._(this.identity, this.name);
+
+  final DeviceIdentity identity;
+  String name;
+  late final ApiServer server;
+  final List<(DeviceInfo, InternetAddress)> registrations = [];
+
+  int get port => server.boundPort!;
+
+  DeviceInfo get info => DeviceInfo(
+    name: name,
+    fingerprint: identity.fingerprint,
+    port: port,
+    protocol: protocolVersion,
+    deviceType: DeviceType.desktop,
+  );
+
+  static Future<_RenamablePeer> start(
+    DeviceIdentity identity, {
+    required String address,
+    required String name,
+  }) async {
+    final paired = await _pairedStore();
+    final peer = _RenamablePeer._(identity, name);
+    peer.server = ApiServer(
+      identity: identity,
+      paired: paired,
+      selfInfo: () => peer.info,
+      onRegistered: (caller, from, _) => peer.registrations.add((caller, from)),
+      port: 0,
+    );
+    addTearDown(peer.server.close);
+    await peer.server.syncInterfaces([_iface(address)]);
+    expect(peer.server.boundPort, isNotNull);
+    return peer;
+  }
+}
+
 void main() {
   late DeviceIdentity self;
   late DeviceIdentity alice;
@@ -2152,6 +2191,281 @@ void main() {
       );
       expect(knocks.hits.values, everyElement(1));
       expect(s.lists(bob.fingerprint), isTrue);
+    });
+  });
+  group('E805: a forged hello cannot rename a known device (RF-507, S11, '
+      'clarify point 5)', () {
+    test('a forged hello with the fingerprint and address of a known device '
+        'and another name makes one check against the real device, which '
+        'answers with its own name, and the name does not change', () async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      expect(peer.registrations, hasLength(1));
+      final emissions = s.emitted.length;
+
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(bob.fingerprint, peer.port, name: 'Forged')),
+      );
+      await _until(() => peer.registrations.length == 2);
+      await _quiet();
+
+      expect(peer.registrations, hasLength(2));
+      expect(s.find(bob.fingerprint)!.info.name, 'Laptop');
+      expect(s.find(bob.fingerprint)!.info.toJson(), peer.info.toJson());
+      expect([
+        for (final list in s.emitted.skip(emissions))
+          for (final device in list) device.info.name,
+      ], isNot(contains('Forged')));
+    });
+
+    test('a forged hello with another name and a false port is checked '
+        'against the known port: the false port gets no connection', () async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final knocks = await _Knocks.start([_host(2)]);
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(bob.fingerprint, knocks.port, name: 'Forged')),
+      );
+      await _until(() => peer.registrations.length == 2);
+      await _quiet();
+
+      expect(knocks.hits, isEmpty);
+      expect(s.find(bob.fingerprint)!.info.toJson(), peer.info.toJson());
+    });
+
+    test('20 forged hellos with other names in less than 5 s make a single '
+        'check', () async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      final watch = Stopwatch()..start();
+
+      for (var i = 0; i < 20; i++) {
+        await channel.deliver(
+          _host(2),
+          _hello(_claim(bob.fingerprint, peer.port, name: 'Forged $i')),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+      }
+      await _quiet();
+
+      expect(watch.elapsed, lessThan(Limits.renameCheckInterval));
+      expect(peer.registrations, hasLength(2));
+      expect(s.find(bob.fingerprint)!.info.name, 'Laptop');
+    });
+
+    test('forged registers with another name from a known device also make a '
+        'single check and keep the name', () async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      for (var i = 0; i < 5; i++) {
+        s.service.handleRegistration(
+          _claim(bob.fingerprint, peer.port, name: 'Forged $i'),
+          _host(2),
+          first,
+        );
+      }
+      await _until(() => peer.registrations.length == 2);
+      await _quiet();
+
+      expect(peer.registrations, hasLength(2));
+      expect(s.find(bob.fingerprint)!.info.name, 'Laptop');
+    });
+
+    test('a real new name arrives after its check, and a second one 5 s later '
+        'also through a register', () async {
+      final peer = await _RenamablePeer.start(
+        bob,
+        address: '127.0.0.2',
+        name: 'Laptop',
+      );
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+
+      peer.name = 'Laptop Renamed';
+      final watch = Stopwatch()..start();
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(
+        () => s.find(bob.fingerprint)?.info.name == 'Laptop Renamed',
+      );
+      expect(watch.elapsed, lessThan(const Duration(seconds: 5)));
+
+      await Future<void>.delayed(Limits.renameCheckInterval);
+      peer.name = 'Laptop Again';
+      s.service.handleRegistration(peer.info, _host(2), first);
+      await _until(() => s.find(bob.fingerprint)?.info.name == 'Laptop Again');
+      expect(peer.registrations, hasLength(3));
+    });
+
+    test('a rename check that fails leaves the entry as it was and does not '
+        'cool a paired device down: its goodbye is checked at once without '
+        'waiting 9 s', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      final info = peer.info;
+      final before = s.find(bob.fingerprint)!;
+      final emissions = s.emitted.length;
+      await peer.server.close();
+      final dropping = await ServerSocket.bind(_host(2), info.port);
+      addTearDown(dropping.close);
+      var dropped = 0;
+      dropping.listen((socket) {
+        dropped++;
+        socket.destroy();
+      });
+
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(bob.fingerprint, info.port, name: 'Forged')),
+      );
+      await _until(() => dropped == 1);
+      await _quiet();
+
+      final after = s.find(bob.fingerprint)!;
+      expect(after.info.toJson(), before.info.toJson());
+      expect(after.address, before.address);
+      expect(after.interfaceId, before.interfaceId);
+      expect(s.emitted, hasLength(emissions));
+
+      await channel.deliver(_host(2), _bye(info));
+      await _until(() => dropped == 2, limit: _oneSecond);
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+    });
+
+    test(
+      'a rename check that fails does not cool an unpaired device down '
+      'either: after its bye, its hello from a new port is listed at once',
+      () async {
+        final clock = _Clock();
+        final peer = await _Peer.start(
+          carol,
+          address: '127.0.0.2',
+          name: 'Desk',
+        );
+        final channel = await _Channel.open([first]);
+        final s = await _Subject.create(channel, identity: self, clock: clock);
+        await s.service.syncInterfaces([first]);
+        await channel.deliver(_host(2), _hello(peer.info));
+        await _until(() => s.lists(carol.fingerprint));
+        final info = peer.info;
+        await peer.server.close();
+        final dropping = await ServerSocket.bind(_host(2), info.port);
+        addTearDown(dropping.close);
+        var dropped = 0;
+        dropping.listen((socket) {
+          dropped++;
+          socket.destroy();
+        });
+
+        await channel.deliver(
+          _host(2),
+          _hello(_claim(carol.fingerprint, info.port, name: 'Forged')),
+        );
+        await _until(() => dropped == 1);
+        await _quiet();
+        expect(s.find(carol.fingerprint)!.info.name, 'Desk');
+        await channel.deliver(_host(2), _bye(info));
+        await _until(() => !s.lists(carol.fingerprint), limit: _oneSecond);
+
+        final back = await _Peer.start(
+          carol,
+          address: '127.0.0.2',
+          name: 'Desk',
+        );
+        await channel.deliver(_host(2), _hello(back.info));
+
+        await _until(
+          () => s.find(carol.fingerprint)?.info.port == back.port,
+          limit: const Duration(seconds: 2),
+        );
+        expect(back.registrations, hasLength(1));
+      },
+    );
+  });
+
+  group('presentNow (S11 point 6, RF-507)', () {
+    test(
+      'presents itself at once to every listed device, also one that only '
+      'presented itself and never sent a hello, with the current selfInfo',
+      () async {
+        final peer = await _Peer.start(
+          bob,
+          address: '127.0.0.2',
+          name: 'Laptop',
+        );
+        final other = await _Peer.start(
+          carol,
+          address: '127.0.0.3',
+          name: 'Desk',
+        );
+        final channel = await _Channel.open([first]);
+        final s = await _Subject.create(channel, identity: self);
+        await s.service.syncInterfaces([first]);
+        await channel.deliver(_host(2), _hello(peer.info));
+        s.service.handleRegistration(other.info, _host(3), first);
+        await _until(
+          () => s.lists(bob.fingerprint) && s.lists(carol.fingerprint),
+        );
+        expect(peer.registrations, hasLength(1));
+        expect(other.registrations, hasLength(1));
+
+        s.service.presentNow();
+        await _until(
+          () =>
+              peer.registrations.length == 2 && other.registrations.length == 2,
+        );
+
+        expect(peer.registrations.last.$1.toJson(), s.selfInfo().toJson());
+        expect(other.registrations.last.$1.toJson(), s.selfInfo().toJson());
+        expect(s.lists(bob.fingerprint), isTrue);
+        expect(s.lists(carol.fingerprint), isTrue);
+      },
+    );
+
+    test('does nothing without devices, nor after stop', () async {
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+
+      s.service.presentNow();
+      await _quiet();
+      expect(peer.registrations, isEmpty);
+
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      await s.service.stop(sayGoodbye: false);
+      s.service.presentNow();
+      await _quiet();
+      expect(peer.registrations, hasLength(1));
     });
   });
 }
