@@ -29,11 +29,16 @@ Future<void> _finishNext(
   h.sender.finish(outcome, size: size);
 }
 
-void main() {
-  late Harness h;
+Harness? _harness;
 
+Harness get h => _harness!;
+
+set h(Harness value) => _harness = value;
+
+void main() {
   tearDown(() async {
-    await h.dispose();
+    await _harness?.dispose();
+    _harness = null;
   });
 
   group('Q-5, RF-285, RF-301: what is cancelled stays in the total', () {
