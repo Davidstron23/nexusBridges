@@ -29,6 +29,8 @@ DiscTone discToneFor(NodeState state, DeviceEntry entry) {
   return DiscTone.idle;
 }
 
+const double _chipShare = 0.7;
+
 class DeviceList extends StatelessWidget {
   const DeviceList({
     required this.controller,
@@ -285,38 +287,43 @@ class _DeviceRowState extends State<DeviceRow> {
                         ],
                       ),
                       const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Flexible(
-                            child: StatusChip(
-                              height: 20,
-                              label: chipLabel,
-                              tone: chipTone,
+                      LayoutBuilder(
+                        builder: (context, constraints) => Row(
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: constraints.maxWidth * _chipShare,
+                              ),
+                              child: StatusChip(
+                                height: 20,
+                                label: chipLabel,
+                                tone: chipTone,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: entry.visible
-                                  ? colors.successInk
-                                  : colors.hint,
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: entry.visible
+                                    ? colors.successInk
+                                    : colors.hint,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              entry.visible
-                                  ? strings.visibleLabel
-                                  : strings.notVisibleLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: caption,
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                entry.visible
+                                    ? strings.visibleLabel
+                                    : strings.notVisibleLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: caption,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                       if (explanation != null) ...[
                         const SizedBox(height: 4),

@@ -941,12 +941,10 @@ void main() {
             lessThanOrEqualTo(rowRect.right),
           );
         }
-        for (final finder in [chip, visibility]) {
-          expect(
-            find.ancestor(of: finder, matching: find.byType(Flexible)),
-            findsWidgets,
-          );
-        }
+        expect(
+          find.ancestor(of: visibility, matching: find.byType(Flexible)),
+          findsWidgets,
+        );
         for (final finder in [chipText, visibility]) {
           final text = tester.widget<Text>(finder);
           expect(text.maxLines, 1);

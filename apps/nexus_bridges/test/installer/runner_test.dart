@@ -523,4 +523,134 @@ void main() {
       }
     });
   });
+
+  group('Q-13: the count of a drop and the extraction folder', () {
+    late String dropTarget;
+
+    setUpAll(() {
+      dropTarget = _withoutLineComments(
+        File(_dropTargetPath).readAsStringSync(),
+      );
+    });
+
+    String body(String signature) {
+      final start = _indexOf(dropTarget, signature);
+      final open = _indexOf(dropTarget, '{', start);
+      var depth = 0;
+      for (var i = open; i < dropTarget.length; i++) {
+        if (dropTarget[i] == '{') depth++;
+        if (dropTarget[i] == '}') depth--;
+        if (depth == 0) return dropTarget.substring(open, i + 1);
+      }
+      fail('unbalanced braces in $signature');
+    }
+
+    test('Q-13 up to 1001 paths the count sent is the number of paths that '
+        'were converted; above it, the real count', () {
+      final drop = body('DropTarget::Drop(');
+      final rule = RegExp(
+        r'const\s+int\s+reported_count\s*=\s*count\s*<=\s*kMaxPaths\s*\?\s*'
+        r'static_cast<int>\(\s*encoded\.size\(\)\s*\)\s*:\s*'
+        r'static_cast<int>\(\s*count\s*\)\s*;',
+      );
+      expect(rule.allMatches(drop), hasLength(1));
+      expect(dropTarget, contains('constexpr UINT kMaxPaths = 1001;'));
+      final converted = _indexOf(drop, 'encoded.emplace_back(');
+      final counted = _indexOf(drop, 'reported_count =');
+      expect(counted, greaterThan(converted));
+      final key = _indexOf(drop, 'flutter::EncodableValue("count")');
+      final value = _indexOf(drop, 'flutter::EncodableValue(', key + 1);
+      expect(
+        drop
+            .substring(value)
+            .startsWith('flutter::EncodableValue(reported_count)'),
+        isTrue,
+      );
+      expect(drop.contains('EncodableValue(static_cast<int>(count))'), isFalse);
+    });
+
+    test('Q-13 a path that cannot be converted to UTF-8 is left out and does '
+        'not count', () {
+      final drop = body('DropTarget::Drop(');
+      final convert = _indexOf(drop, 'Utf8FromUtf16(');
+      final guard = _indexOf(drop, 'if (!utf8.empty())', convert);
+      final add = _indexOf(drop, 'encoded.emplace_back(utf8)', guard);
+      expect(add, greaterThan(guard));
+    });
+
+    test('Q-13 Temp<n> counts as the extraction folder only when it is a '
+        'folder followed by more path', () {
+      final rule = body('bool InsideExtractionFolder(');
+      final digit = _indexOf(rule, 'std::iswdigit(rest[4])');
+      final separator = _indexOf(rule, r"std::wcschr(rest, L'\\')");
+      expect(separator, greaterThan(digit));
+      expect(
+        rule,
+        contains(r"return separator != nullptr && separator[1] != L'\0';"),
+      );
+      expect(_count(rule, 'return true'), 0);
+    });
+  });
+
+  group('B-2: the drop target lets go of the channel before it is '
+      'destroyed', () {
+    late String dropTarget;
+    late String dropHeader;
+    late String flutterWindow;
+
+    setUpAll(() {
+      dropTarget = _withoutLineComments(
+        File(_dropTargetPath).readAsStringSync(),
+      );
+      dropHeader = _withoutLineComments(
+        File(_dropTargetHeaderPath).readAsStringSync(),
+      );
+      flutterWindow = _withoutLineComments(
+        File(_flutterWindowPath).readAsStringSync(),
+      );
+    });
+
+    test('B-2 Detach is public and clears the channel', () {
+      final public = _indexOf(dropHeader, 'public:');
+      final private = _indexOf(dropHeader, 'private:');
+      final detach = _indexOf(dropHeader, 'void Detach();');
+      expect(detach, inExclusiveRange(public, private));
+      final start = _indexOf(dropTarget, 'void DropTarget::Detach()');
+      final end = _indexOf(dropTarget, '}', start);
+      expect(dropTarget.substring(start, end), contains('channel_ = nullptr;'));
+    });
+
+    test('B-2 Notify does nothing without a channel, and it is the only '
+        'place that uses it', () {
+      final start = _indexOf(dropTarget, 'void DropTarget::Notify(');
+      final guard = _indexOf(dropTarget, 'if (channel_ == nullptr) {', start);
+      final early = _indexOf(dropTarget, 'return;', guard);
+      final invoke = _indexOf(dropTarget, 'channel_->InvokeMethod(', start);
+      expect(early, lessThan(invoke));
+      expect(_count(dropTarget, 'channel_->'), 1);
+    });
+
+    test('B-2 OnDestroy detaches the target before releasing it and before '
+        'the channel goes away', () {
+      final destroy = _indexOf(flutterWindow, 'FlutterWindow::OnDestroy()');
+      final detach = _indexOf(
+        flutterWindow,
+        'drop_target_->Detach();',
+        destroy,
+      );
+      final release = _indexOf(
+        flutterWindow,
+        'drop_target_->Release();',
+        destroy,
+      );
+      final channel = _indexOf(
+        flutterWindow,
+        'drop_channel_ = nullptr;',
+        destroy,
+      );
+      expect(detach, lessThan(release));
+      expect(detach, lessThan(channel));
+      expect(_count(flutterWindow, 'drop_target_->Detach();'), 1);
+    });
+  });
 }

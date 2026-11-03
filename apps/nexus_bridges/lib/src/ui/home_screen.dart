@@ -478,7 +478,7 @@ class _ColumnTabs extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(_trackPadding),
         child: SizedBox(
-          height: _tabHeight,
+          height: _scaledTabHeight(context),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -511,6 +511,9 @@ class _ColumnTabs extends StatelessWidget {
 }
 
 const double _tabHeight = 32;
+
+double _scaledTabHeight(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(_tabHeight);
 
 const double _trackPadding = 4;
 
@@ -576,7 +579,7 @@ class _TabZone extends StatelessWidget {
       button: true,
       selected: active,
       child: SizedBox(
-        height: _tabHeight,
+        height: _scaledTabHeight(context),
         child: Material(
           type: MaterialType.transparency,
           child: InkWell(
@@ -622,14 +625,19 @@ class _TabZone extends StatelessWidget {
                         minHeight: 18,
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 5),
-                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: colors.primaryWeak,
                         borderRadius: BorderRadius.circular(9),
                       ),
-                      child: Text(
-                        badge.toString(),
-                        style: NbText.badge.copyWith(color: colors.primaryInk),
+                      child: Align(
+                        widthFactor: 1,
+                        heightFactor: 1,
+                        child: Text(
+                          badge.toString(),
+                          style: NbText.badge.copyWith(
+                            color: colors.primaryInk,
+                          ),
+                        ),
                       ),
                     ),
                   ],
