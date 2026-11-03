@@ -5,12 +5,29 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../l10n/app_strings.dart';
 import '../format.dart';
+import '../icons/file_icon.dart' show FileKind, fileKindOf;
 import '../theme/components.dart' show ChipTone;
 import 'flow_layout.dart';
 
 const int _shortFingerprintLength = 8;
 
 enum LinkState { idle, waiting, asking, active, done }
+
+final class TravelIcon {
+  const TravelIcon.folder() : kind = null;
+
+  const TravelIcon.file(FileKind this.kind);
+
+  final FileKind? kind;
+
+  bool get isFolder => kind == null;
+
+  @override
+  bool operator ==(Object other) => other is TravelIcon && other.kind == kind;
+
+  @override
+  int get hashCode => kind.hashCode;
+}
 
 final class LinkView {
   const LinkView({
@@ -19,6 +36,8 @@ final class LinkView {
     this.progress = 0,
     this.fileName,
     this.isProgram = false,
+    this.isFolder = false,
+    this.tracked = false,
   });
 
   final LinkState state;
@@ -26,6 +45,12 @@ final class LinkView {
   final double progress;
   final String? fileName;
   final bool isProgram;
+  final bool isFolder;
+  final bool tracked;
+
+  TravelIcon get travelIcon => isFolder
+      ? const TravelIcon.folder()
+      : TravelIcon.file(fileKindOf(fileName ?? '', isProgram: isProgram));
 
   @override
   bool operator ==(Object other) =>
@@ -34,11 +59,20 @@ final class LinkView {
       other.towardsHub == towardsHub &&
       other.progress == progress &&
       other.fileName == fileName &&
-      other.isProgram == isProgram;
+      other.isProgram == isProgram &&
+      other.isFolder == isFolder &&
+      other.tracked == tracked;
 
   @override
-  int get hashCode =>
-      Object.hash(state, towardsHub, progress, fileName, isProgram);
+  int get hashCode => Object.hash(
+    state,
+    towardsHub,
+    progress,
+    fileName,
+    isProgram,
+    isFolder,
+    tracked,
+  );
 }
 
 double _fraction(int done, int total) {
@@ -66,31 +100,71 @@ LinkView linkFor(
   }
 
   final outgoing = state.outgoing;
+  final selection = state.selectionProgress;
+  final queues = state.queues;
+  final carried =
+      queues != null &&
+      !queues.finished &&
+      queues.peerFingerprint == fingerprint &&
+      selection != null &&
+      selection.selectionId == queues.selectionId &&
+      selection.doneBytes > 0;
+  final selectionFraction = selection == null
+      ? 0.0
+      : _fraction(selection.doneBytes, selection.totalBytes);
+
   if (outgoing != null && outgoing.peerFingerprint == fingerprint) {
     switch (outgoing.phase) {
       case OutgoingPhase.preparing:
       case OutgoingPhase.requesting:
       case OutgoingPhase.waiting:
+        if (carried) {
+          return LinkView(
+            state: LinkState.active,
+            progress: selectionFraction,
+            fileName: outgoing.fileName,
+            isProgram: outgoing.isProgram,
+            isFolder: outgoing.isFolder,
+            tracked: true,
+          );
+        }
         return LinkView(
           state: LinkState.waiting,
           fileName: outgoing.fileName,
           isProgram: outgoing.isProgram,
+          isFolder: outgoing.isFolder,
         );
       case OutgoingPhase.uploading:
         return LinkView(
           state: LinkState.active,
-          progress: _fraction(outgoing.sentBytes, outgoing.size),
+          progress: selection != null
+              ? selectionFraction
+              : _fraction(outgoing.sentBytes, outgoing.size),
           fileName: outgoing.fileName,
           isProgram: outgoing.isProgram,
+          isFolder: outgoing.isFolder,
+          tracked: selection != null,
         );
       case OutgoingPhase.verifying:
         return LinkView(
           state: LinkState.active,
-          progress: 1,
+          progress: selection != null ? selectionFraction : 1,
           fileName: outgoing.fileName,
           isProgram: outgoing.isProgram,
+          isFolder: outgoing.isFolder,
+          tracked: selection != null,
         );
     }
+  }
+
+  if (carried) {
+    return LinkView(
+      state: LinkState.active,
+      progress: selectionFraction,
+      fileName: selection.currentName,
+      isFolder: selection.currentIsFolder,
+      tracked: true,
+    );
   }
 
   if (incomingHere) {
@@ -109,6 +183,8 @@ LinkView linkFor(
           progress: _fraction(incoming.receivedBytes, incoming.size),
           fileName: incoming.fileName,
           isProgram: incoming.isProgram,
+          isFolder: incoming.isFolder,
+          tracked: true,
         );
       case IncomingStage.verifying:
         return LinkView(
@@ -117,6 +193,8 @@ LinkView linkFor(
           progress: 1,
           fileName: incoming.fileName,
           isProgram: incoming.isProgram,
+          isFolder: incoming.isFolder,
+          tracked: true,
         );
       case IncomingStage.warning:
       case IncomingStage.folderQuestion:
@@ -140,7 +218,18 @@ bool _isReceiving(IncomingTransferView? view) =>
 String? newlyDone(NodeState? before, NodeState after) {
   if (before == null) return null;
   final sent = after.lastSent;
-  if (before.outgoing != null &&
+  final queues = after.queues;
+  if (queues != null) {
+    final previous = before.queues;
+    final justFinished =
+        queues.finished &&
+        (previous == null ||
+            previous.selectionId != queues.selectionId ||
+            !previous.finished);
+    if (justFinished && queues.total > 0 && queues.delivered == queues.total) {
+      return queues.peerFingerprint;
+    }
+  } else if (before.outgoing != null &&
       after.outgoing == null &&
       sent != null &&
       sent.outcome.kind == TransferResultKind.saved) {

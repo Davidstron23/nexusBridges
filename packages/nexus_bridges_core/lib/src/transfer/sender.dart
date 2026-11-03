@@ -43,6 +43,8 @@ import 'windows_folder_io.dart'
         FileHashSkipped,
         checkAgainstData;
 
+const int _maxSourcePathChars = 259;
+
 const Duration _pollMargin = Duration(seconds: 3);
 
 const Duration _retryDelay = Duration(seconds: 1);
@@ -497,6 +499,10 @@ final class TransferSender {
       record(TransferOutcome.shortcut);
       return null;
     }
+    if (path.length > _maxSourcePathChars) {
+      record(TransferOutcome.pathTooLong);
+      return null;
+    }
     final FileSystemEntityType kind;
     try {
       kind = await FileSystemEntity.type(path, followLinks: true);
@@ -604,7 +610,7 @@ final class TransferSender {
       isProgram: isProgram(name),
       outcome: outcome,
       canReveal: false,
-      problemPath: problemPath,
+      problemPath: problemPath == null ? null : visibleFileName(problemPath),
     );
     _onChanged();
   }
@@ -1361,7 +1367,9 @@ final class TransferSender {
       canReveal: false,
       isFolder: session.isFolder,
       fileCount: session.plan?.manifest.files ?? 0,
-      problemPath: session.problemPath,
+      problemPath: session.problemPath == null
+          ? null
+          : visibleFileName(session.problemPath!),
       size: session.size,
     );
     _lastSent = result;

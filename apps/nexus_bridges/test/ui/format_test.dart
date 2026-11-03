@@ -246,6 +246,40 @@ void main() {
     });
   });
 
+  group('E548: formatCount', () {
+    test('numbers under a thousand are written as they are', () {
+      for (final language in ['en', 'es']) {
+        expect(formatCount(0, language), '0');
+        expect(formatCount(7, language), '7');
+        expect(formatCount(999, language), '999');
+      }
+    });
+
+    test('English groups thousands with a comma and Spanish with a '
+        'space', () {
+      expect(formatCount(1000, 'en'), '1,000');
+      expect(formatCount(1000, 'es'), '1 000');
+      expect(formatCount(12345, 'en'), '12,345');
+      expect(formatCount(12345, 'es'), '12 345');
+      expect(formatCount(100000, 'en'), '100,000');
+      expect(formatCount(100000, 'es'), '100 000');
+      expect(formatCount(1234567, 'en'), '1,234,567');
+      expect(formatCount(1234567, 'es'), '1 234 567');
+    });
+
+    test('any language other than Spanish gets the English form', () {
+      for (final code in ['', 'fr', 'de']) {
+        expect(formatCount(1500, code), '1,500', reason: code);
+      }
+    });
+
+    test('a negative number keeps its sign', () {
+      expect(formatCount(-5, 'en'), '-5');
+      expect(formatCount(-1500, 'en'), '-1,500');
+      expect(formatCount(-1500, 'es'), '-1 500');
+    });
+  });
+
   group('E260, E262: formatOverflow', () {
     test('is a plus sign and the number of hidden peers, the same in both '
         'languages', () {

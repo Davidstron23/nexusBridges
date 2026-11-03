@@ -163,7 +163,7 @@ Color? _dotColor(WidgetTester tester, String fingerprint) {
 }
 
 Finder _sendFinder(AppStrings strings, String fingerprint) => find.ancestor(
-  of: _inRow(fingerprint, find.text(strings.sendFileButton)),
+  of: _inRow(fingerprint, find.text(strings.sendEllipsis)),
   matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
 );
 
@@ -659,7 +659,8 @@ void main() {
     group('[$code] E136 Send file only when the device can receive it '
         '(RF-130, RF-131, RF-210)', () {
       testWidgets(
-        'visible and paired: Send file is active and calls sendFile',
+        'visible and paired: Send is active and its menu calls sendFiles or '
+        'sendFolders',
         (tester) async {
           final controller = await _pumpList(tester, code, [_mine]);
 
@@ -674,7 +675,19 @@ void main() {
 
           await tester.tap(_sendFinder(strings, _mineFp));
           await tester.pumpAndSettle();
-          expect(controller.calls, ['sendFile $_mineFp']);
+          expect(controller.calls, isEmpty);
+          await tester.tap(find.text(strings.sendFilesOption));
+          await tester.pumpAndSettle();
+          expect(controller.calls, ['sendFiles $_mineFp']);
+
+          await tester.tap(_sendFinder(strings, _mineFp));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(strings.sendFoldersOption));
+          await tester.pumpAndSettle();
+          expect(controller.calls, [
+            'sendFiles $_mineFp',
+            'sendFolders $_mineFp',
+          ]);
         },
       );
 
@@ -928,12 +941,10 @@ void main() {
             lessThanOrEqualTo(rowRect.right),
           );
         }
-        for (final finder in [chip, visibility]) {
-          expect(
-            find.ancestor(of: finder, matching: find.byType(Flexible)),
-            findsWidgets,
-          );
-        }
+        expect(
+          find.ancestor(of: visibility, matching: find.byType(Flexible)),
+          findsWidgets,
+        );
         for (final finder in [chipText, visibility]) {
           final text = tester.widget<Text>(finder);
           expect(text.maxLines, 1);

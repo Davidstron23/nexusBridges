@@ -5,11 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
+import '../../drop/drop_zone.dart';
 import '../../l10n/app_strings.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
-import '../icons/glyphs.dart';
-import '../soft_button.dart';
+import '../progress/selection_progress_painter.dart';
+import '../send_menu.dart';
 import '../theme/app_theme.dart';
 import '../theme/components.dart';
 import '../theme/tokens.dart';
@@ -21,9 +22,17 @@ const Duration _clockPeriod = Duration(milliseconds: 14400);
 const Duration _hoverDuration = Duration(milliseconds: 200);
 const Duration _popoverDuration = Duration(milliseconds: 240);
 const Duration _doneDuration = Duration(milliseconds: 3200);
+const Duration _iconFadeDuration = Duration(milliseconds: 400);
+const Duration _spinPeriod = Duration(seconds: 6);
 const Cubic _motionCurve = Cubic(0.2, 0.8, 0.2, 1);
 const double _popoverWidth = 264;
 const double _hitExtra = 6;
+const double _tipLeft = 14;
+const double _tipBottom = 12;
+const double _pillTop = 12;
+const double _pillNarrowTop = 52;
+const double _pillNarrowWidth = 780;
+const double _pillSide = 12;
 const int _shortLength = 8;
 
 String _shortOf(String fingerprint) =>
@@ -41,14 +50,16 @@ class FlowDiagram extends StatefulWidget {
   const FlowDiagram({
     required this.state,
     required this.hovered,
-    required this.onSend,
+    required this.onSendFiles,
+    required this.onSendFolders,
     required this.onShowDevices,
     super.key,
   });
 
   final NodeState state;
   final ValueNotifier<String?> hovered;
-  final void Function(String fingerprint) onSend;
+  final void Function(String fingerprint) onSendFiles;
+  final void Function(String fingerprint) onSendFolders;
   final VoidCallback onShowDevices;
 
   @override
@@ -60,6 +71,12 @@ class _FlowDiagramState extends State<FlowDiagram>
   late final AnimationController _clock;
   late final AnimationController _hover;
   late final CurvedAnimation _hoverCurve;
+  late final AnimationController _iconFade;
+  late final AnimationController _drag;
+  late final AnimationController _spin;
+  late final CurvedAnimation _dragCurve;
+  Map<String, TravelIcon> _icons = const {};
+  Map<String, TravelIcon> _iconFrom = const {};
   Timer? _doneTimer;
   String? _done;
   String? _popoverFor;
@@ -73,9 +90,15 @@ class _FlowDiagramState extends State<FlowDiagram>
     _clock = AnimationController(vsync: this, duration: _clockPeriod);
     _hover = AnimationController(vsync: this, duration: _hoverDuration);
     _hoverCurve = CurvedAnimation(parent: _hover, curve: _motionCurve);
+    _iconFade = AnimationController(vsync: this, duration: _iconFadeDuration);
+    _drag = AnimationController(vsync: this, duration: dropFadeDuration);
+    _spin = AnimationController(vsync: this, duration: _spinPeriod);
+    _dragCurve = CurvedAnimation(parent: _drag, curve: _motionCurve);
+    _drag.addStatusListener(_onDragStatus);
     _hover.addStatusListener(_onHoverStatus);
     widget.hovered.addListener(_onHovered);
     _previous = widget.state;
+    _icons = _travelIcons(widget.state);
     _shownHover = widget.hovered.value;
     if (_shownHover != null) _hover.value = 1;
   }
@@ -88,6 +111,7 @@ class _FlowDiagramState extends State<FlowDiagram>
       widget.hovered.addListener(_onHovered);
       _onHovered();
     }
+    _trackIcons();
     final finished = newlyDone(_previous, widget.state);
     _previous = widget.state;
     if (finished != null) {
@@ -109,10 +133,44 @@ class _FlowDiagramState extends State<FlowDiagram>
     _doneTimer?.cancel();
     widget.hovered.removeListener(_onHovered);
     _hover.removeStatusListener(_onHoverStatus);
+    _drag.removeStatusListener(_onDragStatus);
     _hoverCurve.dispose();
     _hover.dispose();
+    _iconFade.dispose();
+    _dragCurve.dispose();
+    _drag.dispose();
+    _spin.dispose();
     _clock.dispose();
     super.dispose();
+  }
+
+  Map<String, TravelIcon> _travelIcons(NodeState state) {
+    final icons = <String, TravelIcon>{};
+    for (final entry in state.entries) {
+      if (!entry.paired) continue;
+      final link = linkFor(state, entry.fingerprint);
+      if (link.state == LinkState.active) {
+        icons[entry.fingerprint] = link.travelIcon;
+      }
+    }
+    return icons;
+  }
+
+  void _trackIcons() {
+    final next = _travelIcons(widget.state);
+    final changed = <String, TravelIcon>{};
+    for (final MapEntry(:key, :value) in next.entries) {
+      final before = _icons[key];
+      if (before != null && before != value) changed[key] = before;
+    }
+    _icons = next;
+    if (changed.isEmpty) return;
+    _iconFrom = changed;
+    if (_reduceMotion) {
+      _iconFade.value = 1;
+    } else {
+      _iconFade.forward(from: 0);
+    }
   }
 
   void _onHovered() {
@@ -143,6 +201,25 @@ class _FlowDiagramState extends State<FlowDiagram>
     }
   }
 
+  void _onDragStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed) _spin.stop();
+  }
+
+  void _syncDrag(bool dragging) {
+    if (dragging) {
+      if (_reduceMotion) {
+        _drag.value = 1;
+      } else {
+        if (!_drag.isForwardOrCompleted) _drag.forward();
+        if (!_spin.isAnimating) _spin.repeat();
+      }
+    } else if (_reduceMotion) {
+      _drag.value = 0;
+    } else if (_drag.isForwardOrCompleted) {
+      _drag.reverse();
+    }
+  }
+
   void _closePopover() {
     if (_popoverFor != null) setState(() => _popoverFor = null);
   }
@@ -161,9 +238,13 @@ class _FlowDiagramState extends State<FlowDiagram>
     final colors = NbColors.of(context);
     final textDirection = Directionality.of(context);
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final drop = DropScope.maybeOf(context);
+    final dragging = drop?.dragging ?? false;
+    _syncDrag(dragging);
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final tracker = SelectionProgressScope.maybeOf(context);
         final scene = buildFlowScene(
           state: widget.state,
           strings: strings,
@@ -174,6 +255,11 @@ class _FlowDiagramState extends State<FlowDiagram>
         _syncClock(scene.animates);
         final layout = scene.layout;
         final hitRadius = layout.peerRadius + _hitExtra;
+        final lit = <String>{
+          for (final peer in scene.peers)
+            if (widget.state.canSendTo(peer.fingerprint)) peer.fingerprint,
+        };
+        final hovering = dragging ? drop?.hovered : null;
 
         final zones = <Widget>[];
         for (var i = 0; i < scene.peers.length; i++) {
@@ -185,20 +271,26 @@ class _FlowDiagramState extends State<FlowDiagram>
                 center: layout.slots[i].center,
                 radius: hitRadius,
               ),
-              child: Semantics(
-                button: true,
-                label: peer.name,
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  onEnter: (_) => widget.hovered.value = peer.fingerprint,
-                  onExit: (_) {
-                    if (widget.hovered.value == peer.fingerprint) {
-                      widget.hovered.value = null;
-                    }
-                  },
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _popoverFor = peer.fingerprint),
+              child: DropZone(
+                fingerprint: peer.fingerprint,
+                lit: lit.contains(peer.fingerprint),
+                decorate: false,
+                child: Semantics(
+                  button: true,
+                  label: peer.name,
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    onEnter: (_) => widget.hovered.value = peer.fingerprint,
+                    onExit: (_) {
+                      if (widget.hovered.value == peer.fingerprint) {
+                        widget.hovered.value = null;
+                      }
+                    },
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () =>
+                          setState(() => _popoverFor = peer.fingerprint),
+                    ),
                   ),
                 ),
               ),
@@ -251,10 +343,38 @@ class _FlowDiagramState extends State<FlowDiagram>
                     hover: _hoverCurve,
                     reduceMotion: _reduceMotion,
                     textDirection: textDirection,
+                    progress: tracker,
+                    iconFade: _iconFade,
+                    iconFrom: _iconFrom,
+                    dragFade: _dragCurve,
+                    dragSpin: _spin,
+                    lit: lit,
+                    hot: hovering,
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: _MapRing(
+                    visible: dragging && drop?.hovered == null,
+                    color: colors.primary,
                   ),
                 ),
               ),
               ...zones,
+              Positioned(
+                left: _tipLeft,
+                bottom: _tipBottom,
+                child: DragTip(hidden: dragging, width: constraints.maxWidth),
+              ),
+              Positioned(
+                top: constraints.maxWidth < _pillNarrowWidth
+                    ? _pillNarrowTop
+                    : _pillTop,
+                left: _pillSide,
+                right: _pillSide,
+                child: Center(child: DragPill(visible: dragging)),
+              ),
               ...popover,
             ],
           ),
@@ -295,10 +415,15 @@ class _FlowDiagramState extends State<FlowDiagram>
               reduceMotion: _reduceMotion,
               child: _FlowPopover(
                 entry: entry,
+                state: widget.state,
                 tone: discToneFor(widget.state, entry),
-                onSend: () {
+                onFiles: () {
                   _closePopover();
-                  widget.onSend(entry.fingerprint);
+                  widget.onSendFiles(entry.fingerprint);
+                },
+                onFolders: () {
+                  _closePopover();
+                  widget.onSendFolders(entry.fingerprint);
                 },
               ),
             ),
@@ -306,6 +431,30 @@ class _FlowDiagramState extends State<FlowDiagram>
         ),
       ),
     ];
+  }
+}
+
+class _MapRing extends StatelessWidget {
+  const _MapRing({required this.visible, required this.color});
+
+  final bool visible;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: visible ? 1 : 0),
+      duration: animate ? dropFadeDuration : Duration.zero,
+      curve: _motionCurve,
+      builder: (context, shown, child) => Opacity(opacity: shown, child: child),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color, width: 1.5),
+        ),
+      ),
+    );
   }
 }
 
@@ -403,13 +552,17 @@ class _PopoverLayerState extends State<_PopoverLayer>
 class _FlowPopover extends StatelessWidget {
   const _FlowPopover({
     required this.entry,
+    required this.state,
     required this.tone,
-    required this.onSend,
+    required this.onFiles,
+    required this.onFolders,
   });
 
   final DeviceEntry entry;
+  final NodeState state;
   final DiscTone tone;
-  final VoidCallback onSend;
+  final VoidCallback onFiles;
+  final VoidCallback onFolders;
 
   @override
   Widget build(BuildContext context) {
@@ -417,11 +570,7 @@ class _FlowPopover extends StatelessWidget {
     final colors = NbColors.of(context);
     final radius = BorderRadius.circular(12);
     final caption = NbText.caption.copyWith(color: colors.textWeak);
-    final explanation = entry.canSendFile
-        ? null
-        : entry.mismatch
-        ? strings.sendNeedsPairAgain
-        : strings.sendNeedsVisible;
+    final explanation = sendExplanation(strings, state, entry);
 
     return SizedBox(
       width: _popoverWidth,
@@ -521,11 +670,11 @@ class _FlowPopover extends StatelessWidget {
                 const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
-                  child: SoftButton(
-                    glyph: Glyphs.send,
-                    label: strings.sendFileButton,
+                  child: SendMenuButton(
+                    enabled: state.canSendTo(entry.fingerprint),
                     height: 32,
-                    onPressed: entry.canSendFile ? onSend : null,
+                    onFiles: onFiles,
+                    onFolders: onFolders,
                   ),
                 ),
               ],

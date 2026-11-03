@@ -2521,6 +2521,7 @@ final class TransferReceiver {
         canReveal: finalPath != null,
         isFolder: folderOffer != null,
         fileCount: folderOffer?.files ?? 0,
+        size: folderOffer?.bytes ?? session.size,
         containsGitRepository: session.containsGit,
         problemPath:
             manifest != null &&

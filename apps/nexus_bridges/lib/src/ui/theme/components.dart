@@ -80,7 +80,7 @@ class StatusChip extends StatelessWidget {
     };
     final icon = this.icon;
     return Container(
-      height: height,
+      constraints: BoxConstraints(minHeight: height),
       padding: const EdgeInsets.symmetric(horizontal: 9),
       decoration: ShapeDecoration(
         color: fill,

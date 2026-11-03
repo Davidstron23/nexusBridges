@@ -183,7 +183,7 @@ class _RowMenuState extends State<RowMenu> with SingleTickerProviderStateMixin {
                     },
                     child: FocusScope(
                       node: _scope,
-                      child: _MenuPanel(
+                      child: RowMenuPanel(
                         entries: widget.entries,
                         onSelect: _select,
                       ),
@@ -282,8 +282,12 @@ class _RowMenuState extends State<RowMenu> with SingleTickerProviderStateMixin {
   }
 }
 
-class _MenuPanel extends StatelessWidget {
-  const _MenuPanel({required this.entries, required this.onSelect});
+class RowMenuPanel extends StatelessWidget {
+  const RowMenuPanel({
+    required this.entries,
+    required this.onSelect,
+    super.key,
+  });
 
   final List<RowMenuEntry> entries;
   final ValueChanged<RowMenuEntry> onSelect;

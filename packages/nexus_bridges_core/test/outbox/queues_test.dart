@@ -456,14 +456,18 @@ void main() {
       await until(() => h.sender.busy);
       h.queues.cancelAll();
       expect(h.sender.cancels, 1);
-      expect(h.looseNames, ['A.TXT']);
-      expect(h.view.bundles, isEmpty);
+      expect(h.looseNames, ['A.TXT', 'b.txt']);
+      expect(h.item('b.txt').state, QueueItemState.notSent);
+      expect(h.item('b.txt').outcome, TransferOutcome.cancelledHere);
+      expect(h.item('Carpeta').state, QueueItemState.notSent);
+      expect(h.item('Carpeta').outcome, TransferOutcome.cancelledHere);
       h.sender.finish(TransferOutcome.cancelledHere);
       await until(() => !h.queues.active);
       await settle();
       expect(h.sender.paths, [inA]);
       expect(h.view.finished, isTrue);
-      expect(h.view.total, 1);
+      expect(h.view.total, 3);
+      expect(h.view.delivered, 0);
     });
 
     test('during a single send', () async {

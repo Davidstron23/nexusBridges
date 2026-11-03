@@ -232,7 +232,8 @@ void main() {
       await until(() => !h.queues.active);
 
       expect(h.sender.paths, [inA]);
-      expect(h.view.total, 1);
+      expect(h.view.total, 2);
+      expect(h.item('b.txt').state, QueueItemState.notSent);
     });
   });
 }

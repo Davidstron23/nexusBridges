@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
+import '../drop/drop_zone.dart';
 import '../l10n/app_strings.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
-import 'soft_button.dart';
 import 'row_menu.dart';
 import 'send_action.dart';
+import 'send_menu.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -27,6 +28,8 @@ DiscTone discToneFor(NodeState state, DeviceEntry entry) {
   if (!entry.visible) return DiscTone.notVisible;
   return DiscTone.idle;
 }
+
+const double _chipShare = 0.7;
 
 class DeviceList extends StatelessWidget {
   const DeviceList({
@@ -57,6 +60,7 @@ class DeviceList extends StatelessWidget {
     Widget rowOf(DeviceEntry entry) => DeviceRow(
       key: ValueKey(entry.fingerprint),
       controller: controller,
+      state: state,
       entry: entry,
       tone: discToneFor(state, entry),
       hovered: hovered,
@@ -107,6 +111,7 @@ const Duration rowHoverFade = Duration(milliseconds: 250);
 class DeviceRow extends StatefulWidget {
   const DeviceRow({
     required this.controller,
+    required this.state,
     required this.entry,
     required this.tone,
     required this.hovered,
@@ -114,6 +119,7 @@ class DeviceRow extends StatefulWidget {
   });
 
   final AppController controller;
+  final NodeState state;
   final DeviceEntry entry;
   final DiscTone tone;
   final ValueNotifier<String?> hovered;
@@ -160,11 +166,7 @@ class _DeviceRowState extends State<DeviceRow> {
     final caption = NbText.caption.copyWith(color: colors.textWeak);
     final bodySm = NbText.bodySm.copyWith(color: colors.text);
     final possiblyReplaces = entry.possiblyReplaces;
-    final explanation = !entry.paired || entry.canSendFile
-        ? null
-        : entry.mismatch
-        ? strings.sendNeedsPairAgain
-        : strings.sendNeedsVisible;
+    final explanation = sendExplanation(strings, widget.state, entry);
     final (String chipLabel, ChipTone chipTone) = entry.paired
         ? (
             entry.mine ? strings.chipMine : strings.chipForeign,
@@ -176,12 +178,12 @@ class _DeviceRowState extends State<DeviceRow> {
           );
     final actions = <Widget>[
       if (entry.paired)
-        SoftButton(
-          glyph: Glyphs.send,
-          label: strings.sendFileButton,
-          onPressed: entry.canSendFile
-              ? () => startSend(context, controller, entry.fingerprint)
-              : null,
+        SendMenuButton(
+          enabled: widget.state.canSendTo(entry.fingerprint),
+          onOpenChanged: (open) => setState(() => _menuOpen = open),
+          onFiles: () => startSendFiles(context, controller, entry.fingerprint),
+          onFolders: () =>
+              startSendFolders(context, controller, entry.fingerprint),
         ),
       if (entry.paired && entry.mismatch) ...[
         OutlinedButton(
@@ -208,136 +210,145 @@ class _DeviceRowState extends State<DeviceRow> {
           child: Text(strings.unignoreButton),
         ),
     ];
-    return MouseRegion(
-      onEnter: (_) => hovered.value = entry.fingerprint,
-      onExit: (_) {
-        if (hovered.value == entry.fingerprint) hovered.value = null;
-      },
-      child: ValueListenableBuilder<String?>(
-        valueListenable: hovered,
-        builder: (context, current, child) => TweenAnimationBuilder<Color?>(
-          tween: ColorTween(
-            end: current == entry.fingerprint || _menuOpen
-                ? colors.surfaceWeak
-                : colors.surfaceWeak.withValues(alpha: 0),
+    return DropZone(
+      fingerprint: entry.fingerprint,
+      lit: widget.state.canSendTo(entry.fingerprint),
+      child: MouseRegion(
+        onEnter: (_) => hovered.value = entry.fingerprint,
+        onExit: (_) {
+          if (hovered.value == entry.fingerprint) hovered.value = null;
+        },
+        child: ValueListenableBuilder<String?>(
+          valueListenable: hovered,
+          builder: (context, current, child) => TweenAnimationBuilder<Color?>(
+            tween: ColorTween(
+              end: current == entry.fingerprint || _menuOpen
+                  ? colors.surfaceWeak
+                  : colors.surfaceWeak.withValues(alpha: 0),
+            ),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : rowHoverFade,
+            curve: Curves.ease,
+            builder: (context, fill, child) =>
+                ColoredBox(color: fill ?? Colors.transparent, child: child),
+            child: child,
           ),
-          duration: MediaQuery.disableAnimationsOf(context)
-              ? Duration.zero
-              : rowHoverFade,
-          curve: Curves.ease,
-          builder: (context, fill, child) =>
-              ColoredBox(color: fill ?? Colors.transparent, child: child),
-          child: child,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DeviceDisc(type: entry.deviceType, tone: widget.tone),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            entry.displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: NbText.bodyStrong.copyWith(
-                              fontSize: 13,
-                              color: colors.text,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DeviceDisc(type: entry.deviceType, tone: widget.tone),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              entry.displayName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: NbText.bodyStrong.copyWith(
+                                fontSize: 13,
+                                color: colors.text,
+                              ),
                             ),
                           ),
-                        ),
-                        if (entry.paired)
-                          RowMenu(
-                            tooltip: strings.moreOptions,
-                            onOpenChanged: (open) =>
-                                setState(() => _menuOpen = open),
-                            entries: [
-                              RowMenuEntry(
-                                label: entry.mine
-                                    ? strings.markAsForeign
-                                    : strings.markAsMine,
-                                glyph: entry.mine
-                                    ? Glyphs.someoneElse
-                                    : Glyphs.mine,
-                                onSelected: () => controller.setMine(
-                                  entry.fingerprint,
-                                  mine: !entry.mine,
+                          if (entry.paired)
+                            RowMenu(
+                              tooltip: strings.moreOptions,
+                              onOpenChanged: (open) =>
+                                  setState(() => _menuOpen = open),
+                              entries: [
+                                RowMenuEntry(
+                                  label: entry.mine
+                                      ? strings.markAsForeign
+                                      : strings.markAsMine,
+                                  glyph: entry.mine
+                                      ? Glyphs.someoneElse
+                                      : Glyphs.mine,
+                                  onSelected: () => controller.setMine(
+                                    entry.fingerprint,
+                                    mine: !entry.mine,
+                                  ),
                                 ),
-                              ),
-                              RowMenuEntry(
-                                label: strings.unpairButton,
-                                glyph: Glyphs.unlink,
-                                danger: true,
-                                onSelected: () => _unpair(context),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Flexible(
-                          child: StatusChip(
-                            height: 20,
-                            label: chipLabel,
-                            tone: chipTone,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: entry.visible
-                                ? colors.successInk
-                                : colors.hint,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            entry.visible
-                                ? strings.visibleLabel
-                                : strings.notVisibleLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: caption,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (explanation != null) ...[
-                      const SizedBox(height: 4),
-                      Text(explanation, style: caption),
-                    ],
-                    if (entry.paired && entry.mismatch) ...[
-                      const SizedBox(height: 4),
-                      Text(strings.mismatchWarning, style: bodySm),
-                    ],
-                    if (possiblyReplaces != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        strings.possibleReinstall(possiblyReplaces),
-                        style: bodySm,
+                                RowMenuEntry(
+                                  label: strings.unpairButton,
+                                  glyph: Glyphs.unlink,
+                                  danger: true,
+                                  onSelected: () => _unpair(context),
+                                ),
+                              ],
+                            ),
+                        ],
                       ),
+                      const SizedBox(height: 3),
+                      LayoutBuilder(
+                        builder: (context, constraints) => Row(
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: constraints.maxWidth * _chipShare,
+                              ),
+                              child: StatusChip(
+                                height: 20,
+                                label: chipLabel,
+                                tone: chipTone,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: entry.visible
+                                    ? colors.successInk
+                                    : colors.hint,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                entry.visible
+                                    ? strings.visibleLabel
+                                    : strings.notVisibleLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: caption,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (explanation != null) ...[
+                        const SizedBox(height: 4),
+                        Text(explanation, style: caption),
+                      ],
+                      if (entry.paired && entry.mismatch) ...[
+                        const SizedBox(height: 4),
+                        Text(strings.mismatchWarning, style: bodySm),
+                      ],
+                      if (possiblyReplaces != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          strings.possibleReinstall(possiblyReplaces),
+                          style: bodySm,
+                        ),
+                      ],
+                      if (actions.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(spacing: 8, runSpacing: 4, children: actions),
+                      ],
                     ],
-                    if (actions.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Wrap(spacing: 8, runSpacing: 4, children: actions),
-                    ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

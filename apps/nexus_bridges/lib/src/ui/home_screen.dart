@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
+import '../drop/drop_controller.dart';
+import '../drop/drop_events.dart';
+import '../drop/drop_zone.dart';
 import '../l10n/app_strings.dart';
 import 'activity_cards.dart';
 import 'diagram/flow_diagram.dart';
@@ -10,17 +15,20 @@ import 'device_list.dart';
 import 'incoming_cards.dart';
 import 'modal/timeline.dart';
 import 'network_strip.dart';
+import 'progress/selection_progress_painter.dart';
 import 'send_action.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
+import 'tray_panel.dart';
 
 const double _narrowHeader = 600;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen(this.controller, {super.key});
+  const HomeScreen(this.controller, {this.dropEvents, super.key});
 
   final AppController controller;
+  final DropEvents? dropEvents;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -29,14 +37,54 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ValueNotifier<ColumnTab> _tab = ValueNotifier(ColumnTab.devices);
   final ValueNotifier<String?> _hovered = ValueNotifier(null);
+  late final DropController _drop = DropController(
+    canSendTo: (fingerprint) =>
+        widget.controller.state?.canSendTo(fingerprint) ?? false,
+    isMine: _isMine,
+    isBlocked: () => mounted && ModalRoute.of(context)?.isCurrent == false,
+    onPortal: (fingerprint) =>
+        unawaited(widget.controller.requestPortal(fingerprint)),
+    onOutcome: (outcome) {
+      if (!mounted) return;
+      unawaited(applyDropOutcome(context, widget.controller, outcome));
+    },
+  );
+  StreamSubscription<DropEvent>? _dropSubscription;
   NodeState? _previous;
   bool _tabSet = false;
+  bool _dropHovering = false;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_syncTab);
     _syncTab();
+    _drop.addListener(_syncDropHover);
+    _dropSubscription = (widget.dropEvents ?? MethodChannelDropEvents()).events
+        .listen(_drop.handle);
+  }
+
+  bool _isMine(String fingerprint) {
+    final state = widget.controller.state;
+    if (state == null) return false;
+    for (final entry in state.entries) {
+      if (entry.fingerprint == fingerprint) return entry.mine;
+    }
+    return false;
+  }
+
+  void _syncDropHover() {
+    final hovered = _drop.dragging ? _drop.hovered : null;
+    final lit =
+        hovered != null &&
+        (widget.controller.state?.canSendTo(hovered) ?? false);
+    if (lit) {
+      _hovered.value = hovered;
+      _dropHovering = true;
+    } else if (_dropHovering) {
+      _hovered.value = null;
+      _dropHovering = false;
+    }
   }
 
   @override
@@ -50,6 +98,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    unawaited(_dropSubscription?.cancel());
+    _drop.removeListener(_syncDropHover);
+    _drop.dispose();
     widget.controller.removeListener(_syncTab);
     _tab.dispose();
     _hovered.dispose();
@@ -71,80 +122,91 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final strings = AppStringsDelegate.of(context);
-        final state = controller.state;
-        final failure = _failureMessage(strings);
-        return Scaffold(
+    return DropScope(
+      controller: _drop,
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, child) =>
+            SelectionProgressScope(state: controller.state, child: child!),
+        child: Scaffold(
           body: Column(
             children: [
-              _Header(
-                controller: controller,
-                state: failure == null ? state : null,
+              ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) {
+                  final strings = AppStringsDelegate.of(context);
+                  return _Header(
+                    controller: controller,
+                    state: _failureMessage(controller, strings) == null
+                        ? controller.state
+                        : null,
+                  );
+                },
               ),
               Expanded(
-                child: failure != null
-                    ? _MessageWithRetry(
-                        message: failure,
-                        retryLabel: strings.retryButton,
-                        onRetry: controller.retry,
-                      )
-                    : _Body(
-                        strings: strings,
-                        controller: controller,
-                        state: state!,
-                        tab: _tab,
-                        hovered: _hovered,
-                        noticeText: (notice) => _noticeText(strings, notice),
-                      ),
+                child: ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, body) {
+                    final strings = AppStringsDelegate.of(context);
+                    final failure = _failureMessage(controller, strings);
+                    if (failure == null) return body!;
+                    return _MessageWithRetry(
+                      message: failure,
+                      retryLabel: strings.retryButton,
+                      onRetry: controller.retry,
+                    );
+                  },
+                  child: _Body(
+                    controller: controller,
+                    tab: _tab,
+                    hovered: _hovered,
+                  ),
+                ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
+}
 
-  String? _failureMessage(AppStrings strings) {
-    final controller = widget.controller;
-    final state = controller.state;
-    if (state == null ||
-        controller.startFailed ||
-        state.identityStatus == IdentityStatus.failed) {
-      return strings.identityFailed;
-    }
-    final port = state.portInUse;
-    if (port != null) return strings.portInUse(port);
-    return null;
+String? _failureMessage(AppController controller, AppStrings strings) {
+  final state = controller.state;
+  if (state == null ||
+      controller.startFailed ||
+      state.identityStatus == IdentityStatus.failed) {
+    return strings.identityFailed;
   }
+  final port = state.portInUse;
+  if (port != null) return strings.portInUse(port);
+  return null;
+}
 
-  String _noticeText(AppStrings strings, Notice notice) {
-    final name = notice.deviceName ?? '';
-    return switch (notice.kind) {
-      NoticeKind.attemptDataMismatch => strings.noticeAttemptCancelled(name),
-      NoticeKind.attemptCancelled =>
-        notice.count == 1
-            ? strings.noticeAttemptPeerCancelled(name)
-            : strings.noticeAttemptsCancelled(notice.count),
-      NoticeKind.attemptLost => strings.noticeAttemptLost(name),
-      NoticeKind.replaceWithdrawn => strings.noticeReplaceWithdrawn(name),
-      NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
-      NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
-      NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,
-      NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
-      NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
-      NoticeKind.pairingFailed => strings.noticePairingFailed(name),
-      NoticeKind.pairingPaused => strings.noticePairingPaused,
-      NoticeKind.receiveFolderNotSaved => strings.noticeReceiveFolderNotSaved(
-        notice.detail ?? '',
-      ),
-      NoticeKind.peerCancelledTransfer => strings.noticePeerCancelledTransfer(
-        notice.detail ?? '',
-      ),
-    };
-  }
+String _noticeText(AppStrings strings, Notice notice) {
+  final name = notice.deviceName ?? '';
+  return switch (notice.kind) {
+    NoticeKind.attemptDataMismatch => strings.noticeAttemptCancelled(name),
+    NoticeKind.attemptCancelled =>
+      notice.count == 1
+          ? strings.noticeAttemptPeerCancelled(name)
+          : strings.noticeAttemptsCancelled(notice.count),
+    NoticeKind.attemptLost => strings.noticeAttemptLost(name),
+    NoticeKind.replaceWithdrawn => strings.noticeReplaceWithdrawn(name),
+    NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
+    NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
+    NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,
+    NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
+    NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
+    NoticeKind.pairingFailed => strings.noticePairingFailed(name),
+    NoticeKind.pairingPaused => strings.noticePairingPaused,
+    NoticeKind.receiveFolderNotSaved => strings.noticeReceiveFolderNotSaved(
+      notice.detail ?? '',
+    ),
+    NoticeKind.peerCancelledTransfer => strings.noticePeerCancelledTransfer(
+      notice.detail ?? '',
+    ),
+  };
 }
 
 class _Header extends StatelessWidget {
@@ -209,20 +271,14 @@ class _MessageWithRetry extends StatelessWidget {
 
 class _Body extends StatelessWidget {
   const _Body({
-    required this.strings,
     required this.controller,
-    required this.state,
     required this.tab,
     required this.hovered,
-    required this.noticeText,
   });
 
-  final AppStrings strings;
   final AppController controller;
-  final NodeState state;
   final ValueNotifier<ColumnTab> tab;
   final ValueNotifier<String?> hovered;
-  final String Function(Notice notice) noticeText;
 
   @override
   Widget build(BuildContext context) {
@@ -231,27 +287,58 @@ class _Body extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final column = _SideColumn(
-            strings: strings,
-            controller: controller,
-            state: state,
-            tab: tab,
-            hovered: hovered,
-            noticeText: noticeText,
+          final column = ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) {
+              final state = controller.state;
+              if (state == null) return const SizedBox.shrink();
+              return _SideColumn(
+                strings: AppStringsDelegate.of(context),
+                controller: controller,
+                state: state,
+                tab: tab,
+                hovered: hovered,
+              );
+            },
           );
-          if (!showsDiagram(width)) return column;
+          if (!showsDiagram(width)) {
+            return Stack(
+              children: [
+                Positioned.fill(child: column),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: DragPill(
+                      visible: DropScope.maybeOf(context)?.dragging ?? false,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
                 child: NbCard(
                   padding: EdgeInsets.zero,
-                  child: FlowDiagram(
-                    state: state,
-                    hovered: hovered,
-                    onSend: (fingerprint) =>
-                        startSend(context, controller, fingerprint),
-                    onShowDevices: () => tab.value = ColumnTab.devices,
+                  child: ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final state = controller.state;
+                      if (state == null) return const SizedBox.shrink();
+                      return FlowDiagram(
+                        state: state,
+                        hovered: hovered,
+                        onSendFiles: (fingerprint) =>
+                            startSendFiles(context, controller, fingerprint),
+                        onSendFolders: (fingerprint) =>
+                            startSendFolders(context, controller, fingerprint),
+                        onShowDevices: () => tab.value = ColumnTab.devices,
+                      );
+                    },
                   ),
                 ),
               ),
@@ -272,7 +359,6 @@ class _SideColumn extends StatelessWidget {
     required this.state,
     required this.tab,
     required this.hovered,
-    required this.noticeText,
   });
 
   final AppStrings strings;
@@ -280,7 +366,6 @@ class _SideColumn extends StatelessWidget {
   final NodeState state;
   final ValueNotifier<ColumnTab> tab;
   final ValueNotifier<String?> hovered;
-  final String Function(Notice notice) noticeText;
 
   List<Widget> _notices() {
     return [
@@ -299,7 +384,7 @@ class _SideColumn extends StatelessWidget {
       for (final notice in state.notices)
         NoticeCard(
           key: ValueKey('notice-${notice.id}'),
-          message: noticeText(notice),
+          message: _noticeText(strings, notice),
           actions: [
             if (notice.canRetry)
               TextButton(
@@ -331,10 +416,12 @@ class _SideColumn extends StatelessWidget {
     return ValueListenableBuilder<ColumnTab>(
       valueListenable: tab,
       builder: (context, current, _) {
-        final blocks = <Widget>[
+        final leading = <Widget>[
           if (hasIncomingCard(state))
             IncomingCards(controller: controller, state: state),
           ..._notices(),
+        ];
+        final blocks = <Widget>[
           _ColumnTabs(
             strings: strings,
             current: current,
@@ -350,6 +437,11 @@ class _SideColumn extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              for (final block in leading) ...[
+                block,
+                const SizedBox(height: 12),
+              ],
+              TrayHost(controller: controller, state: state),
               for (var i = 0; i < blocks.length; i++) ...[
                 if (i > 0) const SizedBox(height: 12),
                 blocks[i],
@@ -386,7 +478,7 @@ class _ColumnTabs extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(_trackPadding),
         child: SizedBox(
-          height: _tabHeight,
+          height: _scaledTabHeight(context),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -419,6 +511,9 @@ class _ColumnTabs extends StatelessWidget {
 }
 
 const double _tabHeight = 32;
+
+double _scaledTabHeight(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(_tabHeight);
 
 const double _trackPadding = 4;
 
@@ -484,7 +579,7 @@ class _TabZone extends StatelessWidget {
       button: true,
       selected: active,
       child: SizedBox(
-        height: _tabHeight,
+        height: _scaledTabHeight(context),
         child: Material(
           type: MaterialType.transparency,
           child: InkWell(
@@ -525,17 +620,24 @@ class _TabZone extends StatelessWidget {
                   if (badge != null) ...[
                     const SizedBox(width: 6),
                     Container(
-                      height: 18,
-                      constraints: const BoxConstraints(minWidth: 18),
+                      constraints: const BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
                       padding: const EdgeInsets.symmetric(horizontal: 5),
-                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: colors.primaryWeak,
                         borderRadius: BorderRadius.circular(9),
                       ),
-                      child: Text(
-                        badge.toString(),
-                        style: NbText.badge.copyWith(color: colors.primaryInk),
+                      child: Align(
+                        widthFactor: 1,
+                        heightFactor: 1,
+                        child: Text(
+                          badge.toString(),
+                          style: NbText.badge.copyWith(
+                            color: colors.primaryInk,
+                          ),
+                        ),
                       ),
                     ),
                   ],

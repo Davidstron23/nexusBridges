@@ -634,11 +634,11 @@ void main() {
     final unknown = 'CD' * 32;
     const session = 'no-such-session';
 
-    test('without a node, sendFile and revealLastReceived are unavailable '
+    test('without a node, sendFiles and revealLastReceived are unavailable '
         'and the rest do nothing nor throw', () async {
       final controller = controllerFor();
 
-      expect(await controller.sendFile(unknown), SendResult.unavailable);
+      expect(await controller.sendFiles(unknown), SendResult.unavailable);
       expect(await controller.revealLastReceived(), RevealResult.unavailable);
       controller.cancelSending();
       controller.cancelReceiving(session);
@@ -656,6 +656,33 @@ void main() {
       expect(controller.state, isNull);
     });
 
+    test('without a node, the queue and tray methods are unavailable and '
+        'requestPortal does nothing nor throws', () async {
+      final controller = controllerFor();
+
+      expect(await controller.sendFiles(unknown), SendResult.unavailable);
+      expect(await controller.sendFolders(unknown), SendResult.unavailable);
+      expect(
+        await controller.sendPaths(unknown, ['a']),
+        SendResult.unavailable,
+      );
+      expect(await controller.sendTray(unknown), SendResult.unavailable);
+      expect(await controller.addToTray(['a']), TrayResult.unavailable);
+      expect(
+        await controller.addToTray(['a'], totalCount: 5000),
+        TrayResult.unavailable,
+      );
+      controller.cancelQueueItem('x');
+      controller.removeQueueItem('x');
+      controller.cancelAllQueued();
+      controller.removeFromTray('x');
+      controller.clearTray();
+      await controller.requestPortal(unknown);
+
+      expect(harness.startCalls, 0);
+      expect(controller.state, isNull);
+    });
+
     test(
       'after a failed start, the transfer methods still have no node',
       () async {
@@ -664,7 +691,7 @@ void main() {
         await controller.init();
         expect(controller.startFailed, isTrue);
 
-        expect(await controller.sendFile(unknown), SendResult.unavailable);
+        expect(await controller.sendFiles(unknown), SendResult.unavailable);
         expect(await controller.revealLastReceived(), RevealResult.unavailable);
         await controller.useProposedFolder(session);
         await controller.chooseOtherFolder(session);
@@ -673,13 +700,13 @@ void main() {
       },
     );
 
-    test('with a node, sendFile of a device that is not in the list goes to '
+    test('with a node, sendFiles of a device that is not in the list goes to '
         'the node and is unavailable, without a send', () async {
       final controller = controllerFor();
       await controller.init();
 
       expect(
-        await controller.sendFile(unknown).timeout(const Duration(seconds: 5)),
+        await controller.sendFiles(unknown).timeout(const Duration(seconds: 5)),
         SendResult.unavailable,
       );
       await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -690,6 +717,48 @@ void main() {
       expect(state.transferInProgress, isFalse);
       expect(state.pickerOpen, isFalse);
     });
+
+    test('with a node, the tray methods reach it and the queue methods on '
+        'unknown ids change nothing', () async {
+      final controller = controllerFor();
+      await controller.init();
+      final file = File('${root.path}${Platform.pathSeparator}one.txt')
+        ..writeAsStringSync('x');
+      final other = File('${root.path}${Platform.pathSeparator}two.txt')
+        ..writeAsStringSync('y');
+
+      expect(await controller.addToTray([file.path]), TrayResult.added);
+      expect(await controller.addToTray([file.path]), TrayResult.nothingNew);
+      expect(await controller.addToTray([other.path]), TrayResult.added);
+      await _waitFor(controller, (state) => state.tray.length == 2);
+
+      final first = controller.state!.tray.first.id;
+      controller.removeFromTray(first);
+      await _waitFor(controller, (state) => state.tray.length == 1);
+
+      controller.cancelQueueItem('no-such-item');
+      controller.removeQueueItem('no-such-item');
+      controller.cancelAllQueued();
+      await controller.requestPortal(unknown);
+
+      controller.clearTray();
+      await _waitFor(controller, (state) => state.tray.isEmpty);
+      expect(controller.state!.queues, isNull);
+    });
+
+    test(
+      'with a node, addToTray with a count over the limit is too many',
+      () async {
+        final controller = controllerFor();
+        await controller.init();
+
+        expect(
+          await controller.addToTray(['a'], totalCount: 1001),
+          TrayResult.tooMany,
+        );
+        expect(controller.state!.tray, isEmpty);
+      },
+    );
 
     test('with a node and nothing received, revealLastReceived goes to the '
         'node and is unavailable', () async {
@@ -746,13 +815,27 @@ void main() {
       );
     });
 
-    test('after shutdown, sendFile and revealLastReceived are unavailable and '
+    test('after shutdown, sendFiles and revealLastReceived are unavailable and '
         'the rest do nothing', () async {
       final controller = controllerFor();
       await controller.init();
       await controller.shutdown();
 
-      expect(await controller.sendFile(unknown), SendResult.unavailable);
+      expect(await controller.sendFiles(unknown), SendResult.unavailable);
+      expect(await controller.sendFolders(unknown), SendResult.unavailable);
+      expect(
+        await controller.sendPaths(unknown, ['a']),
+        SendResult.unavailable,
+      );
+      expect(await controller.sendTray(unknown), SendResult.unavailable);
+      expect(await controller.addToTray(['a']), TrayResult.unavailable);
+      controller.cancelQueueItem('x');
+      controller.removeQueueItem('x');
+      controller.cancelAllQueued();
+      controller.removeFromTray('x');
+      controller.clearTray();
+      await controller.requestPortal(unknown);
+      expect(await controller.sendFiles(unknown), SendResult.unavailable);
       expect(await controller.revealLastReceived(), RevealResult.unavailable);
       controller.cancelSending();
       controller.cancelReceiving(session);

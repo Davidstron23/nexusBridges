@@ -1790,13 +1790,16 @@ void main() {
 
         final send = inside(
           find.byKey(ValueKey(other)),
-          find.text(strings.sendFileButton),
+          find.text(strings.sendEllipsis),
         );
         await tester.ensureVisible(send);
         await tester.pump();
         await tester.tap(send);
         await tester.pump();
-        expect(controller.calls, ['sendFile $other']);
+        await tester.pump(const Duration(milliseconds: 240));
+        await tester.tap(find.text(strings.sendFilesOption));
+        await tester.pump();
+        expect(controller.calls, ['sendFiles $other']);
         expect(_cards, findsOneWidget);
       });
     });

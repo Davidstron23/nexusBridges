@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/app_controller.dart';
+import 'package:nexus_bridges/src/drop/drop_events.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/network_prompt_dialog.dart';
@@ -140,14 +141,79 @@ class FakeAppController extends AppController {
     calls.add('dismissNotice $id');
   }
 
-  SendResult sendFileResult = SendResult.started;
   RevealResult revealResult = RevealResult.shown;
   Future<void> Function() shutdownResult = () async {};
 
+  SendResult sendFilesResult = SendResult.started;
+  SendResult sendFoldersResult = SendResult.started;
+  SendResult sendPathsResult = SendResult.started;
+  SendResult sendTrayResult = SendResult.started;
+  TrayResult addToTrayResult = TrayResult.added;
+  final List<List<String>> sendPathsCalls = [];
+  final List<List<String>> addToTrayCalls = [];
+  final List<int?> addToTrayTotals = [];
+
   @override
-  Future<SendResult> sendFile(String fingerprint) async {
-    calls.add('sendFile $fingerprint');
-    return sendFileResult;
+  Future<SendResult> sendFiles(String fingerprint) async {
+    calls.add('sendFiles $fingerprint');
+    return sendFilesResult;
+  }
+
+  @override
+  Future<SendResult> sendFolders(String fingerprint) async {
+    calls.add('sendFolders $fingerprint');
+    return sendFoldersResult;
+  }
+
+  @override
+  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+    calls.add('sendPaths $fingerprint ${paths.join('|')}');
+    sendPathsCalls.add(List.of(paths));
+    return sendPathsResult;
+  }
+
+  @override
+  void cancelQueueItem(String itemId) {
+    calls.add('cancelQueueItem $itemId');
+  }
+
+  @override
+  void removeQueueItem(String itemId) {
+    calls.add('removeQueueItem $itemId');
+  }
+
+  @override
+  void cancelAllQueued() {
+    calls.add('cancelAllQueued');
+  }
+
+  @override
+  Future<TrayResult> addToTray(List<String> paths, {int? totalCount}) async {
+    calls.add('addToTray ${paths.join('|')} $totalCount');
+    addToTrayCalls.add(List.of(paths));
+    addToTrayTotals.add(totalCount);
+    return addToTrayResult;
+  }
+
+  @override
+  void removeFromTray(String itemId) {
+    calls.add('removeFromTray $itemId');
+  }
+
+  @override
+  void clearTray() {
+    calls.add('clearTray');
+  }
+
+  @override
+  Future<SendResult> sendTray(String fingerprint) async {
+    calls.add('sendTray $fingerprint');
+    return sendTrayResult;
+  }
+
+  @override
+  Future<void> requestPortal(String fingerprint) async {
+    calls.add('requestPortal $fingerprint');
   }
 
   @override
@@ -215,6 +281,7 @@ Widget homeApp(
   AppController controller,
   String languageCode, {
   bool reduceMotion = false,
+  DropEvents? dropEvents,
 }) {
   return MaterialApp(
     locale: Locale(languageCode),
@@ -237,7 +304,10 @@ Widget homeApp(
         : null,
     home: NetworkPromptHost(
       controller: controller,
-      child: PairingHost(controller: controller, child: HomeScreen(controller)),
+      child: PairingHost(
+        controller: controller,
+        child: HomeScreen(controller, dropEvents: dropEvents),
+      ),
     ),
   );
 }
@@ -248,9 +318,15 @@ Future<void> pumpHome(
   String languageCode, {
   bool settle = true,
   bool reduceMotion = false,
+  DropEvents? dropEvents,
 }) async {
   await tester.pumpWidget(
-    homeApp(controller, languageCode, reduceMotion: reduceMotion),
+    homeApp(
+      controller,
+      languageCode,
+      reduceMotion: reduceMotion,
+      dropEvents: dropEvents,
+    ),
   );
   if (settle) {
     await tester.pumpAndSettle();

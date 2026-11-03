@@ -258,6 +258,64 @@ abstract final class Glyphs {
     ],
   );
 
+  static const Glyph files = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M6 2.5h4.2L12.5 5v6.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z',
+        ),
+      ),
+      GlyphPart(SvgShape('M10 2.5V5h2.5')),
+      GlyphPart(SvgShape('M3.5 5v7.5a1 1 0 0 0 1 1h5')),
+    ],
+  );
+
+  static const Glyph drop = Glyph(
+    box: 24,
+    strokeWidth: 1.6,
+    parts: [
+      GlyphPart(SvgShape('M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5')),
+      GlyphPart(SvgShape('M4 15.5v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3')),
+    ],
+  );
+
+  static const Glyph tray = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(SvgShape('M2.5 9.5h3.2l.9 1.6h2.8l.9-1.6h3.2')),
+      GlyphPart(
+        SvgShape(
+          'M2.5 9.5v2.6a1.4 1.4 0 0 0 1.4 1.4h8.2a1.4 1.4 0 0 0 1.4-1.4V9.5'
+          'L11.8 4a1.4 1.4 0 0 0-1.3-1H5.5a1.4 1.4 0 0 0-1.3 1z',
+        ),
+      ),
+      GlyphPart(SvgShape('M8 4.8v3M6.6 6.5 8 7.9l1.4-1.4')),
+    ],
+  );
+
+  static const Glyph hand = Glyph(
+    box: 16,
+    strokeWidth: 1.3,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M5.5 8V3.8a1 1 0 0 1 2 0V7.5M7.5 7V2.8a1 1 0 0 1 2 0V7'
+          'M9.5 7.2V3.8a1 1 0 0 1 2 0v5.4c0 2.8-1.8 4.8-4.4 4.8'
+          '-1.8 0-2.8-.9-3.7-2.4L2.2 9.3a1 1 0 0 1 1.6-1.2L5.5 10',
+        ),
+      ),
+    ],
+  );
+
+  static const Glyph chevronDown = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M3.5 6L8 10.5 12.5 6'))],
+  );
+
   static const Glyph more = Glyph(
     box: 16,
     strokeWidth: 1.5,

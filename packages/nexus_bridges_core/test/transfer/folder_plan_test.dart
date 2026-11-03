@@ -577,7 +577,7 @@ void main() {
   });
 
   group('RF-260 and RF-261: limits and names on disk', () {
-    test('a name that Windows would not accept travels nowhere: the plan '
+    test('E415 a name that Windows would not accept travels nowhere: the plan '
         'stops before any summary is calculated', () async {
       final root = await scratchRoot();
       write('$root\\aaa.txt', 'a' * 1000);

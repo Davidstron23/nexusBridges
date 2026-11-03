@@ -116,6 +116,7 @@ final class SendQueues {
   Completer<void>? _gapWaiter;
   Future<void> _lock = Future<void>.value();
   bool _measuring = false;
+  SendQueuesView? _previous;
 
   static SendTarget? _noTarget() => null;
 
@@ -126,6 +127,8 @@ final class SendQueues {
   String? get target => _pumpRunning ? _fingerprint : null;
 
   int get selectionId => _selectionCounter;
+
+  SendQueuesView? get previous => _pumpRunning ? _previous : null;
 
   SendQueuesView? get view {
     if (_mode != _Mode.queues) return null;
@@ -231,6 +234,7 @@ final class SendQueues {
         _kickMeasure();
         return SelectionResult.queued;
       }
+      _previous = view;
       _clearAll();
       _fingerprint = fingerprint;
       _peerName = peerName;
@@ -294,13 +298,7 @@ final class SendQueues {
 
   void cancelAll() {
     if (_mode == _Mode.none) return;
-    for (final list in [_loose, _bundles]) {
-      list.removeWhere((item) {
-        if (item.state != QueueItemState.pending) return false;
-        item.stopMeasuring();
-        return true;
-      });
-    }
+    _stopPending(TransferOutcome.cancelledHere);
     if (_current != null) _cancelCurrent();
     _emit();
   }

@@ -359,6 +359,60 @@ void main() {
       });
     }
 
+    for (final code in languageCodes) {
+      final strings = stringsFor(code);
+
+      testWidgets('in $code E554 queues between two items still ask before '
+          'closing (RF-299)', (tester) async {
+        final key = await _pumpHost(tester, languageCode: code);
+        final controller = FakeAppController(
+          state: NodeState(
+            transferInProgress: true,
+            queues: SendQueuesView(
+              selectionId: 1,
+              peerFingerprint: senderFingerprint,
+              peerName: senderName,
+              loose: const [
+                QueueItemView(
+                  id: 'l1',
+                  name: 'a.pdf',
+                  isFolder: false,
+                  isArchive: false,
+                  state: QueueItemState.done,
+                  outcome: TransferOutcome.saved,
+                ),
+                QueueItemView(
+                  id: 'l2',
+                  name: 'b.pdf',
+                  isFolder: false,
+                  isArchive: false,
+                  state: QueueItemState.pending,
+                ),
+              ],
+              bundles: const [],
+              finished: false,
+              delivered: 1,
+              total: 2,
+              completedBytes: 10,
+              pendingKnownBytes: 10,
+              currentProbeSize: null,
+            ),
+          ),
+        );
+
+        final request = _exit(controller, key);
+        await tester.pumpAndSettle();
+
+        expect(find.text(strings.closeDuringTransferTitle), findsOneWidget);
+        expect(controller.calls, isEmpty);
+
+        await _tapAndSettle(tester, strings.closeAndCancelButton);
+        expect(request.result, AppExitResponse.exit);
+        expect(controller.calls, ['shutdown']);
+        await request.done;
+      });
+    }
+
     testWidgets('closing the dialog by tapping outside counts as keep open', (
       tester,
     ) async {

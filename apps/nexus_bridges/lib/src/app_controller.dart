@@ -121,11 +121,57 @@ class AppController extends ChangeNotifier {
     return _node?.setMine(fingerprint, mine: mine) ?? Future<void>.value();
   }
 
-  Future<SendResult> sendFile(String fingerprint) async {
+  Future<SendResult> sendFiles(String fingerprint) async {
     final node = _node;
     if (node == null) return SendResult.unavailable;
     return node.sendFiles(fingerprint);
   }
+
+  Future<SendResult> sendFolders(String fingerprint) async {
+    final node = _node;
+    if (node == null) return SendResult.unavailable;
+    return node.sendFolders(fingerprint);
+  }
+
+  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+    final node = _node;
+    if (node == null) return SendResult.unavailable;
+    return node.sendPaths(fingerprint, paths);
+  }
+
+  void cancelQueueItem(String itemId) {
+    _node?.cancelQueueItem(itemId);
+  }
+
+  void removeQueueItem(String itemId) {
+    _node?.removeQueueItem(itemId);
+  }
+
+  void cancelAllQueued() {
+    _node?.cancelAllQueued();
+  }
+
+  Future<TrayResult> addToTray(List<String> paths, {int? totalCount}) async {
+    final node = _node;
+    if (node == null) return TrayResult.unavailable;
+    return node.addToTray(paths, totalCount: totalCount);
+  }
+
+  void removeFromTray(String itemId) {
+    _node?.removeFromTray(itemId);
+  }
+
+  void clearTray() {
+    _node?.clearTray();
+  }
+
+  Future<SendResult> sendTray(String fingerprint) async {
+    final node = _node;
+    if (node == null) return SendResult.unavailable;
+    return node.sendTray(fingerprint);
+  }
+
+  Future<void> requestPortal(String fingerprint) async {}
 
   void cancelSending() {
     _node?.cancelSending();

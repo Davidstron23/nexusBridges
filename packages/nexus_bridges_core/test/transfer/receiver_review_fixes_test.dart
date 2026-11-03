@@ -464,14 +464,14 @@ void main() {
 
   group('B-3: direction marks stay valid and are saved, but not displayed', () {
     const hebrew = 'שלום';
-    const marked = '$hebrew‏';
+    const marked = '$hebrew\u200F';
 
     test('a folder and a file named with RLM are saved with their exact '
         'name and shown without the mark', () async {
       final s = await stack();
       final job = folderJob([
         ('$marked.txt', smallFile),
-        ('a‎b؜', null),
+        ('a\u200Eb\u061C', null),
       ], name: marked);
       final permit = await s.acceptedPermit(laptop, job);
       expect(s.incoming?.fileName, hebrew);
@@ -488,7 +488,10 @@ void main() {
         File('${s.receiveDir}\\$marked\\$marked.txt').readAsBytesSync(),
         smallFile,
       );
-      expect(Directory('${s.receiveDir}\\$marked\\a‎b؜').existsSync(), isTrue);
+      expect(
+        Directory('${s.receiveDir}\\$marked\\a\u200Eb\u061C').existsSync(),
+        isTrue,
+      );
       expect(s.coordinator.lastReceived?.fileName, hebrew);
     });
 
@@ -497,8 +500,8 @@ void main() {
       final s = await stack();
       final job = folderJob([
         ('$marked.txt', smallFile),
-        ('a‎b', null),
-        ('c؜d.txt', smallFile),
+        ('a\u200Eb', null),
+        ('c\u061Cd.txt', smallFile),
       ]);
       final permit = await s.askManifest(portatil, job.declared);
       final reply = await s.sendManifest(portatil, job, permit);
