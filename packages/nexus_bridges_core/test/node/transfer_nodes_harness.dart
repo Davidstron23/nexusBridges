@@ -76,9 +76,15 @@ final class NodePicker implements FilePicker {
     return nextFile;
   }
 
+  Completer<void>? folderGate;
+  final List<String?> folderStartIns = [];
+
   @override
   Future<String?> pickFolder({String? startIn}) async {
     folderCalls++;
+    folderStartIns.add(startIn);
+    final gate = folderGate;
+    if (gate != null) await gate.future;
     return nextFolder;
   }
 
@@ -188,6 +194,8 @@ final class TransferNode {
   Duration elapsed = Duration.zero;
   Duration transferPollHold = const Duration(milliseconds: 200);
   int prefixLength = 30;
+  List<ActiveInterface> Function(List<InterfaceState> states, String loopback)?
+  activeOfOverride;
   int channelPort = 0;
   NexusNode? _node;
   Future<void>? _stopped;
@@ -324,16 +332,18 @@ final class TransferNode {
         monotonic: monotonic,
         presentInterval: const Duration(hours: 1),
         log: logs.add,
-        activeOf: (states) => [
-          for (final state in states)
-            if (state.status == InterfaceStatus.active)
-              ActiveInterface(
-                id: '${state.adapter.id}#${address.address}',
-                adapterId: state.adapter.id,
-                friendlyName: loopback,
-                subnet: Ipv4Subnet(address, prefixLength),
-              ),
-        ],
+        activeOf: (states) =>
+            activeOfOverride?.call(states, loopback) ??
+            [
+              for (final state in states)
+                if (state.status == InterfaceStatus.active)
+                  ActiveInterface(
+                    id: '${state.adapter.id}#${address.address}',
+                    adapterId: state.adapter.id,
+                    friendlyName: loopback,
+                    subnet: Ipv4Subnet(address, prefixLength),
+                  ),
+            ],
         pollInterval: pollInterval,
         channel: channel,
         pairingTickInterval: const Duration(milliseconds: 50),

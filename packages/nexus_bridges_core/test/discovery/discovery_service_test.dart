@@ -2468,4 +2468,150 @@ void main() {
       expect(peer.registrations, hasLength(1));
     });
   });
+
+  group('E840: leaving one interface cuts only its part of a rescan (RF-534, '
+      'S5) [SEG]', () {
+    test('with two interfaces and many slow hosts, leaving one mid-scan '
+        'probes nothing more through it, cuts its probe in flight and the '
+        'search goes on and finds the device of the other', () async {
+      final leaving = [for (var n = 20; n < 70; n++) n];
+      final staying = [for (var n = 70; n < 80; n++) n];
+      final farm = await _Farm.start([
+        _Endpoint.held(12, dave),
+        for (final n in leaving) _Endpoint.silent(n),
+        for (final n in staying) _Endpoint.silent(n),
+        _Endpoint.honest(80, bob),
+      ]);
+      final channel = await _Channel.open([first, second]);
+      final asked = <String>[];
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: farm.port,
+          hostsOf: (iface) {
+            asked.add(iface.id);
+            return iface.id == second.id
+                ? [_host(12), for (final n in leaving) _host(n)]
+                : [for (final n in staying) _host(n), _host(80)];
+          },
+        ),
+      );
+      await s.service.syncInterfaces([second, first]);
+
+      final scan = s.service.rescan();
+      await farm.requestAt(12);
+      final probedBefore =
+          farm.totalAt(12) + leaving.fold(0, (sum, n) => sum + farm.totalAt(n));
+      expect(probedBefore, lessThan(leaving.length + 1));
+
+      await s.service.syncInterfaces([first]);
+      await (farm.linkTo(12).then((l) => l.closed.future)).timeout(_oneSecond);
+      await scan.timeout(scaled(const Duration(seconds: 10)));
+      farm.endpointAt(12).release();
+      await _quiet(const Duration(milliseconds: 500));
+
+      final probedAfter =
+          farm.totalAt(12) + leaving.fold(0, (sum, n) => sum + farm.totalAt(n));
+      expect(probedAfter, probedBefore, reason: 'no new probe through it');
+      expect(farm.openIn([12, ...leaving]), 0);
+      expect(s.lists(dave.fingerprint), isFalse);
+      expect(s.lists(bob.fingerprint), isTrue);
+      expect(s.find(bob.fingerprint)!.interfaceId, first.id);
+      expect(farm.totalAt(80), 1);
+      expect(asked.toSet(), {first.id, second.id});
+    });
+
+    test('control: stopping the whole service still ends the scan at once '
+        'and finds nothing', () async {
+      final farm = await _Farm.start([
+        _Endpoint.held(12, dave),
+        for (var n = 20; n < 40; n++) _Endpoint.silent(n),
+        _Endpoint.honest(80, bob),
+      ]);
+      final channel = await _Channel.open([first, second]);
+      final s = await _Subject.create(
+        channel,
+        identity: self,
+        scanner: (verifier) => SubnetScanner(
+          verifier: verifier,
+          port: farm.port,
+          hostsOf: (iface) => iface.id == second.id
+              ? [_host(12), for (var n = 20; n < 40; n++) _host(n)]
+              : [_host(80)],
+        ),
+      );
+      await s.service.syncInterfaces([second, first]);
+
+      final scan = s.service.rescan();
+      await farm.requestAt(12);
+      await s.service.stop(sayGoodbye: false);
+
+      await scan.timeout(_oneSecond);
+      await farm.allClosed.timeout(_oneSecond);
+      farm.endpointAt(12).release();
+      expect(s.lists(dave.fingerprint), isFalse);
+    });
+  });
+
+  group('sayGoodbye (S5, RF-534)', () {
+    test('one bye goes out through each named interface that is still '
+        'active, carrying selfInfo; an unknown id sends nothing', () async {
+      final channel = await _Channel.open([first, second]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first, second]);
+      await _quiet();
+      final before = channel.received.length;
+
+      s.service.sayGoodbye({second.id, 'unknown#127.0.0.9'});
+      await _until(
+        () => channel
+            .of(self.fingerprint, kind: AnnouncementKind.bye, skip: before)
+            .isNotEmpty,
+      );
+      await _quiet();
+
+      final byes = channel.of(
+        self.fingerprint,
+        kind: AnnouncementKind.bye,
+        skip: before,
+      );
+      expect(byes, hasLength(1));
+      expect(byes.single.$1.info.toJson(), s.selfInfo().toJson());
+
+      final again = channel.received.length;
+      s.service.sayGoodbye({first.id, second.id});
+      await _until(
+        () =>
+            channel
+                .of(self.fingerprint, kind: AnnouncementKind.bye, skip: again)
+                .length >=
+            2,
+      );
+      await _quiet();
+      expect(
+        channel.of(self.fingerprint, kind: AnnouncementKind.bye, skip: again),
+        hasLength(2),
+      );
+      expect(s.service.current, isEmpty);
+    });
+
+    test('after stop it sends nothing', () async {
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self);
+      await s.service.syncInterfaces([first]);
+      await s.service.stop(sayGoodbye: false);
+      await _quiet();
+      final before = channel.received.length;
+
+      s.service.sayGoodbye({first.id});
+      await _quiet();
+
+      expect(
+        channel.of(self.fingerprint, kind: AnnouncementKind.bye, skip: before),
+        isEmpty,
+      );
+    });
+  });
 }
