@@ -1637,25 +1637,28 @@ final class NexusNode {
     final wanted = {for (final iface in active) iface.id};
     final before = {for (final iface in _listening) iface.id};
     _notifyInterfaces(wanted);
-    await server.syncInterfaces(active);
-    final open = server.openInterfaceIds;
-    final listening = [
-      for (final iface in active)
-        if (open.contains(iface.id)) iface,
-    ];
-    _listening = listening;
-    _discoveringSince = listening.isEmpty
-        ? null
-        : (_discoveringSince ?? _now());
-    final farewell = _farewell.intersection(before).difference({
-      for (final iface in listening) iface.id,
-    });
-    _farewell = const {};
-    if (farewell.isNotEmpty) discovery.sayGoodbye(farewell);
-    await channel.syncInterfaces(listening);
-    await discovery.syncInterfaces(listening);
-    final bound = {for (final iface in listening) iface.id};
-    if (bound.length != wanted.length) _notifyInterfaces(bound);
+    try {
+      await server.syncInterfaces(active);
+    } finally {
+      final open = server.openInterfaceIds;
+      final listening = [
+        for (final iface in active)
+          if (open.contains(iface.id)) iface,
+      ];
+      _listening = listening;
+      _discoveringSince = listening.isEmpty
+          ? null
+          : (_discoveringSince ?? _now());
+      final farewell = _farewell.intersection(before).difference({
+        for (final iface in listening) iface.id,
+      });
+      _farewell = const {};
+      if (farewell.isNotEmpty) discovery.sayGoodbye(farewell);
+      await channel.syncInterfaces(listening);
+      await discovery.syncInterfaces(listening);
+      final bound = {for (final iface in listening) iface.id};
+      if (bound.length != wanted.length) _notifyInterfaces(bound);
+    }
   }
 
   void _notifyInterfaces(Set<String> ids) {

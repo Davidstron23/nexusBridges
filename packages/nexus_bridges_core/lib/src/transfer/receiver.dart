@@ -970,7 +970,15 @@ final class TransferReceiver {
   }
 
   void _discardCreatedAt(String path, bool createdNow) {
-    if (createdNow) _track(() => _removeIfEmpty(path));
+    if (!createdNow || _isInUse(path)) return;
+    _track(() => _removeIfEmpty(path));
+  }
+
+  bool _isInUse(String path) {
+    final remembered = _rememberedNow;
+    if (remembered != null && samePath(path, remembered.path)) return true;
+    final target = _active?.target;
+    return target != null && samePath(path, target.path);
   }
 
   void useFolderAnyway(String sessionId) {

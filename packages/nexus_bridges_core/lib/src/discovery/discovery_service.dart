@@ -296,14 +296,14 @@ final class DiscoveryService {
     final now = _now();
     final last = _goodbyeChecks[fingerprint];
     if (last != null && !_goodbyeExpired(now, last)) return;
-    _goodbyeChecks[fingerprint] = now;
-    _gate.submit(
+    final queued = _gate.submit(
       fingerprint: fingerprint,
       ip: address.address,
       interfaceId: interfaceId,
       port: info.port,
       job: () => _verifyGoodbye(info, address, interfaceId, abort),
     );
+    if (queued) _goodbyeChecks[fingerprint] = now;
   }
 
   Future<void> _verifyGoodbye(

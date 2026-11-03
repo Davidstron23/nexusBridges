@@ -354,6 +354,35 @@ void main() {
       );
     });
 
+    test('B-4: cancel does not remove the pending folder when the folder '
+        'question made it the remembered one in the meantime', () async {
+      final f = await notRemembered(configure: (p) => p.noMarkSupport = true);
+      final created = '${f.s.base}\\compartida';
+      final ask = await f.change(created) as FolderChangeNeedsConfirmation;
+      expect(Directory(created).existsSync(), isTrue);
+
+      await openQuestion(f);
+      final choosing = f.coordinator.chooseOtherFolder(f.s.sid);
+      await eventually(() => f.picker.open);
+      f.picker.answer(created);
+      await choosing;
+      await eventually(
+        () => f.s.incoming?.folder?.cautionPath != null,
+        reason: 'the question asks to use the folder anyway',
+      );
+      f.coordinator.useFolderAnyway(f.s.sid);
+      await eventually(
+        () => f.coordinator.receiveFolderPath == created,
+        reason: 'the folder of the question is remembered',
+      );
+
+      f.coordinator.cancelReceiveFolderChange(ask.changeId);
+      await settle(const Duration(milliseconds: 300));
+
+      expect(Directory(created).existsSync(), isTrue);
+      expect(f.coordinator.receiveFolderPath, created);
+    });
+
     test('cancel never removes a folder that existed before', () async {
       final f = await remembered(configure: (p) => p.noMarkSupport = true);
       final existing = f.folder('existente');

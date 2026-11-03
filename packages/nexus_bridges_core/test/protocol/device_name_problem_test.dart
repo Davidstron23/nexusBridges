@@ -81,6 +81,32 @@ void main() {
       expect(deviceNameProblem('PC $_grin'), isNull);
     });
 
+    for (final MapEntry(key: label, value: character) in {
+      'a lone high surrogate U+D800': '\u{D800}',
+      'a lone low surrogate U+DC00': '\u{DC00}',
+      'U+FFF9 (interlinear annotation anchor)': '\u{FFF9}',
+      'U+FFFB (interlinear annotation terminator)': '\u{FFFB}',
+      'U+0600 (Arabic number sign)': '\u{600}',
+      'U+110BD (Kaithi number sign)': '\u{110BD}',
+    }.entries) {
+      test('B-1: a name with $label has invalid characters', () {
+        expect(
+          deviceNameProblem('Desk${character}PC'),
+          DeviceNameProblem.invalidCharacters,
+        );
+        expect(
+          deviceNameProblem('Desk PC$character'),
+          DeviceNameProblem.invalidCharacters,
+        );
+      });
+    }
+
+    test('B-1: a well formed surrogate pair still passes and the input '
+        'sanitizer is untouched', () {
+      expect(deviceNameProblem('Desk${_grin}PC'), isNull);
+      expect(sanitizeDisplayName('Desk\u{FFF9}PC'), 'Desk\u{FFF9}PC');
+    });
+
     test('ordinary names pass', () {
       for (final name in [
         'PC David',

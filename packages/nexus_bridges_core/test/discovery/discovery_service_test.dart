@@ -1145,6 +1145,50 @@ void main() {
       expect(s.find(bob.fingerprint)!.info.toJson(), peer.info.toJson());
     });
 
+    test('B-5: a bye that arrives while a name check of the same device is '
+        'in flight is not written down as checked, so the next bye is '
+        'verified and removes the device', () async {
+      final clock = _Clock();
+      final peer = await _Peer.start(bob, address: '127.0.0.2', name: 'Laptop');
+      final channel = await _Channel.open([first]);
+      final s = await _Subject.create(channel, identity: self, clock: clock);
+      await s.paired.replaceAll([pairedDeviceOf(bob)]);
+      await s.service.syncInterfaces([first]);
+      await channel.deliver(_host(2), _hello(peer.info));
+      await _until(() => s.lists(bob.fingerprint));
+      final info = peer.info;
+      await peer.server.close();
+      final holding = await ServerSocket.bind(_host(2), info.port);
+      addTearDown(holding.close);
+      final held = <Socket>[];
+      var accepted = 0;
+      holding.listen((socket) {
+        accepted++;
+        held.add(socket);
+      });
+
+      await channel.deliver(
+        _host(2),
+        _hello(_claim(bob.fingerprint, info.port, name: 'Renamed')),
+      );
+      await _until(() => accepted == 1);
+      await channel.deliver(_host(2), _bye(info));
+      await _quiet();
+      expect(accepted, 1);
+      expect(s.lists(bob.fingerprint), isTrue);
+
+      for (final socket in held) {
+        socket.destroy();
+      }
+      await _quiet();
+      await channel.deliver(_host(2), _bye(info));
+      await _until(() => accepted == 2, limit: _oneSecond);
+      for (final socket in held) {
+        socket.destroy();
+      }
+      await _until(() => !s.lists(bob.fingerprint), limit: _oneSecond);
+    });
+
     test('the bye of a device that is not paired removes it at once without '
         'a check, as before', () async {
       final peer = await _Peer.start(carol, address: '127.0.0.2');

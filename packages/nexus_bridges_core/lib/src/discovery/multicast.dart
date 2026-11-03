@@ -237,10 +237,10 @@ final class MulticastChannel {
   }
 
   void _handle(Datagram datagram) {
-    final announcement = Announcement.tryDecode(datagram.data);
-    if (announcement == null) return;
     for (final via in _active) {
       if (originAllowed(datagram.address, via.subnet)) {
+        final announcement = Announcement.tryDecode(datagram.data);
+        if (announcement == null) return;
         _controller.add((announcement, datagram.address, via));
         return;
       }

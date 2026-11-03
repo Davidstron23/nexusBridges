@@ -179,6 +179,14 @@ final RegExp _invisibleCharacters = RegExp(
   unicode: true,
 );
 final RegExp _combiningMark = RegExp(r'^\p{M}$', unicode: true);
+final RegExp _formatCharacter = RegExp(r'\p{Cf}', unicode: true);
+
+bool _hasUnsafeNameCharacter(String name) {
+  for (final rune in name.runes) {
+    if (rune >= 0xD800 && rune <= 0xDFFF) return true;
+  }
+  return _formatCharacter.hasMatch(name);
+}
 
 const Set<String> _deviceInfoKeys = {
   'name',
@@ -290,7 +298,8 @@ DeviceNameProblem? deviceNameProblem(String trimmed) {
   if (trimmed.runes.length > Limits.maxNameLength) {
     return DeviceNameProblem.tooLong;
   }
-  if (sanitizeDisplayName(trimmed) != trimmed) {
+  if (sanitizeDisplayName(trimmed) != trimmed ||
+      _hasUnsafeNameCharacter(trimmed)) {
     return DeviceNameProblem.invalidCharacters;
   }
   return null;
