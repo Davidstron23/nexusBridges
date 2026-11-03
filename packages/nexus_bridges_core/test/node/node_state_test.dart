@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:nexus_bridges_core/src/discovery/discovery.dart';
 import 'package:nexus_bridges_core/src/node/node_state.dart';
+import 'package:nexus_bridges_core/src/outbox/outbox.dart'
+    show QueueItemView, QueueItemState, SendQueuesView;
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:test/test.dart';
 
@@ -149,6 +151,146 @@ void main() {
 
       expect(saved.decisionNotSaved, isFalse);
       expect(notSaved.decisionNotSaved, isTrue);
+    });
+  });
+
+  group('E527, RF-249, RF-290: canSendTo', () {
+    const b = 'BBBBBBBB';
+    const c = 'CCCCCCCC';
+
+    DeviceEntry entry(
+      String fingerprint, {
+      bool visible = true,
+      bool paired = true,
+      bool mismatch = false,
+    }) => DeviceEntry(
+      fingerprint: fingerprint,
+      displayName: 'PC',
+      deviceType: DeviceType.desktop,
+      visible: visible,
+      paired: paired,
+      mine: true,
+      ignored: false,
+      mismatch: mismatch,
+      possiblyReplaces: null,
+    );
+
+    bool canSend({
+      bool visible = true,
+      bool paired = true,
+      bool mismatch = false,
+      bool pickerOpen = false,
+      String? sendingTo,
+      String to = b,
+    }) => NodeState(
+      entries: [
+        entry(b, visible: visible, paired: paired, mismatch: mismatch),
+        entry(c),
+      ],
+      pickerOpen: pickerOpen,
+      sendingTo: sendingTo,
+    ).canSendTo(to);
+
+    test('every combination of visible, paired, mismatch, picker and the '
+        'current target', () {
+      for (final visible in [true, false]) {
+        for (final paired in [true, false]) {
+          for (final mismatch in [true, false]) {
+            for (final pickerOpen in [true, false]) {
+              for (final sendingTo in <String?>[null, b, c]) {
+                final expected =
+                    visible &&
+                    paired &&
+                    !mismatch &&
+                    !pickerOpen &&
+                    (sendingTo == null || sendingTo == b);
+                expect(
+                  canSend(
+                    visible: visible,
+                    paired: paired,
+                    mismatch: mismatch,
+                    pickerOpen: pickerOpen,
+                    sendingTo: sendingTo,
+                  ),
+                  expected,
+                  reason:
+                      'visible $visible, paired $paired, mismatch $mismatch, '
+                      'picker $pickerOpen, sendingTo $sendingTo',
+                );
+              }
+            }
+          }
+        }
+      }
+    });
+
+    test('a device with queues running to it can still be sent to and the '
+        'others cannot', () {
+      expect(canSend(sendingTo: b), isTrue);
+      expect(canSend(sendingTo: b, to: c), isFalse);
+      expect(canSend(sendingTo: c, to: c), isTrue);
+    });
+
+    test('a fingerprint without a row is never available', () {
+      expect(canSend(to: 'FFFFFFFF'), isFalse);
+      expect(const NodeState().canSendTo(b), isFalse);
+    });
+
+    test('the default state has no queues, an empty tray, no target and no '
+        'selection progress', () {
+      const state = NodeState();
+
+      expect(state.queues, isNull);
+      expect(state.tray, isEmpty);
+      expect(state.sendingTo, isNull);
+      expect(state.selectionProgress, isNull);
+    });
+  });
+
+  group('E577: SelectionProgress and the queue views compare by value', () {
+    SelectionProgress progress({int done = 5, bool finished = false}) =>
+        SelectionProgress(
+          selectionId: 1,
+          doneBytes: done,
+          totalBytes: 10,
+          currentName: 'a.txt',
+          currentIsFolder: false,
+          finished: finished,
+        );
+
+    SendQueuesView view(QueueItemState state) => SendQueuesView(
+      selectionId: 1,
+      peerFingerprint: 'BBBBBBBB',
+      peerName: 'PC',
+      loose: [
+        QueueItemView(
+          id: 'q1',
+          name: 'a.txt',
+          isFolder: false,
+          isArchive: false,
+          state: state,
+        ),
+      ],
+      bundles: const [],
+      finished: false,
+      delivered: 0,
+      total: 1,
+      completedBytes: 0,
+      pendingKnownBytes: 5,
+      currentProbeSize: null,
+    );
+
+    test('equal fields are equal and share a hash; a changed field is not '
+        'equal', () {
+      expect(progress(), progress());
+      expect(progress().hashCode, progress().hashCode);
+      expect(progress(), isNot(progress(done: 6)));
+      expect(progress(), isNot(progress(finished: true)));
+      expect(view(QueueItemState.pending), view(QueueItemState.pending));
+      expect(
+        view(QueueItemState.pending),
+        isNot(view(QueueItemState.inProgress)),
+      );
     });
   });
 }

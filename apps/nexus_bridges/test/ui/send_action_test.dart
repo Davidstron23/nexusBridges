@@ -21,26 +21,25 @@ const Duration _popoverIn = Duration(milliseconds: 240);
 class _PendingController extends FakeAppController {
   _PendingController() : super(state: const NodeState());
 
-  final Completer<SendFileResult> pending = Completer<SendFileResult>();
+  final Completer<SendResult> pending = Completer<SendResult>();
 
   @override
-  Future<SendFileResult> sendFile(String fingerprint) {
+  Future<SendResult> sendFile(String fingerprint) {
     calls.add('sendFile $fingerprint');
     return pending.future;
   }
 }
 
-String? _messageFor(AppStrings strings, SendFileResult result) =>
-    switch (result) {
-      SendFileResult.alreadySending => strings.alreadySending,
-      SendFileResult.unavailable => strings.sendUnavailable,
-      SendFileResult.started || SendFileResult.nothingChosen => null,
-    };
+String? _messageFor(AppStrings strings, SendResult result) => switch (result) {
+  SendResult.otherTargetBusy => strings.alreadySending,
+  SendResult.unavailable || SendResult.tooMany => strings.sendUnavailable,
+  SendResult.started || SendResult.queued || SendResult.nothingChosen => null,
+};
 
 Future<FakeAppController> _pumpTwoPaired(
   WidgetTester tester,
   String code,
-  SendFileResult result,
+  SendResult result,
 ) async {
   tester.view.physicalSize = const Size(800, 600);
   tester.view.devicePixelRatio = 1;
@@ -117,7 +116,7 @@ void main() {
     final strings = stringsFor(code);
 
     group('[$code] E137 Send file from a row (RF-132, RF-133, RF-141)', () {
-      for (final result in SendFileResult.values) {
+      for (final result in SendResult.values) {
         final message = _messageFor(strings, result);
         testWidgets('${result.name} calls sendFile for that device and '
             '${message == null ? 'shows no SnackBar' : 'shows its SnackBar'}', (
@@ -136,7 +135,7 @@ void main() {
     });
 
     group('[$code] E137 and E268 Send file from the diagram popover', () {
-      for (final result in SendFileResult.values) {
+      for (final result in SendResult.values) {
         final message = _messageFor(strings, result);
         testWidgets(
           '${result.name} closes the popover, calls sendFile and '
@@ -176,15 +175,15 @@ void main() {
         expect(controller.calls, ['sendFile $_fp']);
         expect(find.byType(SnackBar), findsNothing);
 
-        controller.pending.complete(SendFileResult.alreadySending);
+        controller.pending.complete(SendResult.otherTargetBusy);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 750));
         _expectSnackBar(strings, strings.alreadySending);
       });
 
       for (final result in [
-        SendFileResult.alreadySending,
-        SendFileResult.unavailable,
+        SendResult.otherTargetBusy,
+        SendResult.unavailable,
       ]) {
         testWidgets('${result.name} after the caller is gone shows nothing and '
             'does not throw', (tester) async {

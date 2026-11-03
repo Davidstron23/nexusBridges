@@ -149,7 +149,7 @@ void main() {
         'informe.bin',
         patternBytes(256 * kib, 1),
       );
-      expect(await c.sendTo(b, path), SendFileResult.started);
+      expect(await c.sendTo(b, path), SendResult.started);
       final sent = await c.sentResult();
       expect(sent.outcome, TransferOutcome.noContact);
       expect(sent.peerFingerprint, b.fingerprint);
@@ -202,7 +202,7 @@ void main() {
       final inspected = b.platform.calls.length;
 
       final path = await c.sourceFile('informe.bin', patternBytes(4 * kib, 3));
-      expect(await c.sendTo(b, path), SendFileResult.unavailable);
+      expect(await c.sendTo(b, path), SendResult.unavailable);
       expect(c.picker.fileCalls, 0);
       await Future<void>.delayed(const Duration(milliseconds: 300));
       expect(c.state.lastSent, isNull);
@@ -219,7 +219,7 @@ void main() {
       );
       final path = await a.sourceFile('grande.bin', patternBytes(24 * mib, 4));
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       await b.until(
         (s) =>
             s.incoming?.stage == IncomingStage.receiving &&
@@ -590,7 +590,7 @@ void main() {
       final content = patternBytes(512 * kib, 15);
       final path = await a.sourceFile('informe.bin', content);
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       final session = await waitingSession(b);
       await a.until((s) => s.outgoing?.phase == OutgoingPhase.waiting);
       final changed = Uint8List.fromList(content)..[0] ^= 0x01;
@@ -608,7 +608,7 @@ void main() {
       final content = patternBytes(256 * kib, 16);
       final path = await a.sourceFile('informe.bin', content);
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       final session = await waitingSession(b);
       await File(
         path,
@@ -656,7 +656,7 @@ void main() {
       );
       final path = await a.sourceFile('informe.bin', content);
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       expect((await a.sentResult()).outcome, TransferOutcome.noSpace);
       final received = await b.receivedResult();
       expect(received.outcome, TransferOutcome.noSpace);
@@ -677,7 +677,7 @@ void main() {
         patternBytes(64 * kib, 20),
       );
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       final asked = await b.until(
         (s) => s.incoming?.stage == IncomingStage.folderQuestion,
         reason: 'folder question',
@@ -700,7 +700,7 @@ void main() {
       final content = patternBytes(128 * kib, 21);
       final path = await a.sourceFile('factura.pdf', content);
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       expect((await a.sentResult()).outcome, TransferOutcome.saved);
       final received = await b.receivedResult();
       expect(received.outcome, TransferOutcome.saved);
@@ -717,7 +717,7 @@ void main() {
       final content = patternBytes(128 * kib, 22);
       final path = await a.sourceFile('factura.pdf', content);
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       expect((await a.sentResult()).outcome, TransferOutcome.savedWithoutMark);
       expect(
         (await b.receivedResult()).outcome,
@@ -813,7 +813,7 @@ void main() {
         patternBytes(kib, 24),
       );
 
-      expect(await a.sendTo(b, path), SendFileResult.started);
+      expect(await a.sendTo(b, path), SendResult.started);
       final sent = await a.sentResult();
       expect(sent.outcome, TransferOutcome.invalidName);
       expect(sent.fileName, isNot(contains(rlo)));

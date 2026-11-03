@@ -190,6 +190,7 @@ FolderMeasure measureFolders({
   required bool Function() isCancelled,
   int maxEntries = Limits.folderMeasureMaxEntries,
   Duration cap = Limits.folderMeasureCap,
+  bool Function(String name)? skipFolder,
 }) {
   final pending = List<String>.of(roots.reversed);
   var bytes = 0;
@@ -210,6 +211,9 @@ FolderMeasure measureFolders({
     for (final entry in listed) {
       final tag = entry.reparseTag;
       if (tag != null && isLinkTag(tag)) continue;
+      if (entry.isDirectory && skipFolder != null && skipFolder(entry.name)) {
+        continue;
+      }
       entries++;
       if (entries > maxEntries) {
         return FolderMeasure(bytes: bytes, partial: true);

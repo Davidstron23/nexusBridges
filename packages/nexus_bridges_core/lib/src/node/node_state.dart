@@ -1,4 +1,5 @@
 import '../discovery/discovery.dart';
+import '../outbox/outbox.dart' show SendQueuesView, TrayItemView;
 import '../pairing_flow/pairing_flow.dart' show PairingView;
 import '../protocol/protocol.dart' show DeviceType;
 import '../transfer/transfer.dart'
@@ -13,7 +14,16 @@ enum PairRequestResult {
   unavailable,
 }
 
-enum SendFileResult { started, nothingChosen, alreadySending, unavailable }
+enum SendResult {
+  started,
+  queued,
+  nothingChosen,
+  otherTargetBusy,
+  tooMany,
+  unavailable,
+}
+
+enum TrayResult { added, nothingNew, tooMany, unavailable }
 
 enum NoticeKind {
   attemptCancelled,
@@ -189,6 +199,44 @@ final class MineQuestion extends PairingQuestion {
   int get hashCode => Object.hash(MineQuestion, fingerprint, deviceName);
 }
 
+final class SelectionProgress {
+  const SelectionProgress({
+    required this.selectionId,
+    required this.doneBytes,
+    required this.totalBytes,
+    required this.currentName,
+    required this.currentIsFolder,
+    required this.finished,
+  });
+
+  final int selectionId;
+  final int doneBytes;
+  final int totalBytes;
+  final String? currentName;
+  final bool currentIsFolder;
+  final bool finished;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SelectionProgress &&
+      other.selectionId == selectionId &&
+      other.doneBytes == doneBytes &&
+      other.totalBytes == totalBytes &&
+      other.currentName == currentName &&
+      other.currentIsFolder == currentIsFolder &&
+      other.finished == finished;
+
+  @override
+  int get hashCode => Object.hash(
+    selectionId,
+    doneBytes,
+    totalBytes,
+    currentName,
+    currentIsFolder,
+    finished,
+  );
+}
+
 final class NodeState {
   const NodeState({
     this.identityStatus = IdentityStatus.ok,
@@ -218,6 +266,10 @@ final class NodeState {
     this.transferInProgress = false,
     this.pickerOpen = false,
     this.incomingNamesake,
+    this.queues,
+    this.tray = const [],
+    this.sendingTo,
+    this.selectionProgress,
   });
 
   final IdentityStatus identityStatus;
@@ -247,4 +299,18 @@ final class NodeState {
   final bool transferInProgress;
   final bool pickerOpen;
   final String? incomingNamesake;
+  final SendQueuesView? queues;
+  final List<TrayItemView> tray;
+  final String? sendingTo;
+  final SelectionProgress? selectionProgress;
+
+  bool canSendTo(String fingerprint) {
+    for (final entry in entries) {
+      if (entry.fingerprint != fingerprint) continue;
+      return entry.canSendFile &&
+          !pickerOpen &&
+          (sendingTo == null || sendingTo == fingerprint);
+    }
+    return false;
+  }
 }

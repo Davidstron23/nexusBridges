@@ -212,6 +212,8 @@ final class TransferSender {
 
   bool _starting = false;
 
+  bool _cancelWhileStarting = false;
+
   bool get sending => _active != null || _filePickerOpen || _starting;
 
   TransferResultView? get lastSent => _lastSent;
@@ -245,6 +247,7 @@ final class TransferSender {
   }) async {
     if (_closed || _active != null || _starting) return null;
     _starting = true;
+    _cancelWhileStarting = false;
     _OutSession? session;
     try {
       session = await _beginElement(target, path, refresh);
@@ -258,6 +261,7 @@ final class TransferSender {
       );
     } finally {
       _starting = false;
+      _cancelWhileStarting = false;
     }
     if (session == null) return _closed ? null : _lastSent;
     return session.completion.future;
@@ -291,7 +295,11 @@ final class TransferSender {
 
   void cancelOutgoing() {
     final session = _active;
-    if (session == null || session.done || session.stopping) return;
+    if (session == null) {
+      if (_starting) _cancelWhileStarting = true;
+      return;
+    }
+    if (session.done || session.stopping) return;
     switch (session.phase) {
       case OutgoingPhase.preparing:
         _finish(session, TransferOutcome.cancelledHere);
@@ -541,6 +549,10 @@ final class TransferSender {
       }
     }
     if (_closed) return null;
+    if (_cancelWhileStarting) {
+      record(TransferOutcome.cancelledHere);
+      return null;
+    }
     if (_paired.deviceOf(target.fingerprint) == null) {
       record(TransferOutcome.unpaired);
       return null;

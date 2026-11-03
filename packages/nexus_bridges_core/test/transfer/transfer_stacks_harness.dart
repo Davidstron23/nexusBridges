@@ -134,6 +134,32 @@ final class ScriptedPicker implements FilePicker {
     folderCalls++;
     return null;
   }
+
+  List<String> nextMany = const [];
+  Object? manyFailure;
+  Completer<void>? manyGate;
+  int filesCalls = 0;
+  int foldersCalls = 0;
+
+  @override
+  Future<List<String>> pickFiles() {
+    filesCalls++;
+    return _pickMany();
+  }
+
+  @override
+  Future<List<String>> pickFolders() {
+    foldersCalls++;
+    return _pickMany();
+  }
+
+  Future<List<String>> _pickMany() async {
+    final hold = manyGate;
+    if (hold != null) await hold.future;
+    final error = manyFailure;
+    if (error != null) throw error;
+    return nextMany;
+  }
 }
 
 Future<Directory> transferFolder(String prefix) async {

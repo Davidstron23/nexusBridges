@@ -45,9 +45,9 @@ void main() {
     test('sendFile gives started by default and then whatever the test '
         'sets', () async {
       final fake = FakeAppController();
-      expect(await fake.sendFile('FP'), SendFileResult.started);
+      expect(await fake.sendFile('FP'), SendResult.started);
 
-      for (final result in SendFileResult.values) {
+      for (final result in SendResult.values) {
         fake.sendFileResult = result;
         expect(await fake.sendFile('FP'), result);
       }

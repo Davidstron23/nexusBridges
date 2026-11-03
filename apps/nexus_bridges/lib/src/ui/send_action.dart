@@ -13,9 +13,9 @@ Future<void> startSend(
   if (!context.mounted) return;
   final strings = AppStringsDelegate.of(context);
   final message = switch (result) {
-    SendFileResult.alreadySending => strings.alreadySending,
-    SendFileResult.unavailable => strings.sendUnavailable,
-    SendFileResult.started || SendFileResult.nothingChosen => null,
+    SendResult.otherTargetBusy => strings.alreadySending,
+    SendResult.unavailable || SendResult.tooMany => strings.sendUnavailable,
+    SendResult.started || SendResult.queued || SendResult.nothingChosen => null,
   };
   if (message == null) return;
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));

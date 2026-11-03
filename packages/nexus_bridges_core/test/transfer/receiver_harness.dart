@@ -291,6 +291,12 @@ final class HeldPicker implements FilePicker {
     return pending.future;
   }
 
+  @override
+  Future<List<String>> pickFiles() async => const [];
+
+  @override
+  Future<List<String>> pickFolders() async => const [];
+
   void answer(String? path) {
     expect(_pending, isNotEmpty, reason: 'no folder picker is open');
     _pending.removeAt(0).complete(path);
@@ -311,6 +317,12 @@ final class NoPicker implements FilePicker {
     calls++;
     return null;
   }
+
+  @override
+  Future<List<String>> pickFiles() async => const [];
+
+  @override
+  Future<List<String>> pickFolders() async => const [];
 }
 
 final class Peer {

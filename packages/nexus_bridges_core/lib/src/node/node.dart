@@ -5,6 +5,17 @@ import 'dart:isolate';
 import '../discovery/discovery.dart';
 import '../identity/identity.dart';
 import '../network/network.dart';
+import '../outbox/outbox.dart'
+    show
+        ElementKind,
+        ElementProbe,
+        ElementSender,
+        QueueItemState,
+        SelectionResult,
+        SendQueues,
+        SendQueuesView,
+        SendTray,
+        TrayAddResult;
 import '../pairing/pairing.dart'
     show
         IgnoredDevicesStore,
@@ -18,22 +29,27 @@ import '../settings/settings.dart' show SavedReceiveFolder, SettingsStore;
 import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
 import '../transfer/transfer.dart'
     show
+        AbortSignal,
         ExclusionSource,
         FilePicker,
         FileSystemPlatform,
         FolderRevealer,
+        OutgoingPhase,
         PeerCancelledTransfer,
         ReceiveFolder,
         ReceiveFolderNotSaved,
         ReceiveFolderStore,
         RevealResult,
-        SendStart,
+        SendDestination,
         SendTarget,
         TempJournal,
         TransferCoordinator,
         TransferEvent,
+        TransferOutcome,
+        TransferResultView,
         WindowsFileSystemPlatform,
         WindowsFilePicker,
+        measureFolderSize,
         writeAllBytes;
 import 'entries.dart';
 import 'node_state.dart';
@@ -42,6 +58,8 @@ import 'reconcile.dart';
 export '../discovery/discovery.dart' show DiscoveredDevice;
 export '../identity/identity.dart' show SecretProtector;
 export '../network/network.dart' show NetworkDecision, AdapterInfo, Ipv4Subnet;
+export '../outbox/outbox.dart'
+    show QueueItemState, QueueItemView, SendQueuesView, TrayItemView;
 export '../pairing_flow/pairing_flow.dart'
     show PairingView, PairingRole, PairingPhase, PairingOutcome, ReceiverAnswer;
 export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
@@ -121,6 +139,61 @@ final class _SettingsExclusions implements ExclusionSource {
 
   @override
   Future<List<String>?> load() => _settings.readExclusions();
+}
+
+Future<ElementProbe> _probeElement(String path) async {
+  try {
+    final type = await FileSystemEntity.type(path, followLinks: true);
+    if (type == FileSystemEntityType.file) {
+      int? size;
+      try {
+        size = await File(path).length();
+      } catch (_) {
+        size = null;
+      }
+      return ElementProbe(kind: ElementKind.file, size: size);
+    }
+    if (type == FileSystemEntityType.directory) {
+      return const ElementProbe(kind: ElementKind.folder);
+    }
+    if (type == FileSystemEntityType.notFound) {
+      return const ElementProbe(kind: ElementKind.missing);
+    }
+  } catch (_) {
+    return const ElementProbe(kind: ElementKind.other);
+  }
+  return const ElementProbe(kind: ElementKind.other);
+}
+
+final class _ElementSenderAdapter implements ElementSender {
+  _ElementSenderAdapter(this._transfers, this._targetOf, this._isForeign);
+
+  final TransferCoordinator _transfers;
+  final SendTarget? Function(String fingerprint) _targetOf;
+  final bool Function(String fingerprint) _isForeign;
+
+  @override
+  bool get cancelEndsQueue {
+    final outgoing = _transfers.outgoing;
+    return outgoing != null &&
+        outgoing.phase == OutgoingPhase.waiting &&
+        _isForeign(outgoing.peerFingerprint);
+  }
+
+  @override
+  Future<TransferResultView?> send(
+    SendTarget target,
+    String path,
+    SendDestination destination,
+  ) => _transfers.sendElement(
+    target,
+    path,
+    refresh: () => _targetOf(target.fingerprint),
+    destination: destination,
+  );
+
+  @override
+  void cancelCurrent() => _transfers.cancelOutgoing();
 }
 
 final class NexusNode {
@@ -285,12 +358,19 @@ final class NexusNode {
   final Map<String, DateTime> _seenAt = {};
   Set<String> _longAbsent = const {};
   final Map<String, int> _pairingRounds = {};
+  int _progressId = 0;
+  int _progressMax = 0;
+  int _progressTotal = 0;
+  String? _progressName;
+  bool _progressFolder = false;
 
   NetworkTrustStore? _trust;
   PairedDevicesStore? _paired;
   IgnoredDevicesStore? _ignored;
   PairingCoordinator? _coordinator;
   TransferCoordinator? _transfers;
+  SendQueues? _queues;
+  SendTray? _tray;
   PeerCheckScheduler? _scheduler;
   ApiServer? _server;
   MulticastChannel? _channel;
@@ -303,6 +383,8 @@ final class NexusNode {
   StreamSubscription<PairingEvent>? _coordinatorEventsSubscription;
   StreamSubscription<void>? _transfersChangesSubscription;
   StreamSubscription<TransferEvent>? _transfersEventsSubscription;
+  StreamSubscription<void>? _queuesSubscription;
+  StreamSubscription<void>? _traySubscription;
   StreamSubscription<void>? _ignoredSubscription;
   StreamSubscription<void>? _pairedSaveSubscription;
   StreamSubscription<void>? _ignoredSaveSubscription;
@@ -394,44 +476,156 @@ final class NexusNode {
     );
   }
 
-  Future<SendFileResult> sendFile(String fingerprint) async {
-    TransferCoordinator? transfers;
-    SendTarget? target;
-    var result = SendFileResult.unavailable;
-    await _run('send file', () async {
-      final current = _transfers;
+  Future<SendResult> sendFiles(String fingerprint) =>
+      _sendPicked(fingerprint, (transfers) => transfers.pickFilesToSend());
+
+  Future<SendResult> sendFolders(String fingerprint) =>
+      _sendPicked(fingerprint, (transfers) => transfers.pickFoldersToSend());
+
+  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+    SendQueues? queues;
+    String? peerName;
+    var result = SendResult.unavailable;
+    await _run('send paths', () async {
+      final current = _queues;
       if (current == null) return;
-      var allowed = false;
-      for (final entry in _entries) {
-        if (entry.fingerprint == fingerprint) allowed = entry.canSendFile;
-      }
-      if (!allowed) return;
-      if (current.sending) {
-        result = SendFileResult.alreadySending;
+      final blocked = _sendBlock(fingerprint);
+      if (blocked != null) {
+        result = blocked;
         return;
       }
-      final found = _sendTargetOf(fingerprint);
-      if (found == null) return;
-      transfers = current;
-      target = found;
+      for (final entry in _entries) {
+        if (entry.fingerprint == fingerprint) peerName = entry.displayName;
+      }
+      queues = current;
     });
-    final active = transfers;
-    final chosen = target;
-    if (active == null || chosen == null) return result;
+    final active = queues;
+    if (active == null) return result;
     try {
-      final start = await active.sendFile(
-        chosen,
+      final selection = await active.submit(
+        fingerprint,
+        paths,
         refresh: () => _sendTargetOf(fingerprint),
+        peerName: peerName,
       );
-      return switch (start) {
-        SendStart.started => SendFileResult.started,
-        SendStart.nothingChosen => SendFileResult.nothingChosen,
-        SendStart.alreadySending => SendFileResult.alreadySending,
+      return switch (selection) {
+        SelectionResult.started => SendResult.started,
+        SelectionResult.queued => SendResult.queued,
+        SelectionResult.otherTargetBusy => SendResult.otherTargetBusy,
+        SelectionResult.tooMany => SendResult.tooMany,
+        SelectionResult.empty => SendResult.nothingChosen,
+        SelectionResult.closed => SendResult.unavailable,
       };
     } catch (e) {
-      _log('send file failed: ${e.runtimeType}');
-      return SendFileResult.unavailable;
+      _log('send paths failed: ${e.runtimeType}');
+      return SendResult.unavailable;
     }
+  }
+
+  void cancelQueueItem(String itemId) {
+    _enqueue('cancel queue item', () async => _queues?.cancelItem(itemId));
+  }
+
+  void removeQueueItem(String itemId) {
+    _enqueue('remove queue item', () async => _queues?.removeItem(itemId));
+  }
+
+  void cancelAllQueued() {
+    _enqueue('cancel all queued', () async => _queues?.cancelAll());
+  }
+
+  Future<TrayResult> addToTray(List<String> paths, {int? totalCount}) async {
+    final tray = _tray;
+    if (_closing || tray == null) return TrayResult.unavailable;
+    if (totalCount != null && totalCount > Limits.maxSelectionItems) {
+      return TrayResult.tooMany;
+    }
+    try {
+      return switch (await tray.add(paths)) {
+        TrayAddResult.added => TrayResult.added,
+        TrayAddResult.nothingNew => TrayResult.nothingNew,
+        TrayAddResult.tooMany => TrayResult.tooMany,
+      };
+    } catch (e) {
+      _log('add to tray failed: ${e.runtimeType}');
+      return TrayResult.unavailable;
+    }
+  }
+
+  void removeFromTray(String itemId) {
+    if (_closing) return;
+    _tray?.remove(itemId);
+  }
+
+  void clearTray() {
+    if (_closing) return;
+    _tray?.clear();
+  }
+
+  Future<SendResult> sendTray(String fingerprint) async {
+    final tray = _tray;
+    if (_closing || tray == null) return SendResult.unavailable;
+    final batch = tray.take();
+    SendResult result;
+    try {
+      result = await sendPaths(fingerprint, batch.paths);
+    } catch (_) {
+      tray.restore(batch);
+      rethrow;
+    }
+    if (result != SendResult.started && result != SendResult.queued) {
+      tray.restore(batch);
+    }
+    return result;
+  }
+
+  Future<SendResult> _sendPicked(
+    String fingerprint,
+    Future<List<String>> Function(TransferCoordinator) pick,
+  ) async {
+    TransferCoordinator? transfers;
+    var result = SendResult.unavailable;
+    await _run('send picked', () async {
+      final current = _transfers;
+      if (current == null) return;
+      final blocked = _sendBlock(fingerprint);
+      if (blocked != null) {
+        result = blocked;
+        return;
+      }
+      transfers = current;
+    });
+    final active = transfers;
+    if (active == null) return result;
+    try {
+      final chosen = await pick(active);
+      if (chosen.isEmpty) return SendResult.nothingChosen;
+      return await sendPaths(fingerprint, chosen);
+    } catch (e) {
+      _log('send picked failed: ${e.runtimeType}');
+      return SendResult.unavailable;
+    }
+  }
+
+  SendResult? _sendBlock(String fingerprint) {
+    DeviceEntry? entry;
+    for (final candidate in _entries) {
+      if (candidate.fingerprint == fingerprint) entry = candidate;
+    }
+    if (entry == null || !entry.canSendFile) return SendResult.unavailable;
+    final busyWith = _sendingTo();
+    if (busyWith != null && busyWith != fingerprint) {
+      return SendResult.otherTargetBusy;
+    }
+    if (_transfers?.pickerOpen ?? false) return SendResult.unavailable;
+    if (_sendTargetOf(fingerprint) == null) return SendResult.unavailable;
+    return null;
+  }
+
+  String? _sendingTo() {
+    final target = _queues?.target;
+    if (target != null) return target;
+    return _transfers?.outgoing?.peerFingerprint;
   }
 
   void cancelSending() {
@@ -715,6 +909,7 @@ final class NexusNode {
     _activeNetworks = {};
     _listening = const [];
     _entries = const [];
+    _resetProgress();
     if (_closing) return;
 
     final Directory dir;
@@ -831,6 +1026,7 @@ final class NexusNode {
       pollHold: _pairingPollHold,
       log: _log,
     );
+    final exclusions = _SettingsExclusions(settings);
     final transfers = TransferCoordinator(
       identity: identity,
       paired: paired,
@@ -851,9 +1047,21 @@ final class NexusNode {
       idleTimeout: _transferIdleTimeout,
       confirmTimeout: _transferConfirmTimeout,
       writeBytes: _transferWriteBytes ?? writeAllBytes,
-      exclusions: _SettingsExclusions(settings),
+      exclusions: exclusions,
       log: _log,
     );
+    final queues = SendQueues(
+      sender: _ElementSenderAdapter(
+        transfers,
+        _sendTargetOf,
+        (fingerprint) =>
+            paired.deviceOf(fingerprint)?.relation == PeerRelation.foreign,
+      ),
+      probe: _probeElement,
+      measureFolder: (path, abort) => _measureFolder(exclusions, path, abort),
+      log: _log,
+    );
+    final tray = SendTray(probe: _probeElement);
     final server = ApiServer(
       identity: identity,
       paired: paired,
@@ -877,6 +1085,8 @@ final class NexusNode {
     _scheduler = scheduler;
     _coordinator = coordinator;
     _transfers = transfers;
+    _queues = queues;
+    _tray = tray;
     _channel = channel;
     _discovery = discovery;
     _server = server;
@@ -913,6 +1123,8 @@ final class NexusNode {
       (event) =>
           _enqueue('transfer event', () async => _onTransferEvent(event)),
     );
+    _queuesSubscription = queues.changes.listen((_) => _emit());
+    _traySubscription = tray.changes.listen((_) => _emit());
     unawaited(_guard('temp cleanup', transfers.cleanupAtStart));
     _ignoredSubscription = ignored.changes.listen(
       (_) => _enqueue('ignored change', () async => _refresh()),
@@ -929,8 +1141,33 @@ final class NexusNode {
     monitor.start();
   }
 
+  Future<int?> _measureFolder(
+    ExclusionSource exclusions,
+    String path,
+    AbortSignal abort,
+  ) async {
+    List<String>? loaded;
+    try {
+      loaded = await exclusions.load();
+    } catch (e) {
+      _log('exclusions load failed: ${e.runtimeType}');
+    }
+    return measureFolderSize(path, exclusions: loaded, abort: abort);
+  }
+
+  void _stopQueuesIfUnpaired() {
+    final queues = _queues;
+    final paired = _paired;
+    if (queues == null || paired == null) return;
+    final target = queues.target;
+    if (target != null && !paired.isPaired(target)) {
+      queues.stopFor(target, TransferOutcome.unpaired);
+    }
+  }
+
   Future<void> _onPairedChanged() async {
     _callTransfers('paired changed', (transfers) => transfers.pairedChanged());
+    _stopQueuesIfUnpaired();
     final current = _paired;
     if (current != null) {
       _seenAt.removeWhere((fingerprint, _) => !current.isPaired(fingerprint));
@@ -1124,6 +1361,10 @@ final class NexusNode {
     final channel = _channel;
     final coordinator = _coordinator;
     final transfers = _transfers;
+    final queues = _queues;
+    final tray = _tray;
+    final queuesChanges = _queuesSubscription;
+    final trayChanges = _traySubscription;
     final changes = _changesSubscription;
     final paired = _pairedSubscription;
     final devices = _devicesSubscription;
@@ -1139,8 +1380,11 @@ final class NexusNode {
     _ignored = null;
     _coordinator = null;
     _transfers = null;
+    _queues = null;
+    _tray = null;
     _scheduler = null;
     _pairingRounds.clear();
+    _resetProgress();
     _questions = const [];
     _notices = const [];
     _pauseUntil = null;
@@ -1159,6 +1403,8 @@ final class NexusNode {
     _coordinatorEventsSubscription = null;
     _transfersChangesSubscription = null;
     _transfersEventsSubscription = null;
+    _queuesSubscription = null;
+    _traySubscription = null;
     _ignoredSubscription = null;
     _pairedSaveSubscription = null;
     _ignoredSaveSubscription = null;
@@ -1168,10 +1414,14 @@ final class NexusNode {
     await _guard('pairing events cancel', () => pairingEvents?.cancel());
     await _guard('transfers changes cancel', () => transfersChanges?.cancel());
     await _guard('transfers events cancel', () => transfersEvents?.cancel());
+    await _guard('queues changes cancel', () => queuesChanges?.cancel());
+    await _guard('tray changes cancel', () => trayChanges?.cancel());
     await _guard('ignored changes cancel', () => ignoredChanges?.cancel());
     await _guard('paired save status cancel', () => pairedSave?.cancel());
     await _guard('ignored save status cancel', () => ignoredSave?.cancel());
     await _guard('monitor stop', () => monitor?.stop());
+    await _guard('queues close', () => queues?.close());
+    await _guard('tray close', () => tray?.close());
     await _guard(
       'transfers close',
       () => transfers?.close().timeout(Limits.transferCloseBudget),
@@ -1381,6 +1631,7 @@ final class NexusNode {
     if (device == null) return;
     final target = _targetFor(fingerprint);
     final cancelled = _cancelTransfersWith(fingerprint);
+    _queues?.stopFor(fingerprint, TransferOutcome.unpaired);
     final removal = paired.remove(fingerprint);
     final server = _server;
     if (server != null) {
@@ -1710,11 +1961,74 @@ final class NexusNode {
     return changed;
   }
 
+  void _resetProgress() {
+    _progressId = 0;
+    _progressMax = 0;
+    _progressTotal = 0;
+    _progressName = null;
+    _progressFolder = false;
+  }
+
+  SelectionProgress? _selectionProgress(SendQueuesView? view) {
+    final queues = _queues;
+    final transfers = _transfers;
+    if (queues == null) return null;
+    final id = queues.selectionId;
+    if (id == 0) return null;
+    if (id != _progressId) {
+      _resetProgress();
+      _progressId = id;
+    }
+    final outgoing = transfers?.outgoing;
+    if (outgoing != null) {
+      _progressName = outgoing.fileName;
+      _progressFolder = outgoing.isFolder;
+    } else if (view != null) {
+      for (final item in [...view.loose, ...view.bundles]) {
+        if (item.state != QueueItemState.inProgress) continue;
+        _progressName = item.name;
+        _progressFolder = item.isFolder;
+      }
+    }
+    var done = 0;
+    var total = 0;
+    var finished = false;
+    if (view != null) {
+      final size = outgoing?.size ?? 0;
+      final current = size > 0 ? size : (view.currentProbeSize ?? 0);
+      done = view.completedBytes + (outgoing?.sentBytes ?? 0);
+      total = view.completedBytes + current + view.pendingKnownBytes;
+      finished = view.finished;
+    } else if (queues.active) {
+      done = outgoing?.sentBytes ?? 0;
+      if ((outgoing?.size ?? 0) > 0) _progressTotal = outgoing!.size;
+      total = _progressTotal;
+    } else {
+      finished = true;
+      final sent = transfers?.lastSent?.size ?? 0;
+      total = sent > 0 ? sent : _progressTotal;
+    }
+    if (done < _progressMax) done = _progressMax;
+    if (total < done) total = done;
+    if (finished) done = total;
+    _progressMax = done;
+    return SelectionProgress(
+      selectionId: id,
+      doneBytes: done,
+      totalBytes: total,
+      currentName: _progressName,
+      currentIsFolder: _progressFolder,
+      finished: finished,
+    );
+  }
+
   void _emit() {
     if (_closing) return;
     final view = _coordinator?.view;
     final paired = _paired;
     final transfers = _transfers;
+    final queues = _queues;
+    final queuesView = queues?.view;
     final incoming = transfers?.incoming;
     final next = NodeState(
       identityStatus: _identityStatus,
@@ -1749,7 +2063,8 @@ final class NexusNode {
       incoming: incoming,
       lastSent: transfers?.lastSent,
       lastReceived: transfers?.lastReceived,
-      transferInProgress: transfers?.busy ?? false,
+      transferInProgress:
+          (transfers?.busy ?? false) || (queues?.active ?? false),
       pickerOpen: transfers?.pickerOpen ?? false,
       incomingNamesake: incoming == null || paired == null
           ? null
@@ -1758,6 +2073,10 @@ final class NexusNode {
               excluding: incoming.peerFingerprint,
               paired: paired.devices,
             ),
+      queues: queuesView,
+      tray: _tray?.items ?? const [],
+      sendingTo: _sendingTo(),
+      selectionProgress: _selectionProgress(queuesView),
     );
     _state = next;
     final last = _lastEmitted;
@@ -1787,6 +2106,10 @@ bool _sameState(NodeState a, NodeState b) {
       a.incomingNamesake == b.incomingNamesake &&
       a.pairing == b.pairing &&
       a.pairingNamesake == b.pairingNamesake &&
+      a.queues == b.queues &&
+      a.sendingTo == b.sendingTo &&
+      a.selectionProgress == b.selectionProgress &&
+      _sameList(a.tray, b.tray, (x, y) => x == y) &&
       _sameList(a.entries, b.entries, (x, y) => x == y) &&
       _sameList(a.questions, b.questions, (x, y) => x == y) &&
       _sameList(a.notices, b.notices, (x, y) => x == y) &&

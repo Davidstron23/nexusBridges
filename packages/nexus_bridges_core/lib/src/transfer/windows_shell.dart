@@ -58,6 +58,24 @@ final class WindowsFilePicker implements FilePicker {
       () => _pickSync(windowClass, windowTitle, folder: true, startIn: startIn),
     );
   }
+
+  @override
+  Future<List<String>> pickFiles() {
+    final windowClass = ownerWindowClass;
+    final windowTitle = ownerWindowTitle;
+    return _pickManyInIsolate(
+      () => _pickManySync(windowClass, windowTitle, folder: false),
+    );
+  }
+
+  @override
+  Future<List<String>> pickFolders() {
+    final windowClass = ownerWindowClass;
+    final windowTitle = ownerWindowTitle;
+    return _pickManyInIsolate(
+      () => _pickManySync(windowClass, windowTitle, folder: true),
+    );
+  }
 }
 
 final class WindowsFolderRevealer implements FolderRevealer {
@@ -92,6 +110,14 @@ Future<String?> _pickInIsolate(String? Function() work) async {
     return await Isolate.run(work);
   } catch (_) {
     return null;
+  }
+}
+
+Future<List<String>> _pickManyInIsolate(List<String> Function() work) async {
+  try {
+    return await Isolate.run(work);
+  } catch (_) {
+    return const [];
   }
 }
 
@@ -134,6 +160,72 @@ String? _chosenPath(IFileOpenDialog dialog) {
     }
   } finally {
     item.release();
+  }
+}
+
+List<String> _chosenPaths(IFileOpenDialog dialog) {
+  final items = dialog.getResults();
+  if (items == null) return const [];
+  try {
+    final paths = <String>[];
+    final count = items.getCount();
+    for (var i = 0; i < count; i++) {
+      final item = items.getItemAt(i);
+      if (item == null) continue;
+      try {
+        final name = item.getDisplayName(SIGDN_FILESYSPATH);
+        try {
+          final text = name.toDartString();
+          if (text.isNotEmpty) paths.add(text);
+        } finally {
+          CoTaskMemFree(name);
+        }
+      } catch (_) {
+        continue;
+      } finally {
+        item.release();
+      }
+    }
+    return paths;
+  } finally {
+    items.release();
+  }
+}
+
+List<String> _pickManySync(
+  String windowClass,
+  String windowTitle, {
+  required bool folder,
+}) {
+  if (!CoInitializeEx(COINIT_APARTMENTTHREADED).isOk) return const [];
+  try {
+    return using((arena) {
+      final dialog = createInstance<IFileOpenDialog>(FileOpenDialog);
+      try {
+        final options = dialog.getOptions();
+        dialog.setOptions(
+          folder
+              ? options |
+                    FOS_PICKFOLDERS |
+                    FOS_ALLOWMULTISELECT |
+                    FOS_FORCEFILESYSTEM |
+                    FOS_PATHMUSTEXIST
+              : options |
+                    FOS_ALLOWMULTISELECT |
+                    FOS_FORCEFILESYSTEM |
+                    FOS_FILEMUSTEXIST |
+                    FOS_PATHMUSTEXIST,
+        );
+        dialog.show(_findOwner(arena, windowClass, windowTitle));
+        return _chosenPaths(dialog);
+      } finally {
+        dialog.release();
+      }
+    });
+  } catch (_) {
+    return const [];
+  } finally {
+    CoUninitialize();
   }
 }
 

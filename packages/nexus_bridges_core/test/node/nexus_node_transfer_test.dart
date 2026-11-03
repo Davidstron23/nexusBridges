@@ -65,7 +65,7 @@ void main() {
       final (a, b) = await transferNodes();
       final path = await a.sourceFile('a.txt', [7]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
 
       expect(a.picker.fileCalls, 1);
       expect((await a.sentResult()).outcome, TransferOutcome.saved);
@@ -77,10 +77,10 @@ void main() {
       final path = await a.sourceFile('a.txt', [7]);
       a.picker.nextFile = path;
 
-      expect(await a.node.sendFile('F' * 64), SendFileResult.unavailable);
+      expect(await a.node.sendFiles('F' * 64), SendResult.unavailable);
 
       await loseSight(a, b);
-      expect(await a.node.sendFile(b.fingerprint), SendFileResult.unavailable);
+      expect(await a.node.sendFiles(b.fingerprint), SendResult.unavailable);
 
       expect(a.picker.fileCalls, 0);
       expect(a.state.lastSent, isNull);
@@ -93,10 +93,7 @@ void main() {
       final (a, b) = await transferNodes();
       a.picker.nextFile = null;
 
-      expect(
-        await a.node.sendFile(b.fingerprint),
-        SendFileResult.nothingChosen,
-      );
+      expect(await a.node.sendFiles(b.fingerprint), SendResult.nothingChosen);
 
       expect(a.picker.fileCalls, 1);
       expect(a.state.lastSent, isNull);
@@ -117,21 +114,18 @@ void main() {
         ..nextFile = path
         ..hold();
 
-      final first = a.node.sendFile(b.fingerprint);
+      final first = a.node.sendFiles(b.fingerprint);
       await a.until((s) => s.pickerOpen, reason: 'picker open in A');
       expect(a.state.transferInProgress, isTrue);
 
-      expect(
-        await a.node.sendFile(b.fingerprint),
-        SendFileResult.alreadySending,
-      );
+      expect(await a.node.sendFiles(b.fingerprint), SendResult.unavailable);
       expect(a.picker.fileCalls, 1);
       await a.node
           .answerMine(b.fingerprint, mine: true)
           .timeout(const Duration(seconds: 2));
 
       a.picker.release();
-      expect(await first, SendFileResult.started);
+      expect(await first, SendResult.started);
       await a.until((s) => !s.pickerOpen, reason: 'picker closed in A');
       expect((await a.sentResult()).outcome, TransferOutcome.saved);
       expect(a.picker.fileCalls, 1);
@@ -148,7 +142,7 @@ void main() {
         final (a, b) = await transferNodes(rememberB: false);
         final path = await a.sourceFile('notes.txt', [1, 2, 3]);
 
-        expect(await a.send(b, path), SendFileResult.started);
+        expect(await a.send(b, path), SendResult.started);
         final question = await b.incomingAt(IncomingStage.folderQuestion);
         expect(question.folder?.kind, FolderQuestionKind.firstTime);
         expect(question.folder?.proposedPath, b.proposedDir);
@@ -163,7 +157,7 @@ void main() {
 
         final mark = b.states.length;
         final firstReceived = b.state.lastReceived;
-        expect(await a.send(b, path), SendFileResult.started);
+        expect(await a.send(b, path), SendResult.started);
         final second = await a.sentResult(after: first);
         expect(second.outcome, TransferOutcome.saved);
         final secondReceived = await b.receivedResult(after: firstReceived);
@@ -182,7 +176,7 @@ void main() {
         await b.restart();
         await meet(a, b);
         final restartMark = b.states.length;
-        expect(await a.send(b, path), SendFileResult.started);
+        expect(await a.send(b, path), SendResult.started);
         expect(
           (await a.sentResult(after: second)).outcome,
           TransferOutcome.saved,
@@ -209,7 +203,7 @@ void main() {
       final (a, b) = await transferNodes(aAtB: PeerRelation.foreign);
       final path = await a.sourceFile('invoice.pdf', [9, 9, 9]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await _warning(b);
       expect(warning.peerName, 'Desk PC');
       expect(warning.fileName, 'invoice.pdf');
@@ -220,7 +214,7 @@ void main() {
       expect(shownDecline.outcome, TransferOutcome.declined);
 
       final mark = b.states.length;
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final again = await a.sentResult(after: declined);
       expect(again.outcome, TransferOutcome.declined);
       await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -230,7 +224,7 @@ void main() {
       expect(b.state.lastReceived, shownDecline);
 
       b.clock.advance(const Duration(seconds: 61));
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       await _warning(b);
       b.clock.advance(const Duration(seconds: 61));
       final unanswered = await a.sentResult(after: again);
@@ -240,7 +234,7 @@ void main() {
         TransferOutcome.unanswered,
       );
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final last = await _warning(b);
       b.node.answerIncoming(last.sessionId, accept: true);
       expect(
@@ -256,7 +250,7 @@ void main() {
       final (a, b) = await transferNodes(aAtB: PeerRelation.foreign);
       final path = await a.sourceFile('plan.txt', [4, 5]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final warning = await _warning(b);
       await a.until(
         (s) => s.outgoing?.phase == OutgoingPhase.waiting,
@@ -285,7 +279,7 @@ void main() {
       final (a, b) = await transferNodes();
       final path = await a.sourceFile('report.pdf', [3, 1, 4, 1, 5]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final sent = await a.sentResult();
       final received = await b.receivedResult();
 
@@ -325,7 +319,7 @@ void main() {
       expect(await b.node.revealLastReceived(), RevealResult.unavailable);
 
       final path = await a.sourceFile('photo.png', [8, 8]);
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       b.node.answerIncoming((await _warning(b)).sessionId, accept: false);
       final declined = await b.receivedResult();
       final declinedSent = await a.sentResult();
@@ -334,7 +328,7 @@ void main() {
       expect(b.revealer.paths, isEmpty);
 
       b.clock.advance(const Duration(seconds: 61));
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       b.node.answerIncoming((await _warning(b)).sessionId, accept: true);
       await a.sentResult(after: declinedSent);
       final saved = await b.receivedResult(after: declined);
@@ -368,10 +362,10 @@ void main() {
       b.picker.nextFile = fromB;
 
       final starts = await Future.wait([
-        a.node.sendFile(b.fingerprint),
-        b.node.sendFile(a.fingerprint),
+        a.node.sendFiles(b.fingerprint),
+        b.node.sendFiles(a.fingerprint),
       ]);
-      expect(starts, [SendFileResult.started, SendFileResult.started]);
+      expect(starts, [SendResult.started, SendResult.started]);
 
       expect((await a.sentResult()).outcome, TransferOutcome.saved);
       expect((await b.sentResult()).outcome, TransferOutcome.saved);
@@ -397,7 +391,7 @@ void main() {
       );
       final path = await a.sourceFile('notes.txt', [5]);
 
-      expect(await a.send(b, path), SendFileResult.started);
+      expect(await a.send(b, path), SendResult.started);
       final question = await b.incomingAt(IncomingStage.folderQuestion);
       await b.node.useProposedFolder(question.sessionId);
 

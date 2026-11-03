@@ -97,6 +97,12 @@ final class _NoPicker implements FilePicker {
 
   @override
   Future<String?> pickFolder({String? startIn}) async => null;
+
+  @override
+  Future<List<String>> pickFiles() async => const [];
+
+  @override
+  Future<List<String>> pickFolders() async => const [];
 }
 
 final class _NoReveal implements FolderRevealer {

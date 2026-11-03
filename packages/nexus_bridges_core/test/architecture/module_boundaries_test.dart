@@ -29,6 +29,7 @@ const Map<String, Set<String>> allowedImports = {
     'server',
     'transport',
   },
+  'outbox': {'protocol', 'transfer'},
   'browse': {
     'identity',
     'network',
@@ -49,6 +50,7 @@ const Map<String, Set<String>> allowedImports = {
     'transport',
     'pairing_flow',
     'transfer',
+    'outbox',
     'browse',
   },
 };
@@ -187,6 +189,43 @@ void main() {
     expect(allowedImports['node'], contains('transfer'));
     expect(allowedImports['storage'], isEmpty);
     expect(allowedImports['protocol'], isEmpty);
+  });
+
+  test('E513: outbox uses protocol and transfer, and the node may use '
+      'outbox', () {
+    expect(allowedImports['outbox'], {'protocol', 'transfer'});
+    expect(allowedImports['node'], contains('outbox'));
+    for (final module in allowedImports.keys) {
+      if (module == 'node' || module == 'outbox') continue;
+      expect(
+        allowedImports[module],
+        isNot(contains('outbox')),
+        reason: '$module may not import outbox',
+      );
+    }
+    expect(
+      findViolations({
+        'src/outbox/queues.dart':
+            "import '../transfer/transfer.dart';\n"
+            "import '../protocol/protocol.dart';\n",
+      }),
+      isEmpty,
+    );
+    expect(
+      findViolations({
+        'src/outbox/queues.dart': "import '../transport/transport.dart';\n",
+      }),
+      hasLength(1),
+    );
+    expect(
+      findViolations({
+        'src/outbox/queues.dart':
+            "import '../transfer/sender.dart';\n"
+            "import '../node/node.dart';\n"
+            "import '../server/server.dart';\n",
+      }),
+      hasLength(3),
+    );
   });
 
   test('the module table has no cycles', () {

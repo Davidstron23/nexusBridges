@@ -15,7 +15,10 @@ import 'windows_file_system.dart' show WindowsFileSystemPlatform;
 import 'windows_shell.dart' show WindowsFolderRevealer;
 import 'writer.dart' show writeAllBytes;
 
+export '../transport/transport.dart' show AbortSignal;
+export 'folder_size.dart' show measureFolderSize;
 export 'journal.dart' show TempJournal;
+export 'names.dart' show visibleFileName;
 export 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
 export 'windows_file_system.dart' show WindowsFileSystemPlatform;
 export 'windows_shell.dart' show WindowsFilePicker;
@@ -587,7 +590,8 @@ final class TransferCoordinator {
     MarkFile? markFile,
     ClearHidden? clearHidden,
     this._log = _noLog,
-  }) : _revealer = revealer ?? const WindowsFolderRevealer() {
+  }) : _picker = picker,
+       _revealer = revealer ?? const WindowsFolderRevealer() {
     _pickers = PickerTracker(
       clock: clock,
       onChanged: (open, since) => _receiver.pickersChanged(open, since),
@@ -634,6 +638,10 @@ final class TransferCoordinator {
 
   final FolderRevealer _revealer;
 
+  final FilePicker _picker;
+
+  bool _multiPickerOpen = false;
+
   late final TransferReceiver _receiver;
 
   late final PickerTracker _pickers;
@@ -669,7 +677,7 @@ final class TransferCoordinator {
 
   TransferResultView? get lastReceived => _receiver.lastReceived;
 
-  bool get busy => _receiver.busy || _sender.sending;
+  bool get busy => _receiver.busy || sending;
 
   bool get pickerOpen => _pickers.isOpen;
 
@@ -770,7 +778,30 @@ final class TransferCoordinator {
 
   TransferResultView? get lastSent => _sender.lastSent;
 
-  bool get sending => _sender.sending;
+  bool get sending => _sender.sending || _multiPickerOpen;
+
+  Future<List<String>> pickFilesToSend() => _pickMany(_picker.pickFiles);
+
+  Future<List<String>> pickFoldersToSend() => _pickMany(_picker.pickFolders);
+
+  Future<List<String>> _pickMany(Future<List<String>> Function() pick) async {
+    if (_closed || _closing != null || _pickers.isOpen) return const [];
+    _multiPickerOpen = true;
+    _pickers.open();
+    _notify();
+    List<String> chosen = const [];
+    try {
+      chosen = await pick();
+    } catch (e) {
+      _log('multiple picker failed: ${e.runtimeType}');
+    } finally {
+      _multiPickerOpen = false;
+      _pickers.close();
+      _notify();
+    }
+    if (_closed || _closing != null) return const [];
+    return chosen;
+  }
 
   Future<SendStart> sendFile(
     SendTarget target, {
