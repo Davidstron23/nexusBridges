@@ -1080,7 +1080,7 @@ void main() {
         write('$root\\inside.txt', 'inside');
         final result = await refusedHere(a, b, root, after: last);
         expect(result?.outcome, outcome, reason: name);
-        expect(result?.problemPath, name, reason: name);
+        expect(result?.problemPath, visibleFileName(name), reason: name);
         last = result;
       }
     }, timeout: long);

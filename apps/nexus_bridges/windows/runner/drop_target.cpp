@@ -50,7 +50,11 @@ bool InsideExtractionFolder(const std::wstring& path, const std::wstring& temp) 
     return false;
   }
   const wchar_t* rest = path.c_str() + temp.size();
-  return ::_wcsnicmp(rest, L"Temp", 4) == 0 && std::iswdigit(rest[4]) != 0;
+  if (::_wcsnicmp(rest, L"Temp", 4) != 0 || std::iswdigit(rest[4]) == 0) {
+    return false;
+  }
+  const wchar_t* separator = std::wcschr(rest, L'\\');
+  return separator != nullptr && separator[1] != L'\0';
 }
 
 }
@@ -58,6 +62,10 @@ bool InsideExtractionFolder(const std::wstring& path, const std::wstring& temp) 
 DropTarget::DropTarget(HWND view,
                        flutter::MethodChannel<flutter::EncodableValue>* channel)
     : view_(view), channel_(channel) {}
+
+void DropTarget::Detach() {
+  channel_ = nullptr;
+}
 
 HRESULT STDMETHODCALLTYPE DropTarget::QueryInterface(REFIID riid,
                                                      void** object) {
@@ -173,6 +181,9 @@ HRESULT STDMETHODCALLTYPE DropTarget::Drop(IDataObject* data, DWORD key_state,
       encoded.emplace_back(utf8);
     }
   }
+  const int reported_count =
+      count <= kMaxPaths ? static_cast<int>(encoded.size())
+                         : static_cast<int>(count);
   if (extracted || encoded.empty()) {
     Notify("leave", nullptr);
     return S_OK;
@@ -186,7 +197,7 @@ HRESULT STDMETHODCALLTYPE DropTarget::Drop(IDataObject* data, DWORD key_state,
                      {flutter::EncodableValue("y"),
                       flutter::EncodableValue(static_cast<int>(client.y))},
                      {flutter::EncodableValue("count"),
-                      flutter::EncodableValue(static_cast<int>(count))},
+                      flutter::EncodableValue(reported_count)},
                      {flutter::EncodableValue("paths"),
                       flutter::EncodableValue(std::move(encoded))},
                  }));
@@ -201,6 +212,9 @@ POINT DropTarget::ToClient(POINTL point) const {
 
 void DropTarget::Notify(const char* method,
                         std::unique_ptr<flutter::EncodableValue> arguments) {
+  if (channel_ == nullptr) {
+    return;
+  }
   channel_->InvokeMethod(method, std::move(arguments));
 }
 

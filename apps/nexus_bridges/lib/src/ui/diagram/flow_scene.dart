@@ -218,7 +218,18 @@ bool _isReceiving(IncomingTransferView? view) =>
 String? newlyDone(NodeState? before, NodeState after) {
   if (before == null) return null;
   final sent = after.lastSent;
-  if (before.outgoing != null &&
+  final queues = after.queues;
+  if (queues != null) {
+    final previous = before.queues;
+    final justFinished =
+        queues.finished &&
+        (previous == null ||
+            previous.selectionId != queues.selectionId ||
+            !previous.finished);
+    if (justFinished && queues.total > 0 && queues.delivered == queues.total) {
+      return queues.peerFingerprint;
+    }
+  } else if (before.outgoing != null &&
       after.outgoing == null &&
       sent != null &&
       sent.outcome.kind == TransferResultKind.saved) {

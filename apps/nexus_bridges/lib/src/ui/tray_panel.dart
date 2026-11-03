@@ -149,30 +149,35 @@ class TrayPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Container(
-                  width: 26,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    color: colors.primaryWeak,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  alignment: Alignment.center,
-                  child: GlyphIcon(
-                    Glyphs.tray,
-                    size: 15,
-                    color: colors.primaryInk,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    strings.trayTitle(items.length),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: NbText.bodyStrong.copyWith(color: colors.text),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: colors.primaryWeak,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: GlyphIcon(
+                        Glyphs.tray,
+                        size: 15,
+                        color: colors.primaryInk,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        strings.trayTitle(items.length),
+                        style: NbText.bodyStrong.copyWith(color: colors.text),
+                      ),
+                    ),
+                  ],
                 ),
                 Tooltip(
                   message: strings.trayRemoveAll,

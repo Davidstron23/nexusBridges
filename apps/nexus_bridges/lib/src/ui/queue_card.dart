@@ -22,6 +22,11 @@ const double _rowEnterShift = 16;
 const double _iconHeight = 28;
 const double _targetSize = 44;
 const double _badgeSize = 20;
+const int _foldedAbove = 20;
+const int _visibleRows = 4;
+const double _rowExtent = 48;
+const double _peekRow = 24;
+const double _runningSlot = 60;
 
 enum _Section { loose, bundles }
 
@@ -100,6 +105,7 @@ class _QueueCardState extends State<QueueCard> {
   bool _isOpen(_Section section, List<QueueItemView> items) {
     final toggled = _toggled[section];
     if (toggled != null) return toggled;
+    if (items.length > _foldedAbove) return false;
     return items.any((item) => !_isPast(item) || _failed(item));
   }
 
@@ -145,6 +151,9 @@ class _QueueCardState extends State<QueueCard> {
       (_Section.loose, strings.looseQueue, queues.loose),
       (_Section.bundles, strings.bundleQueue, queues.bundles),
     ];
+    final running = all
+        .where((item) => item.state == QueueItemState.inProgress)
+        .firstOrNull;
     return NbCard(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       child: Column(
@@ -178,28 +187,25 @@ class _QueueCardState extends State<QueueCard> {
               );
             },
           ),
-          for (final (section, title, items) in sections)
-            if (items.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _QueueSection(
-                key: ValueKey('queue-section-${section.name}'),
-                title: title,
-                items: items,
-                open: _isOpen(section, items),
-                onToggle: () => _toggle(section, items),
-                controller: controller,
-                outgoing: outgoing,
-                peerName: name,
-                entering: _entering,
-              ),
-            ],
-          if (finished)
-            _DeliveredStrip(
-              delivered: queues.delivered,
-              total: queues.total,
-              allDelivered: allDelivered,
-            )
-          else
+          if (!finished) ...[
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: _runningSlot),
+              child: running == null
+                  ? null
+                  : _RowIn(
+                      key: ValueKey('queue-row-${running.id}'),
+                      animate: false,
+                      child: _ItemRow(
+                        item: running,
+                        controller: controller,
+                        outgoing: outgoing,
+                        peerName: name,
+                      ),
+                    ),
+            ),
+          ],
+          if (!finished)
             ActivityCardFooter(
               note: pending > 0
                   ? strings.queueRemaining(pending)
@@ -211,6 +217,30 @@ class _QueueCardState extends State<QueueCard> {
                   child: Text(strings.queueCancelAll),
                 ),
               ]),
+            ),
+          for (final (section, title, items) in sections)
+            if (items.any((item) => item != running)) ...[
+              const SizedBox(height: 12),
+              _QueueSection(
+                key: ValueKey('queue-section-${section.name}'),
+                title: title,
+                items: items,
+                rows: [
+                  for (final item in items)
+                    if (item != running) item,
+                ],
+                open: _isOpen(section, items),
+                onToggle: () => _toggle(section, items),
+                controller: controller,
+                peerName: name,
+                entering: _entering,
+              ),
+            ],
+          if (finished)
+            _DeliveredStrip(
+              delivered: queues.delivered,
+              total: queues.total,
+              allDelivered: allDelivered,
             ),
         ],
       ),
@@ -303,10 +333,10 @@ class _QueueSection extends StatelessWidget {
   const _QueueSection({
     required this.title,
     required this.items,
+    required this.rows,
     required this.open,
     required this.onToggle,
     required this.controller,
-    required this.outgoing,
     required this.peerName,
     required this.entering,
     super.key,
@@ -314,12 +344,25 @@ class _QueueSection extends StatelessWidget {
 
   final String title;
   final List<QueueItemView> items;
+  final List<QueueItemView> rows;
   final bool open;
   final VoidCallback onToggle;
   final AppController controller;
-  final OutgoingTransferView? outgoing;
   final String peerName;
   final Set<String> entering;
+
+  Widget _row(QueueItemView item, bool animate) {
+    return _RowIn(
+      key: ValueKey('queue-row-${item.id}'),
+      animate: animate && entering.contains(item.id),
+      child: _ItemRow(
+        item: item,
+        controller: controller,
+        outgoing: null,
+        peerName: peerName,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -402,24 +445,23 @@ class _QueueSection extends StatelessWidget {
             child: open
                 ? Padding(
                     padding: const EdgeInsets.fromLTRB(2, 0, 2, 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final item in items)
-                          _RowIn(
-                            key: ValueKey('queue-row-${item.id}'),
-                            animate: animate && entering.contains(item.id),
-                            child: _ItemRow(
-                              item: item,
-                              controller: controller,
-                              outgoing: item.state == QueueItemState.inProgress
-                                  ? outgoing
-                                  : null,
-                              peerName: peerName,
+                    child: rows.length <= _visibleRows
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (final item in rows) _row(item, animate),
+                            ],
+                          )
+                        : SizedBox(
+                            height: _visibleRows * _rowExtent + _peekRow,
+                            child: ListView.builder(
+                              key: ValueKey('queue-list-$title'),
+                              itemCount: rows.length,
+                              padding: EdgeInsets.zero,
+                              itemBuilder: (context, index) =>
+                                  _row(rows[index], animate),
                             ),
                           ),
-                      ],
-                    ),
                   )
                 : const SizedBox(width: double.infinity),
           ),

@@ -18,6 +18,8 @@ class DropTarget : public IDropTarget {
   ULONG STDMETHODCALLTYPE AddRef() override;
   ULONG STDMETHODCALLTYPE Release() override;
 
+  void Detach();
+
   HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data, DWORD key_state,
                                       POINTL point, DWORD* effect) override;
   HRESULT STDMETHODCALLTYPE DragOver(DWORD key_state, POINTL point,

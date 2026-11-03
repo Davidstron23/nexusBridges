@@ -166,7 +166,13 @@ class _ExitViewState extends State<_ExitView> with ArmingState<_ExitView> {
         ],
       ),
       title: strings.closeDuringTransferTitle,
-      body: [ModalLead(text: strings.closeDuringTransferBody)],
+      body: [
+        ModalLead(
+          text: widget.controller.state?.queues?.finished == false
+              ? strings.closeWithQueuesBody
+              : strings.closeDuringTransferBody,
+        ),
+      ],
       actions: [
         ModalButton(
           label: strings.keepOpenButton,

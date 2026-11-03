@@ -223,12 +223,7 @@ class _FirstLevelList extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    item.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: nameStyle,
-                  ),
+                  child: FittedName(name: item.name, style: nameStyle),
                 ),
               ],
             ),

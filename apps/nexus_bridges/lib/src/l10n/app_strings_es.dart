@@ -692,6 +692,11 @@ final class AppStringsEs implements AppStrings {
       'Si cierras la app ahora, el envío se cancelará.';
 
   @override
+  String get closeWithQueuesBody =>
+      'Si cierras la app ahora, el envío se cancelará y lo que aún está '
+      'pendiente no se enviará.';
+
+  @override
   String get keepOpenButton => 'No cerrar';
 
   @override

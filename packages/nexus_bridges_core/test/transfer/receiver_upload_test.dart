@@ -321,6 +321,7 @@ void main() {
           isProgram: false,
           outcome: TransferOutcome.saved,
           canReveal: true,
+          size: a.bytes.length,
         ),
       );
       expect(

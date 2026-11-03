@@ -31,6 +31,8 @@ final class DropTooMany extends DropOutcome {
   const DropTooMany();
 }
 
+bool _never() => false;
+
 final class _Zone {
   const _Zone(this.fingerprint, this.key);
 
@@ -44,6 +46,7 @@ class DropController extends ChangeNotifier {
     required this.isMine,
     required this.onPortal,
     required this.onOutcome,
+    this.isBlocked = _never,
     this.portalAfter = portalDelay,
   });
 
@@ -51,6 +54,7 @@ class DropController extends ChangeNotifier {
   final bool Function(String fingerprint) isMine;
   final void Function(String fingerprint) onPortal;
   final void Function(DropOutcome outcome) onOutcome;
+  final bool Function() isBlocked;
   final Duration portalAfter;
 
   final List<_Zone> _zones = [];
@@ -83,13 +87,19 @@ class DropController extends ChangeNotifier {
       case DropLeave():
         _reset();
       case DropDone(:final position, :final paths, :final count):
-        final target = _zoneAt(position);
+        final lit = _dragging ? _hovered : null;
+        final under = isBlocked() ? null : _zoneAt(position);
+        final target = !_dragging || under == lit ? under : null;
         _reset();
         _resolve(target, paths, count);
     }
   }
 
   void _track(Offset position) {
+    if (isBlocked()) {
+      _reset();
+      return;
+    }
     _position = position;
     final changed = !_dragging;
     _dragging = true;

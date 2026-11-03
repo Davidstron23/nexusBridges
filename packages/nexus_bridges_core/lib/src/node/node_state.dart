@@ -267,6 +267,7 @@ final class NodeState {
     this.pickerOpen = false,
     this.incomingNamesake,
     this.queues,
+    this.lastQueues,
     this.tray = const [],
     this.sendingTo,
     this.selectionProgress,
@@ -300,6 +301,7 @@ final class NodeState {
   final bool pickerOpen;
   final String? incomingNamesake;
   final SendQueuesView? queues;
+  final SendQueuesView? lastQueues;
   final List<TrayItemView> tray;
   final String? sendingTo;
   final SelectionProgress? selectionProgress;

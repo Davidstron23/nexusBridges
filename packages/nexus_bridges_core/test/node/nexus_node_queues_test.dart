@@ -1065,8 +1065,13 @@ void main() {
       a.node.cancelAllQueued();
       b.writes.release();
       final view = await _finished(a);
-      expect(_names(view.loose), ['a.bin']);
-      expect(view.loose.single.outcome, TransferOutcome.cancelledHere);
+      expect(_names(view.loose), ['a.bin', 'c.txt', 'd.txt']);
+      expect(view.total, 3);
+      expect(view.delivered, 0);
+      for (final item in view.loose) {
+        expect(item.outcome, TransferOutcome.cancelledHere);
+      }
+      expect(view.loose[1].state, QueueItemState.notSent);
       await eventually(
         () => !b.tempLeftIn(b.recvDir),
         reason: 'temp deleted in B',

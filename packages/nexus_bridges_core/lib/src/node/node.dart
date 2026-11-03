@@ -2074,6 +2074,7 @@ final class NexusNode {
               paired: paired.devices,
             ),
       queues: queuesView,
+      lastQueues: queues?.previous,
       tray: _tray?.items ?? const [],
       sendingTo: _sendingTo(),
       selectionProgress: _selectionProgress(queuesView),
@@ -2107,6 +2108,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.pairing == b.pairing &&
       a.pairingNamesake == b.pairingNamesake &&
       a.queues == b.queues &&
+      a.lastQueues == b.lastQueues &&
       a.sendingTo == b.sendingTo &&
       a.selectionProgress == b.selectionProgress &&
       _sameList(a.tray, b.tray, (x, y) => x == y) &&

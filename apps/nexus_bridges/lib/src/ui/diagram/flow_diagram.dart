@@ -30,6 +30,8 @@ const double _hitExtra = 6;
 const double _tipLeft = 14;
 const double _tipBottom = 12;
 const double _pillTop = 12;
+const double _pillNarrowTop = 52;
+const double _pillNarrowWidth = 780;
 const double _pillSide = 12;
 const int _shortLength = 8;
 
@@ -366,7 +368,9 @@ class _FlowDiagramState extends State<FlowDiagram>
                 child: DragTip(hidden: dragging, width: constraints.maxWidth),
               ),
               Positioned(
-                top: _pillTop,
+                top: constraints.maxWidth < _pillNarrowWidth
+                    ? _pillNarrowTop
+                    : _pillTop,
                 left: _pillSide,
                 right: _pillSide,
                 child: Center(child: DragPill(visible: dragging)),

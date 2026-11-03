@@ -141,18 +141,19 @@ class FittedName extends StatelessWidget {
   Widget build(BuildContext context) {
     final textScaler = MediaQuery.textScalerOf(context);
     final textDirection = Directionality.of(context);
+    final measured = DefaultTextStyle.of(context).style.merge(style);
     return LayoutBuilder(
       builder: (context, constraints) {
         final shown = fitFileName(
           name,
-          style: style,
+          style: measured,
           maxWidth: constraints.maxWidth,
           textScaler: textScaler,
           textDirection: textDirection,
         );
         return Text(
           shown,
-          style: style,
+          style: measured,
           maxLines: 1,
           softWrap: false,
           overflow: TextOverflow.clip,
@@ -421,15 +422,16 @@ class ActivityPanel extends StatelessWidget {
     final sent = state.lastSent;
     final received = state.lastReceived;
     final queues = state.queues;
+    final previous = state.lastQueues;
     final cards = <Widget>[
-      if (queues != null)
+      if (queues != null && !queues.finished)
         QueueCard(
           key: const ValueKey('activity-queues'),
           controller: controller,
           state: state,
           queues: queues,
         )
-      else if (outgoing != null)
+      else if (queues == null && outgoing != null)
         _OutgoingCard(
           key: const ValueKey('activity-outgoing'),
           controller: controller,
@@ -442,7 +444,21 @@ class ActivityPanel extends StatelessWidget {
           controller: controller,
           view: incoming,
         ),
-      if (sent != null && queues == null)
+      if (queues != null && queues.finished)
+        QueueCard(
+          key: const ValueKey('activity-queues'),
+          controller: controller,
+          state: state,
+          queues: queues,
+        )
+      else if (queues == null && previous != null)
+        QueueCard(
+          key: const ValueKey('activity-last-queues'),
+          controller: controller,
+          state: state,
+          queues: previous,
+        )
+      else if (sent != null && queues == null)
         ResultCard(
           key: const ValueKey('activity-last-sent'),
           controller: controller,

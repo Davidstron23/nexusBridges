@@ -64,6 +64,7 @@ void FlutterWindow::OnDestroy() {
     drop_registered_ = false;
   }
   if (drop_target_) {
+    drop_target_->Detach();
     drop_target_->Release();
     drop_target_ = nullptr;
   }

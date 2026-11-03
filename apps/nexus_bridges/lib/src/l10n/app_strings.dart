@@ -165,6 +165,7 @@ abstract class AppStrings {
 
   String get closeDuringTransferTitle;
   String get closeDuringTransferBody;
+  String get closeWithQueuesBody;
   String get keepOpenButton;
   String get closeAndCancelButton;
 

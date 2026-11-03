@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
     canSendTo: (fingerprint) =>
         widget.controller.state?.canSendTo(fingerprint) ?? false,
     isMine: _isMine,
+    isBlocked: () => mounted && ModalRoute.of(context)?.isCurrent == false,
     onPortal: (fingerprint) =>
         unawaited(widget.controller.requestPortal(fingerprint)),
     onOutcome: (outcome) {
@@ -121,87 +122,91 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final strings = AppStringsDelegate.of(context);
-        final state = controller.state;
-        final failure = _failureMessage(strings);
-        return DropScope(
-          controller: _drop,
-          child: SelectionProgressScope(
-            state: state,
-            child: Scaffold(
-              body: Column(
-                children: [
-                  _Header(
+    return DropScope(
+      controller: _drop,
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, child) =>
+            SelectionProgressScope(state: controller.state, child: child!),
+        child: Scaffold(
+          body: Column(
+            children: [
+              ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) {
+                  final strings = AppStringsDelegate.of(context);
+                  return _Header(
                     controller: controller,
-                    state: failure == null ? state : null,
-                  ),
-                  Expanded(
-                    child: failure != null
-                        ? _MessageWithRetry(
-                            message: failure,
-                            retryLabel: strings.retryButton,
-                            onRetry: controller.retry,
-                          )
-                        : _Body(
-                            strings: strings,
-                            controller: controller,
-                            state: state!,
-                            tab: _tab,
-                            hovered: _hovered,
-                            noticeText: (notice) =>
-                                _noticeText(strings, notice),
-                          ),
-                  ),
-                ],
+                    state: _failureMessage(controller, strings) == null
+                        ? controller.state
+                        : null,
+                  );
+                },
               ),
-            ),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: controller,
+                  builder: (context, body) {
+                    final strings = AppStringsDelegate.of(context);
+                    final failure = _failureMessage(controller, strings);
+                    if (failure == null) return body!;
+                    return _MessageWithRetry(
+                      message: failure,
+                      retryLabel: strings.retryButton,
+                      onRetry: controller.retry,
+                    );
+                  },
+                  child: _Body(
+                    controller: controller,
+                    tab: _tab,
+                    hovered: _hovered,
+                  ),
+                ),
+              ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
+}
 
-  String? _failureMessage(AppStrings strings) {
-    final controller = widget.controller;
-    final state = controller.state;
-    if (state == null ||
-        controller.startFailed ||
-        state.identityStatus == IdentityStatus.failed) {
-      return strings.identityFailed;
-    }
-    final port = state.portInUse;
-    if (port != null) return strings.portInUse(port);
-    return null;
+String? _failureMessage(AppController controller, AppStrings strings) {
+  final state = controller.state;
+  if (state == null ||
+      controller.startFailed ||
+      state.identityStatus == IdentityStatus.failed) {
+    return strings.identityFailed;
   }
+  final port = state.portInUse;
+  if (port != null) return strings.portInUse(port);
+  return null;
+}
 
-  String _noticeText(AppStrings strings, Notice notice) {
-    final name = notice.deviceName ?? '';
-    return switch (notice.kind) {
-      NoticeKind.attemptDataMismatch => strings.noticeAttemptCancelled(name),
-      NoticeKind.attemptCancelled =>
-        notice.count == 1
-            ? strings.noticeAttemptPeerCancelled(name)
-            : strings.noticeAttemptsCancelled(notice.count),
-      NoticeKind.attemptLost => strings.noticeAttemptLost(name),
-      NoticeKind.replaceWithdrawn => strings.noticeReplaceWithdrawn(name),
-      NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
-      NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
-      NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,
-      NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
-      NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
-      NoticeKind.pairingFailed => strings.noticePairingFailed(name),
-      NoticeKind.pairingPaused => strings.noticePairingPaused,
-      NoticeKind.receiveFolderNotSaved => strings.noticeReceiveFolderNotSaved(
-        notice.detail ?? '',
-      ),
-      NoticeKind.peerCancelledTransfer => strings.noticePeerCancelledTransfer(
-        notice.detail ?? '',
-      ),
-    };
-  }
+String _noticeText(AppStrings strings, Notice notice) {
+  final name = notice.deviceName ?? '';
+  return switch (notice.kind) {
+    NoticeKind.attemptDataMismatch => strings.noticeAttemptCancelled(name),
+    NoticeKind.attemptCancelled =>
+      notice.count == 1
+          ? strings.noticeAttemptPeerCancelled(name)
+          : strings.noticeAttemptsCancelled(notice.count),
+    NoticeKind.attemptLost => strings.noticeAttemptLost(name),
+    NoticeKind.replaceWithdrawn => strings.noticeReplaceWithdrawn(name),
+    NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
+    NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
+    NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,
+    NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
+    NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
+    NoticeKind.pairingFailed => strings.noticePairingFailed(name),
+    NoticeKind.pairingPaused => strings.noticePairingPaused,
+    NoticeKind.receiveFolderNotSaved => strings.noticeReceiveFolderNotSaved(
+      notice.detail ?? '',
+    ),
+    NoticeKind.peerCancelledTransfer => strings.noticePeerCancelledTransfer(
+      notice.detail ?? '',
+    ),
+  };
 }
 
 class _Header extends StatelessWidget {
@@ -266,20 +271,14 @@ class _MessageWithRetry extends StatelessWidget {
 
 class _Body extends StatelessWidget {
   const _Body({
-    required this.strings,
     required this.controller,
-    required this.state,
     required this.tab,
     required this.hovered,
-    required this.noticeText,
   });
 
-  final AppStrings strings;
   final AppController controller;
-  final NodeState state;
   final ValueNotifier<ColumnTab> tab;
   final ValueNotifier<String?> hovered;
-  final String Function(Notice notice) noticeText;
 
   @override
   Widget build(BuildContext context) {
@@ -288,13 +287,19 @@ class _Body extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final column = _SideColumn(
-            strings: strings,
-            controller: controller,
-            state: state,
-            tab: tab,
-            hovered: hovered,
-            noticeText: noticeText,
+          final column = ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) {
+              final state = controller.state;
+              if (state == null) return const SizedBox.shrink();
+              return _SideColumn(
+                strings: AppStringsDelegate.of(context),
+                controller: controller,
+                state: state,
+                tab: tab,
+                hovered: hovered,
+              );
+            },
           );
           if (!showsDiagram(width)) {
             return Stack(
@@ -319,14 +324,21 @@ class _Body extends StatelessWidget {
               Expanded(
                 child: NbCard(
                   padding: EdgeInsets.zero,
-                  child: FlowDiagram(
-                    state: state,
-                    hovered: hovered,
-                    onSendFiles: (fingerprint) =>
-                        startSendFiles(context, controller, fingerprint),
-                    onSendFolders: (fingerprint) =>
-                        startSendFolders(context, controller, fingerprint),
-                    onShowDevices: () => tab.value = ColumnTab.devices,
+                  child: ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final state = controller.state;
+                      if (state == null) return const SizedBox.shrink();
+                      return FlowDiagram(
+                        state: state,
+                        hovered: hovered,
+                        onSendFiles: (fingerprint) =>
+                            startSendFiles(context, controller, fingerprint),
+                        onSendFolders: (fingerprint) =>
+                            startSendFolders(context, controller, fingerprint),
+                        onShowDevices: () => tab.value = ColumnTab.devices,
+                      );
+                    },
                   ),
                 ),
               ),
@@ -347,7 +359,6 @@ class _SideColumn extends StatelessWidget {
     required this.state,
     required this.tab,
     required this.hovered,
-    required this.noticeText,
   });
 
   final AppStrings strings;
@@ -355,7 +366,6 @@ class _SideColumn extends StatelessWidget {
   final NodeState state;
   final ValueNotifier<ColumnTab> tab;
   final ValueNotifier<String?> hovered;
-  final String Function(Notice notice) noticeText;
 
   List<Widget> _notices() {
     return [
@@ -374,7 +384,7 @@ class _SideColumn extends StatelessWidget {
       for (final notice in state.notices)
         NoticeCard(
           key: ValueKey('notice-${notice.id}'),
-          message: noticeText(notice),
+          message: _noticeText(strings, notice),
           actions: [
             if (notice.canRetry)
               TextButton(
@@ -607,8 +617,10 @@ class _TabZone extends StatelessWidget {
                   if (badge != null) ...[
                     const SizedBox(width: 6),
                     Container(
-                      height: 18,
-                      constraints: const BoxConstraints(minWidth: 18),
+                      constraints: const BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
                       padding: const EdgeInsets.symmetric(horizontal: 5),
                       alignment: Alignment.center,
                       decoration: BoxDecoration(

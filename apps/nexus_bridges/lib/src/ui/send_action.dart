@@ -74,7 +74,9 @@ Future<void> applyDropOutcome(
 }
 
 void _announce(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message)));
 }
 
 String? sendResultMessage(
@@ -111,5 +113,5 @@ Future<void> _report(
         : deviceNameIn(state, target),
   );
   if (message == null) return;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  _announce(context, message);
 }

@@ -677,6 +677,11 @@ final class AppStringsEn implements AppStrings {
       'If you close the app now, the send will be cancelled.';
 
   @override
+  String get closeWithQueuesBody =>
+      'If you close the app now, the send will be cancelled and what is '
+      'still waiting will not be sent.';
+
+  @override
   String get keepOpenButton => 'Keep open';
 
   @override
