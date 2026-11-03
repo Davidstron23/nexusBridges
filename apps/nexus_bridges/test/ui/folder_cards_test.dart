@@ -492,6 +492,28 @@ void main() {
         }
       });
 
+      testWidgets('received with the path that stopped it (RF-262)', (
+        tester,
+      ) async {
+        await _panel(
+          tester,
+          code,
+          NodeState(
+            lastReceived: _folderResult(
+              direction: TransferDirection.incoming,
+              outcome: TransferOutcome.unreadable,
+              problemPath: r'src\a.txt',
+            ),
+          ),
+        );
+
+        expect(
+          textIn(_lastReceived, strings.outcomeUnreadableEntry(r'src\a.txt')),
+          findsOneWidget,
+        );
+        expect(chipIn(tester, _lastReceived).tone, ChipTone.fail);
+      });
+
       testWidgets('a folder the other device cannot receive explains it, a '
           'file keeps the usual text', (tester) async {
         await _panel(

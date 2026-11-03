@@ -477,16 +477,15 @@ void main() {
         expect(find.byType(SnackBar), findsNothing);
       });
 
-      testWidgets('a count above the paths received is refused', (
-        tester,
-      ) async {
+      testWidgets('a count above the paths received is ignored as a '
+          'malformed drop', (tester) async {
         final (controller, events) = await _pump(tester, code, _state());
 
         events.add(DropDone(_row(tester, _fpA), _paths, 40));
         await _settleFrames(tester);
 
         expect(controller.calls, isEmpty);
-        expect(find.text(strings.tooManySelected), findsOneWidget);
+        expect(find.byType(SnackBar), findsNothing);
       });
     });
 

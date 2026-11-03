@@ -129,11 +129,7 @@ class DropController extends ChangeNotifier {
 
   void _resolve(String? target, List<String> paths, int count) {
     if (paths.isEmpty) return;
-    final incomplete = count > paths.length && count <= maxDropItems;
-    if (incomplete) {
-      onOutcome(const DropTooMany());
-      return;
-    }
+    if (count > paths.length && count <= maxDropItems) return;
     if (target != null && canSendTo(target)) {
       onOutcome(
         count > maxDropItems ? const DropTooMany() : DropSend(target, paths),

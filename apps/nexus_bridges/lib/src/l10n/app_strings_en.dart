@@ -884,8 +884,4 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String get dragTipBody => 'On a device to send it; anywhere else to To send';
-
-  @override
-  String folderSavedNotice(String name, String peer) =>
-      'Folder $name received from $peer';
 }

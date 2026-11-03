@@ -9,7 +9,6 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart'
 typedef _Text = String Function(AppStrings strings);
 
 const String _name = 'Casa de Ana';
-const String _peer = 'Portátil de Luis';
 const String _path = r'src\docs\informe.pdf';
 
 final Map<String, _Text> _texts = {
@@ -48,7 +47,6 @@ final Map<String, _Text> _texts = {
   'dragHint': (s) => s.dragHint,
   'dragTipTitle': (s) => s.dragTipTitle,
   'dragTipBody': (s) => s.dragTipBody,
-  'folderSavedNotice': (s) => s.folderSavedNotice(_name, _peer),
   'incomingFolderRequestTitle': (s) => s.incomingFolderRequestTitle(_name),
 };
 
@@ -127,10 +125,6 @@ final Map<String, (String, String)> _expected = {
     'On a device to send it; anywhere else to To send',
     'Sobre un equipo para enviárselo; fuera de ellos, a Para enviar',
   ),
-  'folderSavedNotice': (
-    'Folder $_name received from $_peer',
-    'Carpeta $_name recibida de $_peer',
-  ),
   'incomingFolderRequestTitle': (
     '$_name wants to send you a folder',
     '$_name quiere enviarte una carpeta',
@@ -142,8 +136,8 @@ void main() {
   final spanish = AppStringsEs();
 
   group('E548: the texts of the 006', () {
-    test('the table covers the 37 new keys', () {
-      expect(_texts.length, 37);
+    test('the table covers the 36 new keys', () {
+      expect(_texts.length, 36);
       expect(_expected.keys.toSet(), _texts.keys.toSet());
     });
 
@@ -271,8 +265,6 @@ void main() {
         expect(strings.queueTitle(odd), contains(odd));
         expect(strings.waitForQueues(odd), contains(odd));
         expect(strings.traySendTo(odd), contains(odd));
-        expect(strings.folderSavedNotice(odd, 'Otro'), contains(odd));
-        expect(strings.folderSavedNotice('Otra', odd), contains(odd));
         expect(strings.queueNotSent(odd), contains(odd));
         expect(strings.outcomeUnreadableEntry(odd), contains(odd));
         expect(strings.outcomeInvalidNameEntry(odd), contains(odd));

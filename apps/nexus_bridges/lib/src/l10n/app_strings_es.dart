@@ -908,8 +908,4 @@ final class AppStringsEs implements AppStrings {
   @override
   String get dragTipBody =>
       'Sobre un equipo para enviárselo; fuera de ellos, a Para enviar';
-
-  @override
-  String folderSavedNotice(String name, String peer) =>
-      'Carpeta $name recibida de $peer';
 }

@@ -230,7 +230,6 @@ abstract class AppStrings {
   String get dragHint;
   String get dragTipTitle;
   String get dragTipBody;
-  String folderSavedNotice(String name, String peer);
 }
 
 AppStrings stringsFor(String languageCode) {
