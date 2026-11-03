@@ -126,6 +126,7 @@ abstract final class Limits {
   static const int maxRelaxedConnections = 2;
   static const Duration replaceAfterAbsence = Duration(minutes: 2);
   static const Duration goodbyeCheckInterval = Duration(seconds: 5);
+  static const Duration renameCheckInterval = Duration(seconds: 5);
   static const int maxCombiningMarks = 4;
   static const int maxFolderEntries = 100000;
   static const int maxFolderDepth = 64;
@@ -280,6 +281,19 @@ String? sanitizeDisplayName(String raw) {
     cleaned.runes.take(Limits.maxNameLength),
   );
   return truncated.isEmpty ? null : truncated;
+}
+
+enum DeviceNameProblem { empty, tooLong, invalidCharacters }
+
+DeviceNameProblem? deviceNameProblem(String trimmed) {
+  if (trimmed.isEmpty) return DeviceNameProblem.empty;
+  if (trimmed.runes.length > Limits.maxNameLength) {
+    return DeviceNameProblem.tooLong;
+  }
+  if (sanitizeDisplayName(trimmed) != trimmed) {
+    return DeviceNameProblem.invalidCharacters;
+  }
+  return null;
 }
 
 enum AnnouncementKind { hello, bye }

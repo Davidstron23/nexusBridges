@@ -37,13 +37,20 @@ final class Refreshed extends RegistryAction {
 }
 
 final class Verify extends RegistryAction {
-  const Verify(this.info, this.address, this.interfaceId);
+  const Verify(
+    this.info,
+    this.address,
+    this.interfaceId, {
+    this.rename = false,
+  });
 
   final DeviceInfo info;
 
   final InternetAddress address;
 
   final String interfaceId;
+
+  final bool rename;
 }
 
 final class VerifyGoodbye extends RegistryAction {
@@ -99,6 +106,8 @@ final class DiscoveryRegistry {
 
   final Map<String, Duration> _heardAt = {};
 
+  final Map<String, Duration> _renameChecks = {};
+
   DiscoveredDevice _deviceOf(_Entry entry) => DiscoveredDevice(
     info: entry.info,
     address: entry.address,
@@ -140,6 +149,14 @@ final class DiscoveryRegistry {
       return const Ignore();
     }
     if (known != null && known.address.address == from.address) {
+      if (a.info.name != known.info.name && _renameCheckDue(fingerprint)) {
+        return Verify(
+          known.info,
+          known.address,
+          known.interfaceId,
+          rename: true,
+        );
+      }
       if (known.fromScan && known.interfaceId == interfaceId) {
         _heardAt[fingerprint] = _clock();
       }
@@ -151,6 +168,16 @@ final class DiscoveryRegistry {
     if (known != null) return Verify(a.info, from, interfaceId);
     if (_unpairedLimitReached(fingerprint, from)) return const Ignore();
     return Verify(a.info, from, interfaceId);
+  }
+
+  bool _renameCheckDue(String fingerprint) {
+    final clock = _clock();
+    final last = _renameChecks[fingerprint];
+    if (last != null && clock - last < Limits.renameCheckInterval) {
+      return false;
+    }
+    _renameChecks[fingerprint] = clock;
+    return true;
   }
 
   bool onVerified(
@@ -221,6 +248,11 @@ final class DiscoveryRegistry {
     expired.forEach(_entries.remove);
     expired.forEach(_heardAt.remove);
     _heardAt.removeWhere((_, heard) => clock - heard >= Limits.expireAfter);
+    _renameChecks.removeWhere(
+      (key, checked) =>
+          !_entries.containsKey(key) ||
+          clock - checked >= Limits.renameCheckInterval,
+    );
     return expired;
   }
 

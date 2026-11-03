@@ -1,7 +1,7 @@
 import '../discovery/discovery.dart';
 import '../outbox/outbox.dart' show SendQueuesView, TrayItemView;
 import '../pairing_flow/pairing_flow.dart' show PairingView;
-import '../protocol/protocol.dart' show DeviceType;
+import '../protocol/protocol.dart' show DeviceNameProblem, DeviceType;
 import '../transfer/transfer.dart'
     show IncomingTransferView, OutgoingTransferView, TransferResultView;
 
@@ -39,6 +39,7 @@ enum NoticeKind {
   replaceWithdrawn,
   receiveFolderNotSaved,
   peerCancelledTransfer,
+  settingNotSaved,
 }
 
 final class NetworkPrompt {
@@ -199,6 +200,38 @@ final class MineQuestion extends PairingQuestion {
   int get hashCode => Object.hash(MineQuestion, fingerprint, deviceName);
 }
 
+final class DeviceNameResult {
+  const DeviceNameResult({this.problem, this.saved = true});
+
+  final DeviceNameProblem? problem;
+  final bool saved;
+
+  @override
+  bool operator ==(Object other) =>
+      other is DeviceNameResult &&
+      other.problem == problem &&
+      other.saved == saved;
+
+  @override
+  int get hashCode => Object.hash(problem, saved);
+}
+
+final class SettingsView {
+  const SettingsView({this.customName, this.windowsName = ''});
+
+  final String? customName;
+  final String windowsName;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SettingsView &&
+      other.customName == customName &&
+      other.windowsName == windowsName;
+
+  @override
+  int get hashCode => Object.hash(customName, windowsName);
+}
+
 final class SelectionProgress {
   const SelectionProgress({
     required this.selectionId,
@@ -251,6 +284,7 @@ final class NodeState {
     this.portInUse,
     this.decisionNotSaved = false,
     this.deviceName = '',
+    this.settings = const SettingsView(),
     this.fingerprint = '',
     this.entries = const [],
     this.pairing,
@@ -285,6 +319,7 @@ final class NodeState {
   final int? portInUse;
   final bool decisionNotSaved;
   final String deviceName;
+  final SettingsView settings;
   final String fingerprint;
   final List<DeviceEntry> entries;
   final PairingView? pairing;

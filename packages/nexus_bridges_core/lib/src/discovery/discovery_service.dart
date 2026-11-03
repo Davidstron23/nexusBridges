@@ -235,8 +235,13 @@ final class DiscoveryService {
           if (!reverse && announcement.kind == AnnouncementKind.hello) {
             _replyTo(announcement.info.fingerprint, from, via.id);
           }
-        case Verify(:final info, :final address, :final interfaceId):
-          _submit(info, address, interfaceId, reverse: reverse);
+        case Verify(
+          :final info,
+          :final address,
+          :final interfaceId,
+          :final rename,
+        ):
+          _submit(info, address, interfaceId, reverse: reverse, rename: rename);
         case VerifyGoodbye(:final info, :final address, :final interfaceId):
           _submitGoodbye(info, address, interfaceId);
       }
@@ -250,6 +255,7 @@ final class DiscoveryService {
     InternetAddress address,
     String interfaceId, {
     required bool reverse,
+    required bool rename,
   }) {
     final abort = _aborts[interfaceId];
     if (abort == null) return;
@@ -260,7 +266,8 @@ final class DiscoveryService {
       interfaceId: interfaceId,
       reverse: reverse,
       port: port,
-      job: () => _verify(info, address, interfaceId, abort, reverse, port),
+      job: () =>
+          _verify(info, address, interfaceId, abort, reverse, port, rename),
     );
   }
 
@@ -324,6 +331,7 @@ final class DiscoveryService {
     AbortSignal abort,
     bool reverse,
     int? port,
+    bool rename,
   ) async {
     DeviceInfo? verified;
     try {
@@ -346,6 +354,7 @@ final class DiscoveryService {
       if (changed) _emitIfChanged();
       return;
     }
+    if (rename) return;
     _gate.markFailed(
       info.fingerprint,
       address.address,
@@ -373,7 +382,30 @@ final class DiscoveryService {
     }
   }
 
-  Future<void> _present(DiscoveredDevice device, AbortSignal abort) async {
+  void presentNow() {
+    if (_stopped) return;
+    try {
+      for (final device in _registry.devices) {
+        final fingerprint = device.info.fingerprint;
+        final abort = _aborts[device.interfaceId];
+        if (_presenting.contains(fingerprint) ||
+            abort == null ||
+            !_active.containsKey(device.interfaceId)) {
+          continue;
+        }
+        _presenting.add(fingerprint);
+        unawaited(_present(device, abort, fromScan: false));
+      }
+    } catch (e) {
+      _log('presentation failed: ${e.runtimeType}');
+    }
+  }
+
+  Future<void> _present(
+    DiscoveredDevice device,
+    AbortSignal abort, {
+    bool fromScan = true,
+  }) async {
     final fingerprint = device.info.fingerprint;
     try {
       final verified = await _verifier.register(
@@ -391,7 +423,7 @@ final class DiscoveryService {
           verified,
           device.address,
           device.interfaceId,
-          fromScan: true,
+          fromScan: fromScan,
         );
         _gate.clearFailures(fingerprint);
         if (changed) _emitIfChanged();

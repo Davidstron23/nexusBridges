@@ -20,12 +20,14 @@ import '../pairing/pairing.dart'
     show
         IgnoredDevicesStore,
         PairedDevicesStore,
+        PairedDevice,
         PairedLoadResult,
         PeerRelation;
 import '../pairing_flow/pairing_flow.dart';
 import '../protocol/protocol.dart';
 import '../server/server.dart' show ApiServer;
-import '../settings/settings.dart' show SavedReceiveFolder, SettingsStore;
+import '../settings/settings.dart'
+    show SavedReceiveFolder, SettingsSnapshot, SettingsStore;
 import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
 import '../transfer/transfer.dart'
     show
@@ -51,7 +53,8 @@ import '../transfer/transfer.dart'
         WindowsFilePicker,
         measureFolderSize,
         writeAllBytes;
-import 'entries.dart';
+import 'entries.dart' hide namesakeOf;
+import 'entries.dart' as entries show namesakeOf;
 import 'node_state.dart';
 import 'reconcile.dart';
 
@@ -62,7 +65,8 @@ export '../outbox/outbox.dart'
     show QueueItemState, QueueItemView, SendQueuesView, TrayItemView;
 export '../pairing_flow/pairing_flow.dart'
     show PairingView, PairingRole, PairingPhase, PairingOutcome, ReceiverAnswer;
-export '../protocol/protocol.dart' show DeviceInfo, DeviceType;
+export '../protocol/protocol.dart'
+    show DeviceInfo, DeviceNameProblem, DeviceType, deviceNameProblem;
 export '../transfer/transfer.dart'
     show
         FirstLevelItem,
@@ -202,7 +206,7 @@ final class NexusNode {
     required this._protector,
     required this._read,
     required this._port,
-    required this._deviceName,
+    required this._windowsName,
     required this._now,
     required this._monotonic,
     required this._presentInterval,
@@ -258,7 +262,7 @@ final class NexusNode {
       protector: protector ?? DpapiSecretProtector(),
       read: readNetworks ?? singleFlight(_readWindowsNetworks),
       port: port,
-      deviceName: _resolveDeviceName(deviceName),
+      windowsName: _resolveDeviceName(deviceName),
       now: now,
       monotonic: monotonic,
       presentInterval: presentInterval,
@@ -295,7 +299,7 @@ final class NexusNode {
   final SecretProtector _protector;
   final Future<List<AdapterInfo>> Function() _read;
   final int _port;
-  final String _deviceName;
+  final String _windowsName;
   final DateTime Function() _now;
   final Duration Function() _monotonic;
   final Duration _presentInterval;
@@ -320,7 +324,11 @@ final class NexusNode {
   final StreamController<NodeState> _states =
       StreamController<NodeState>.broadcast();
 
-  late NodeState _state = NodeState(paused: true, deviceName: _deviceName);
+  late NodeState _state = NodeState(
+    paused: true,
+    deviceName: _effectiveName,
+    settings: SettingsView(windowsName: _windowsName),
+  );
   NodeState? _lastEmitted;
 
   Future<void> _tail = Future<void>.value();
@@ -331,6 +339,9 @@ final class NexusNode {
   IdentityStatus _identityStatus = IdentityStatus.ok;
   String? _identityError;
   String _fingerprint = '';
+  String? _customName;
+  SettingsStore? _settings;
+  Timer? _renameTimer;
   int? _portInUse;
   List<DiscoveredDevice> _devices = const [];
   Map<String, String> _displayNames = const {};
@@ -389,6 +400,8 @@ final class NexusNode {
   StreamSubscription<void>? _pairedSaveSubscription;
   StreamSubscription<void>? _ignoredSaveSubscription;
   Timer? _suggestTimer;
+
+  String get _effectiveName => _customName ?? _windowsName;
 
   NodeState get state => _state;
 
@@ -791,6 +804,63 @@ final class NexusNode {
     });
   }
 
+  Future<DeviceNameResult> setDeviceName(String? name) async {
+    var result = const DeviceNameResult();
+    await _run('set device name', () async {
+      final String? next;
+      if (name == null) {
+        next = null;
+      } else {
+        next = name.trim();
+        final problem = deviceNameProblem(next);
+        if (problem != null) {
+          result = DeviceNameResult(problem: problem);
+          return;
+        }
+      }
+      if (next == _customName) return;
+      _customName = next;
+      _emit();
+      final discovery = _discovery;
+      discovery?.announceNow();
+      discovery?.presentNow();
+      _renameTimer?.cancel();
+      _renameTimer = Timer(Limits.renameCheckInterval, () {
+        if (_closing) return;
+        _discovery?.announceNow();
+      });
+      var saved = false;
+      try {
+        saved = await _settings?.writeDeviceName(next) ?? false;
+      } catch (e) {
+        _log('device name save failed: ${e.runtimeType}');
+      }
+      if (!saved) {
+        _addNotice(NoticeKind.settingNotSaved);
+        result = const DeviceNameResult(saved: false);
+      }
+      _emit();
+    });
+    return result;
+  }
+
+  String? namesakeOf(String candidate) {
+    for (final device in _devices) {
+      final name = device.info.name;
+      if (device.info.fingerprint != _fingerprint &&
+          sameName(candidate, name)) {
+        return sanitizeDisplayName(name!);
+      }
+    }
+    for (final device in _paired?.devices ?? const <PairedDevice>[]) {
+      if (device.fingerprint != _fingerprint &&
+          sameName(candidate, device.name)) {
+        return sanitizeDisplayName(device.name);
+      }
+    }
+    return null;
+  }
+
   Future<void> retrySave() {
     return _run('retry save', () async {
       final paired = _paired;
@@ -836,6 +906,8 @@ final class NexusNode {
     _closing = true;
     _suggestTimer?.cancel();
     _suggestTimer = null;
+    _renameTimer?.cancel();
+    _renameTimer = null;
     return _exclusive(() async {
       await _closeResourcesLocked(sayGoodbye: true);
       if (!_states.isClosed) await _states.close();
@@ -971,7 +1043,14 @@ final class NexusNode {
     }
     final settings = SettingsStore(
       JsonFileStore(_fileIn(dir, 'settings.json')),
+      now: _now,
     );
+    var snapshot = const SettingsSnapshot();
+    try {
+      snapshot = await settings.load();
+    } catch (e) {
+      _log('settings load failed: ${e.runtimeType}');
+    }
     final journal = TempJournal(
       JsonFileStore(_fileIn(dir, 'cleanup.json')),
       log: _log,
@@ -991,13 +1070,18 @@ final class NexusNode {
       _identityStatus = IdentityStatus.reset;
     }
     _fingerprint = identity.fingerprint;
+    _settings = settings;
+    final savedName = snapshot.deviceName;
+    _customName = savedName != null && deviceNameProblem(savedName) == null
+        ? savedName
+        : null;
 
     final channel =
         _injectedChannel ?? MulticastChannel(port: _port, log: _log);
     final verifier = DeviceVerifier(identity: identity);
     final scanner = SubnetScanner(verifier: verifier, port: _port);
     DeviceInfo selfInfo() => DeviceInfo(
-      name: _deviceName,
+      name: _effectiveName,
       fingerprint: identity.fingerprint,
       port: _server?.boundPort ?? _port,
       protocol: protocolVersion,
@@ -1355,6 +1439,9 @@ final class NexusNode {
   }
 
   Future<void> _closeResourcesLocked({required bool sayGoodbye}) async {
+    _renameTimer?.cancel();
+    _renameTimer = null;
+    _settings = null;
     final monitor = _monitor;
     final discovery = _discovery;
     final server = _server;
@@ -2042,13 +2129,17 @@ final class NexusNode {
       suggestRescan: _suggestRescan,
       portInUse: _portInUse,
       decisionNotSaved: _decisionNotSaved,
-      deviceName: _deviceName,
+      deviceName: _effectiveName,
+      settings: SettingsView(
+        customName: _customName,
+        windowsName: _windowsName,
+      ),
       fingerprint: _fingerprint,
       entries: _entries,
       pairing: view,
       pairingNamesake: view == null || paired == null
           ? null
-          : namesakeOf(
+          : entries.namesakeOf(
               name: view.peerName,
               excluding: view.peerFingerprint,
               paired: paired.devices,
@@ -2068,7 +2159,7 @@ final class NexusNode {
       pickerOpen: transfers?.pickerOpen ?? false,
       incomingNamesake: incoming == null || paired == null
           ? null
-          : namesakeOf(
+          : entries.namesakeOf(
               name: incoming.peerName,
               excluding: incoming.peerFingerprint,
               paired: paired.devices,
@@ -2095,6 +2186,7 @@ bool _sameState(NodeState a, NodeState b) {
       a.portInUse == b.portInUse &&
       a.decisionNotSaved == b.decisionNotSaved &&
       a.deviceName == b.deviceName &&
+      a.settings == b.settings &&
       a.fingerprint == b.fingerprint &&
       a.unsavedChanges == b.unsavedChanges &&
       a.scanning == b.scanning &&
