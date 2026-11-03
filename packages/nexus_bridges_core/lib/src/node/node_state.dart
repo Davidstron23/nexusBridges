@@ -3,7 +3,12 @@ import '../outbox/outbox.dart' show SendQueuesView, TrayItemView;
 import '../pairing_flow/pairing_flow.dart' show PairingView;
 import '../protocol/protocol.dart' show DeviceNameProblem, DeviceType;
 import '../transfer/transfer.dart'
-    show IncomingTransferView, OutgoingTransferView, TransferResultView;
+    show
+        IncomingTransferView,
+        OutgoingTransferView,
+        TransferResultView,
+        defaultExclusions;
+import 'settings_rules.dart' show ExclusionProblem;
 
 enum IdentityStatus { ok, reset, failed }
 
@@ -40,6 +45,7 @@ enum NoticeKind {
   receiveFolderNotSaved,
   peerCancelledTransfer,
   settingNotSaved,
+  networkStopNotSaved,
 }
 
 final class NetworkPrompt {
@@ -128,7 +134,9 @@ final class Notice {
   final String? detail;
 
   bool get canRetry =>
-      kind == NoticeKind.unpairNotSaved || kind == NoticeKind.changeNotSaved;
+      kind == NoticeKind.unpairNotSaved ||
+      kind == NoticeKind.changeNotSaved ||
+      kind == NoticeKind.networkStopNotSaved;
 
   @override
   bool operator ==(Object other) =>
@@ -216,20 +224,120 @@ final class DeviceNameResult {
   int get hashCode => Object.hash(problem, saved);
 }
 
+final class ExclusionOutcome {
+  const ExclusionOutcome({this.problem, this.saved = true});
+
+  final ExclusionProblem? problem;
+  final bool saved;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ExclusionOutcome &&
+      other.problem == problem &&
+      other.saved == saved;
+
+  @override
+  int get hashCode => Object.hash(problem, saved);
+}
+
 final class SettingsView {
-  const SettingsView({this.customName, this.windowsName = ''});
+  const SettingsView({
+    this.customName,
+    this.windowsName = '',
+    this.exclusions = defaultExclusions,
+    this.receiveFolder,
+    this.receiveFolderLocked = false,
+  });
 
   final String? customName;
   final String windowsName;
+  final List<String> exclusions;
+  final String? receiveFolder;
+  final bool receiveFolderLocked;
 
   @override
   bool operator ==(Object other) =>
       other is SettingsView &&
       other.customName == customName &&
-      other.windowsName == windowsName;
+      other.windowsName == windowsName &&
+      _sameNames(other.exclusions, exclusions) &&
+      other.receiveFolder == receiveFolder &&
+      other.receiveFolderLocked == receiveFolderLocked;
 
   @override
-  int get hashCode => Object.hash(customName, windowsName);
+  int get hashCode => Object.hash(
+    customName,
+    windowsName,
+    Object.hashAll(exclusions),
+    receiveFolder,
+    receiveFolderLocked,
+  );
+}
+
+bool _sameNames(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+final class TrustedNetworkView {
+  const TrustedNetworkView({
+    required this.networkId,
+    required this.name,
+    required this.trustedAt,
+    required this.connected,
+    this.transfers = 0,
+    this.pairing = false,
+  });
+
+  final String networkId;
+  final String? name;
+  final DateTime trustedAt;
+  final bool connected;
+  final int transfers;
+  final bool pairing;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TrustedNetworkView &&
+      other.networkId == networkId &&
+      other.name == name &&
+      other.trustedAt == trustedAt &&
+      other.connected == connected &&
+      other.transfers == transfers &&
+      other.pairing == pairing;
+
+  @override
+  int get hashCode =>
+      Object.hash(networkId, name, trustedAt, connected, transfers, pairing);
+}
+
+final class IgnoredDeviceView {
+  const IgnoredDeviceView({
+    required this.fingerprint,
+    required this.name,
+    required this.shortFingerprint,
+    required this.ignoredAt,
+  });
+
+  final String fingerprint;
+  final String name;
+  final String shortFingerprint;
+  final DateTime ignoredAt;
+
+  @override
+  bool operator ==(Object other) =>
+      other is IgnoredDeviceView &&
+      other.fingerprint == fingerprint &&
+      other.name == name &&
+      other.shortFingerprint == shortFingerprint &&
+      other.ignoredAt == ignoredAt;
+
+  @override
+  int get hashCode =>
+      Object.hash(fingerprint, name, shortFingerprint, ignoredAt);
 }
 
 final class SelectionProgress {
@@ -305,6 +413,8 @@ final class NodeState {
     this.tray = const [],
     this.sendingTo,
     this.selectionProgress,
+    this.ignoredDevices = const [],
+    this.trustedNetworks = const [],
   });
 
   final IdentityStatus identityStatus;
@@ -340,6 +450,8 @@ final class NodeState {
   final List<TrayItemView> tray;
   final String? sendingTo;
   final SelectionProgress? selectionProgress;
+  final List<IgnoredDeviceView> ignoredDevices;
+  final List<TrustedNetworkView> trustedNetworks;
 
   bool canSendTo(String fingerprint) {
     for (final entry in entries) {

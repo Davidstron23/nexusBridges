@@ -214,12 +214,47 @@ final class _TrustEntry {
   final DateTime decidedAt;
 }
 
+final class TrustedNetwork {
+  const TrustedNetwork({
+    required this.networkId,
+    required this.name,
+    required this.trustedAt,
+  });
+
+  final String networkId;
+  final String name;
+  final DateTime trustedAt;
+}
+
 final class NetworkTrustStore {
   NetworkTrustStore(this._store, {this._now = DateTime.now});
 
   final JsonFileStore _store;
   final DateTime Function() _now;
   final Map<String, _TrustEntry> _entries = {};
+  bool _unsaved = false;
+
+  List<TrustedNetwork> get trusted => [
+    for (final MapEntry(:key, :value) in _entries.entries)
+      if (value.decision == NetworkDecision.trusted)
+        TrustedNetwork(
+          networkId: key,
+          name: value.name,
+          trustedAt: value.decidedAt,
+        ),
+  ];
+
+  TrustedNetwork? trustedEntry(String networkId) {
+    final entry = _entries[networkId];
+    if (entry == null || entry.decision != NetworkDecision.trusted) return null;
+    return TrustedNetwork(
+      networkId: networkId,
+      name: entry.name,
+      trustedAt: entry.decidedAt,
+    );
+  }
+
+  bool get hasUnsavedChanges => _unsaved;
 
   Future<void> load() async {
     _entries.clear();
@@ -240,6 +275,18 @@ final class NetworkTrustStore {
     required String name,
   }) async {
     _entries[networkId] = _TrustEntry(decision, name, _now().toUtc());
+    final saved = await _write();
+    _unsaved = !saved;
+    return saved;
+  }
+
+  Future<bool> retrySave() async {
+    final saved = await _write();
+    if (saved) _unsaved = false;
+    return saved;
+  }
+
+  Future<bool> _write() async {
     try {
       await _store.write(_toJson());
       return true;

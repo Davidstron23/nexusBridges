@@ -196,7 +196,8 @@ String _noticeText(AppStrings strings, Notice notice) {
     NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
     NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
     NoticeKind.changeNotSaved ||
-    NoticeKind.settingNotSaved => strings.noticeChangeNotSaved,
+    NoticeKind.settingNotSaved ||
+    NoticeKind.networkStopNotSaved => strings.noticeChangeNotSaved,
     NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
     NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
     NoticeKind.pairingFailed => strings.noticePairingFailed(name),

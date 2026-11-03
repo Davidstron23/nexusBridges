@@ -790,15 +790,18 @@ void main() {
         NoticeKind.receiveFolderNotSaved,
         NoticeKind.peerCancelledTransfer,
         NoticeKind.settingNotSaved,
+        NoticeKind.networkStopNotSaved,
       ]);
     });
 
-    test('only unpairNotSaved and changeNotSaved can be retried', () {
+    test('only unpairNotSaved, changeNotSaved and networkStopNotSaved can be '
+        'retried', () {
       for (final kind in NoticeKind.values) {
         expect(
           Notice(id: 1, kind: kind).canRetry,
           kind == NoticeKind.unpairNotSaved ||
-              kind == NoticeKind.changeNotSaved,
+              kind == NoticeKind.changeNotSaved ||
+              kind == NoticeKind.networkStopNotSaved,
           reason: kind.name,
         );
       }

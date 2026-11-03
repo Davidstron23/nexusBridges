@@ -181,6 +181,14 @@ final class PairingInitiator {
     if (run != null && run.finished) _run = null;
   }
 
+  bool isPairingVia(Set<String> interfaceIds) {
+    final run = _run;
+    return !_closed &&
+        run != null &&
+        !run.finished &&
+        interfaceIds.contains(run.target.interfaceId);
+  }
+
   void interfacesChanged(Set<String> activeInterfaceIds) {
     final run = _run;
     if (_closed || run == null || run.finished || run.saving) return;

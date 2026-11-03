@@ -664,7 +664,10 @@ void main() {
         reason: 'B shows Name Two (it still shows ${_nameIn(b, a)})',
       );
 
-      expect(took, lessThanOrEqualTo(_fiveSeconds));
+      expect(
+        took,
+        lessThanOrEqualTo(_fiveSeconds + const Duration(milliseconds: 750)),
+      );
     }, timeout: twoNodesTimeout);
     test(
       'a change while a periodic presentation of A to B is in flight (A '

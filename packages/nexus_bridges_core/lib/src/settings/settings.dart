@@ -44,6 +44,20 @@ final class SettingsSnapshot {
   final bool trayHintShown;
 }
 
+final class StartupSettings {
+  const StartupSettings({
+    required this.language,
+    this.theme = ThemeChoice.dark,
+    this.closeToTray = true,
+    this.trayHintShown = false,
+  });
+
+  final String language;
+  final ThemeChoice theme;
+  final bool closeToTray;
+  final bool trayHintShown;
+}
+
 List<String>? _parseExclusions(Object? raw) {
   if (raw is! List<Object?> || raw.length > _maxExclusions) return null;
   final names = <String>[];
@@ -156,6 +170,29 @@ final class SettingsStore {
     });
   }
 
+  Future<bool> writeLanguage(String code) {
+    if (code != 'es' && code != 'en') return Future<bool>.value(false);
+    return _update((json) => json['language'] = code);
+  }
+
+  Future<bool> writeTheme(ThemeChoice theme) {
+    return _update((json) => json['theme'] = theme.name);
+  }
+
+  Future<bool> writeExclusions(List<String> names) {
+    final copy = List<String>.of(names);
+    if (_parseExclusions(copy) == null) return Future<bool>.value(false);
+    return _update((json) => json['exclusions'] = copy);
+  }
+
+  Future<bool> writeCloseToTray(bool enabled) {
+    return _update((json) => json['closeToTray'] = enabled);
+  }
+
+  Future<bool> writeTrayHintShown() {
+    return _update((json) => json['trayHintShown'] = true);
+  }
+
   Future<bool> writeReceiveFolder(SavedReceiveFolder folder) {
     if (!_isValidSavedFolder(folder.path, folder.volumeId)) {
       return Future<bool>.value(false);
@@ -242,5 +279,29 @@ Future<String> loadLanguage({
   return resolveLanguage(
     saved: saved,
     platformLanguageCode: platformLanguageCode,
+  );
+}
+
+Future<StartupSettings> loadStartupSettings({
+  required String platformLanguageCode,
+  Directory? dataDir,
+}) async {
+  var snapshot = const SettingsSnapshot();
+  try {
+    final dir = dataDir ?? defaultDataDir();
+    snapshot = await SettingsStore(
+      JsonFileStore(File('${dir.path}${Platform.pathSeparator}settings.json')),
+    ).load();
+  } catch (_) {
+    snapshot = const SettingsSnapshot();
+  }
+  return StartupSettings(
+    language: resolveLanguage(
+      saved: snapshot.language,
+      platformLanguageCode: platformLanguageCode,
+    ),
+    theme: snapshot.theme,
+    closeToTray: snapshot.closeToTray,
+    trayHintShown: snapshot.trayHintShown,
   );
 }

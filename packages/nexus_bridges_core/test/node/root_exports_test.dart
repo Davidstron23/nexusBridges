@@ -232,12 +232,15 @@ void main() {
       expect(root['src/node/node.dart'], isNull);
     });
 
-    test('the root library shows only the language helpers of settings', () {
+    test('the root library shows only the startup helpers of settings', () {
       final root = _exportsOf(_read('lib/nexus_bridges_core.dart'));
 
       expect(root['src/settings/settings.dart'], {
         'resolveLanguage',
         'loadLanguage',
+        'loadStartupSettings',
+        'StartupSettings',
+        'ThemeChoice',
       });
     });
 
@@ -300,6 +303,7 @@ void main() {
       expect(exports.keys.where((uri) => uri.startsWith('../')).toSet(), {
         '../discovery/discovery.dart',
         '../protocol/protocol.dart',
+        '../settings/settings.dart',
         '../network/network.dart',
         '../identity/identity.dart',
         '../outbox/outbox.dart',
@@ -310,6 +314,12 @@ void main() {
 
     test('from transfer it only shows the view types of the app', () {
       expect(exports['../transfer/transfer.dart'], {
+        'FolderChangeResult',
+        'FolderChanged',
+        'FolderUnchanged',
+        'FolderChangeBlocked',
+        'FolderChangeRefused',
+        'FolderChangeNeedsConfirmation',
         'FirstLevelItem',
         'FolderSummaryView',
         'OutgoingTransferView',

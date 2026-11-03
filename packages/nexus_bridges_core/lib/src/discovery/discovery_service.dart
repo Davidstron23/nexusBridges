@@ -60,6 +60,7 @@ final class DiscoveryService {
   final Map<String, DateTime> _lastReplies = {};
   final Map<String, DateTime> _goodbyeChecks = {};
   final Set<String> _presenting = {};
+  final Set<String> _presentAgain = {};
   final StreamController<List<DiscoveredDevice>> _controller =
       StreamController<List<DiscoveredDevice>>.broadcast();
 
@@ -123,6 +124,14 @@ final class DiscoveryService {
     }
   }
 
+  void sayGoodbye(Set<String> interfaceIds) {
+    if (_stopped) return;
+    for (final id in interfaceIds) {
+      final iface = _active[id];
+      if (iface != null) _send(AnnouncementKind.bye, iface);
+    }
+  }
+
   void announceNow() {
     if (_stopped) return;
     for (final iface in _active.values.toList()) {
@@ -149,15 +158,20 @@ final class DiscoveryService {
     final targets = _active.values.toList();
     final signals = {for (final iface in targets) iface.id: _aborts[iface.id]!};
     final scanAbort = AbortSignal();
+    final perInterface = {for (final iface in targets) iface.id: AbortSignal()};
     final removers = [
       _globalAbort.onAbort(scanAbort.abort),
-      for (final signal in signals.values) signal.onAbort(scanAbort.abort),
+      for (final MapEntry(:key, :value) in perInterface.entries) ...[
+        _globalAbort.onAbort(value.abort),
+        signals[key]!.onAbort(value.abort),
+      ],
     ];
     try {
       await for (final (info, address, iface) in _scanner.scan(
         active: targets,
         self: _selfInfo(),
         abort: scanAbort,
+        abortOf: (iface) => perInterface[iface.id] ?? scanAbort,
       )) {
         final signal = signals[iface.id];
         if (_stopped || signal == null || signal.aborted) continue;
@@ -388,9 +402,11 @@ final class DiscoveryService {
       for (final device in _registry.devices) {
         final fingerprint = device.info.fingerprint;
         final abort = _aborts[device.interfaceId];
-        if (_presenting.contains(fingerprint) ||
-            abort == null ||
-            !_active.containsKey(device.interfaceId)) {
+        if (abort == null || !_active.containsKey(device.interfaceId)) {
+          continue;
+        }
+        if (_presenting.contains(fingerprint)) {
+          _presentAgain.add(fingerprint);
           continue;
         }
         _presenting.add(fingerprint);
@@ -432,6 +448,28 @@ final class DiscoveryService {
       _log('presentation failed: ${e.runtimeType}');
     } finally {
       _presenting.remove(fingerprint);
+      if (_presentAgain.remove(fingerprint)) _presentAgainTo(fingerprint);
+    }
+  }
+
+  void _presentAgainTo(String fingerprint) {
+    if (_stopped) return;
+    try {
+      for (final device in _registry.devices) {
+        if (device.info.fingerprint != fingerprint) continue;
+        final abort = _aborts[device.interfaceId];
+        if (abort == null ||
+            abort.aborted ||
+            !_active.containsKey(device.interfaceId) ||
+            _presenting.contains(fingerprint)) {
+          return;
+        }
+        _presenting.add(fingerprint);
+        unawaited(_present(device, abort, fromScan: false));
+        return;
+      }
+    } catch (e) {
+      _log('presentation failed: ${e.runtimeType}');
     }
   }
 

@@ -315,6 +315,10 @@ final class PairingCoordinator {
     _initiator.interfacesChanged(activeInterfaceIds);
   }
 
+  bool isPairingVia(Set<String> interfaceIds) =>
+      _receiver.isPairingVia(interfaceIds) ||
+      _initiator.isPairingVia(interfaceIds);
+
   Future<PeerStatus> checkPeer(PairingTarget target) =>
       _initiator.checkPeer(target);
 
