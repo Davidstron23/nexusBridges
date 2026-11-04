@@ -43,6 +43,12 @@ const Set<TransferOutcome> stopping = {
   TransferOutcome.interfaceDown,
   TransferOutcome.unconfirmed,
   TransferOutcome.unexpectedData,
+  TransferOutcome.defaultFolderOnly,
+  TransferOutcome.destinationUnavailable,
+  TransferOutcome.destinationMissing,
+  TransferOutcome.destinationLost,
+  TransferOutcome.shareRemoved,
+  TransferOutcome.peerMarkedForeign,
 };
 
 void main() {

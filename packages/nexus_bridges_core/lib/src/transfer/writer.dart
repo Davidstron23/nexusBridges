@@ -202,6 +202,7 @@ final class IncomingFileWriter {
   Future<WriteResult> finish({
     required String name,
     required String expectedSha256,
+    Future<FreeNameMove> Function(String tempPath, String name)? move,
   }) {
     if (_closed) {
       return Future<WriteResult>.value(
@@ -209,7 +210,7 @@ final class IncomingFileWriter {
       );
     }
     _closed = true;
-    return _finishing = _finish(name, expectedSha256);
+    return _finishing = _finish(name, expectedSha256, move);
   }
 
   Future<WriteResult> _fail(TransferOutcome outcome) async {
@@ -217,7 +218,11 @@ final class IncomingFileWriter {
     return WriteFailed(outcome);
   }
 
-  Future<WriteResult> _finish(String name, String expectedSha256) async {
+  Future<WriteResult> _finish(
+    String name,
+    String expectedSha256,
+    Future<FreeNameMove> Function(String tempPath, String name)? move,
+  ) async {
     try {
       if (!isValidFileName(name)) {
         return await _fail(TransferOutcome.invalidName);
@@ -265,7 +270,9 @@ final class IncomingFileWriter {
 
       FreeNameMove moved;
       try {
-        moved = await _fs.moveToFreeName(_tempPath, _target.path, name);
+        moved = move == null
+            ? await _fs.moveToFreeName(_tempPath, _target.path, name)
+            : await move(_tempPath, name);
       } catch (_) {
         moved = const MoveFailed();
       }
@@ -282,6 +289,8 @@ final class IncomingFileWriter {
           return await _fail(TransferOutcome.moveFailed);
         case NoFreeName():
           return await _fail(TransferOutcome.noFreeName);
+        case DestinationChanged():
+          return await _fail(TransferOutcome.destinationLost);
       }
     } catch (_) {
       await _cleanupOnce();

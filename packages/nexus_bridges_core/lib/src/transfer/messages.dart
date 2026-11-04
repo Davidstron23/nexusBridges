@@ -31,18 +31,99 @@ bool _compatibleProtocol(Object? value) {
   return major != null && major == ownMajor;
 }
 
+const int _maxDestinationComponents = 64;
+const int _maxDestinationUnits = 1024;
+
+final RegExp _rootIdPattern = RegExp(r'^[0-9a-f]{32}$');
+
+final class DestinationRequest {
+  const DestinationRequest({
+    required this.rootId,
+    required this.path,
+    this.newFolder,
+  });
+
+  final String rootId;
+  final List<String> path;
+  final String? newFolder;
+
+  Map<String, Object?> toJson() => {
+    'root': rootId,
+    'path': path,
+    if (newFolder != null) 'newFolder': newFolder,
+  };
+
+  static DestinationRequest? tryParse(Object? json) {
+    final map =
+        _objectWithKeys(json, const {'root', 'path'}) ??
+        _objectWithKeys(json, const {'root', 'path', 'newFolder'});
+    if (map == null) return null;
+    final root = map['root'];
+    final raw = map['path'];
+    if (root is! String || !_rootIdPattern.hasMatch(root)) return null;
+    if (raw is! List<Object?> || raw.length > _maxDestinationComponents) {
+      return null;
+    }
+    final path = <String>[];
+    for (final component in raw) {
+      if (component is! String ||
+          component.isEmpty ||
+          component.length > _maxDestinationUnits) {
+        return null;
+      }
+      path.add(component);
+    }
+    String? newFolder;
+    if (map.containsKey('newFolder')) {
+      final value = map['newFolder'];
+      if (value is! String ||
+          value.isEmpty ||
+          value.length > _maxDestinationUnits) {
+        return null;
+      }
+      newFolder = value;
+    }
+    return DestinationRequest(
+      rootId: root,
+      path: List.unmodifiable(path),
+      newFolder: newFolder,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is DestinationRequest &&
+      other.rootId == rootId &&
+      other.newFolder == newFolder &&
+      other.path.length == path.length &&
+      Iterable<int>.generate(path.length)
+          .every((i) => other.path[i] == path[i]);
+
+  @override
+  int get hashCode => Object.hash(rootId, newFolder, Object.hashAll(path));
+}
+
+Map<Object?, Object?>? _offerMap(Object? json, Set<String> keys) =>
+    _objectWithKeys(json, keys) ??
+    _objectWithKeys(json, {...keys, 'destination'});
+
+DestinationRequest? _destinationOf(Map<Object?, Object?> map) =>
+    DestinationRequest.tryParse(map['destination']);
+
 final class OfferRequest {
   const OfferRequest({
     required this.transfer,
     required this.name,
     required this.size,
     required this.sha256,
+    this.destination,
   });
 
   final String transfer;
   final String name;
   final int size;
   final String sha256;
+  final DestinationRequest? destination;
 
   Map<String, Object?> toJson() => {
     'protocol': protocolVersion,
@@ -50,10 +131,11 @@ final class OfferRequest {
     'name': name,
     'size': size,
     'sha256': sha256,
+    if (destination != null) 'destination': destination!.toJson(),
   };
 
   static OfferRequest? tryParse(Object? json) {
-    final map = _objectWithKeys(json, const {
+    final map = _offerMap(json, const {
       'protocol',
       'transfer',
       'name',
@@ -68,11 +150,17 @@ final class OfferRequest {
     if (transfer == null || name is! String) return null;
     if (size is! int || size < 0 || size > Limits.maxTransferSize) return null;
     if (sha256 is! String || !_sha256Pattern.hasMatch(sha256)) return null;
+    DestinationRequest? destination;
+    if (map.containsKey('destination')) {
+      destination = _destinationOf(map);
+      if (destination == null) return null;
+    }
     return OfferRequest(
       transfer: transfer,
       name: name,
       size: size,
       sha256: sha256,
+      destination: destination,
     );
   }
 }
@@ -89,6 +177,7 @@ final class FolderOfferRequest {
     required this.depth,
     required this.longest,
     required this.manifestBytes,
+    this.destination,
   });
 
   final String transfer;
@@ -99,6 +188,7 @@ final class FolderOfferRequest {
   final int depth;
   final int longest;
   final int manifestBytes;
+  final DestinationRequest? destination;
 
   Map<String, Object?> toJson() => {
     'protocol': protocolVersion,
@@ -111,6 +201,7 @@ final class FolderOfferRequest {
     'depth': depth,
     'longest': longest,
     'manifestBytes': manifestBytes,
+    if (destination != null) 'destination': destination!.toJson(),
   };
 
   bool get exceedsLimits =>
@@ -119,7 +210,7 @@ final class FolderOfferRequest {
       manifestBytes > Limits.maxManifestBytes;
 
   static FolderOfferRequest? tryParse(Object? json) {
-    final map = _objectWithKeys(json, const {
+    final map = _offerMap(json, const {
       'protocol',
       'transfer',
       'kind',
@@ -157,6 +248,11 @@ final class FolderOfferRequest {
         manifestBytes < entries * 6) {
       return null;
     }
+    DestinationRequest? destination;
+    if (map.containsKey('destination')) {
+      destination = _destinationOf(map);
+      if (destination == null) return null;
+    }
     return FolderOfferRequest(
       transfer: transfer,
       name: name,
@@ -166,6 +262,7 @@ final class FolderOfferRequest {
       depth: depth,
       longest: longest,
       manifestBytes: manifestBytes,
+      destination: destination,
     );
   }
 }
@@ -274,6 +371,7 @@ const Map<String, TransferOutcome> _failedReasons = {
   'interface_down': TransferOutcome.interfaceDown,
   'unreadable': TransferOutcome.unreadable,
   'unexpected_data': TransferOutcome.unexpectedData,
+  'destination_lost': TransferOutcome.destinationLost,
 };
 
 String? _wireReason(Map<String, TransferOutcome> reasons, TransferOutcome o) {
@@ -480,6 +578,11 @@ TransferOutcome offerOutcome(int status, Map<String, Object?> json) {
   return switch (status) {
     409 || 429 || 503 => TransferOutcome.busy,
     403 when error == 'declined' => TransferOutcome.declined,
+    403 when error == 'default_only' => TransferOutcome.defaultFolderOnly,
+    403 when error == 'destination_unavailable' =>
+      TransferOutcome.destinationUnavailable,
+    404 when error == 'destination_missing' =>
+      TransferOutcome.destinationMissing,
     413 when error == 'too_large' => TransferOutcome.tooLargeForPeer,
     400 || 413 => TransferOutcome.incompatible,
     422 when error == 'path_too_long' => TransferOutcome.pathTooLong,

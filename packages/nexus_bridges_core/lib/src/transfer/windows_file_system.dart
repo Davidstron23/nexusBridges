@@ -6,6 +6,7 @@ import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
 import '../protocol/protocol.dart' show Limits;
+import '../winio/winio.dart' show extendedPath, stripExtendedPrefix;
 import 'names.dart'
     show
         baseName,
@@ -15,12 +16,7 @@ import 'names.dart'
         isValidFileName;
 import 'platform.dart';
 import 'windows_folder_io.dart'
-    show
-        dangerousExtensionsSync,
-        deleteTreeNoFollowSync,
-        extendedPath,
-        isDangerousTypeSync,
-        stripExtendedPrefix;
+    show dangerousExtensionsSync, deleteTreeNoFollowSync, isDangerousTypeSync;
 
 const int _stepMoved = 0;
 const int _stepTaken = 1;

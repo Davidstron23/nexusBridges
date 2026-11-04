@@ -1,4 +1,5 @@
 import '../protocol/protocol.dart' show Limits;
+import '../winio/winio.dart' show isLinkTag;
 import 'folders.dart' show isSameOrInside;
 import 'manifest.dart' show ManifestBuilder;
 import 'names.dart' show isAppReservedName, isBlockedType, isValidFileName;
@@ -23,8 +24,6 @@ abstract interface class FolderLister {
 }
 
 enum DataFolderKind { outside, inside, unknown }
-
-bool isLinkTag(int tag) => (tag & 0x20000000) != 0 || tag == 0x8000001B;
 
 final class WalkResult {
   WalkResult(this.builder);

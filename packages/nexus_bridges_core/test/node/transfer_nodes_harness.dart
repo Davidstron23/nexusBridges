@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:nexus_bridges_core/src/browse/browse.dart'
+    show ShareWriteFileSystem;
 import 'package:nexus_bridges_core/src/discovery/discovery.dart'
     show MulticastChannel;
 import 'package:nexus_bridges_core/src/identity/identity.dart';
@@ -197,6 +199,7 @@ final class TransferNode {
   List<ActiveInterface> Function(List<InterfaceState> states, String loopback)?
   activeOfOverride;
   int channelPort = 0;
+  ShareWriteFileSystem? shareFileSystem;
   NexusNode? _node;
   Future<void>? _stopped;
 
@@ -349,6 +352,7 @@ final class TransferNode {
         pairingTickInterval: const Duration(milliseconds: 50),
         pairingPollHold: const Duration(milliseconds: 300),
         fileSystem: platform,
+        shareFileSystem: shareFileSystem,
         picker: picker,
         revealer: revealer,
         clock: clock.call,

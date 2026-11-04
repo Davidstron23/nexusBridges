@@ -62,6 +62,10 @@ final class NameTooLong extends FreeNameMove {
   const NameTooLong();
 }
 
+final class DestinationChanged extends FreeNameMove {
+  const DestinationChanged();
+}
+
 abstract interface class FileSystemPlatform {
   Future<String?> realPath(String path);
 

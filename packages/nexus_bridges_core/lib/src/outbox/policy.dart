@@ -56,7 +56,13 @@ bool continuesAfter(TransferOutcome outcome) => switch (outcome) {
   TransferOutcome.moveFailed ||
   TransferOutcome.interfaceDown ||
   TransferOutcome.unconfirmed ||
-  TransferOutcome.unexpectedData => false,
+  TransferOutcome.unexpectedData ||
+  TransferOutcome.defaultFolderOnly ||
+  TransferOutcome.destinationUnavailable ||
+  TransferOutcome.destinationMissing ||
+  TransferOutcome.destinationLost ||
+  TransferOutcome.shareRemoved ||
+  TransferOutcome.peerMarkedForeign => false,
 };
 
 final RegExp _driveRoot = RegExp(r'^[A-Za-z]:[\\/]*$');

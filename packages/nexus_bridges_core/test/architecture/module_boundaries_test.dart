@@ -20,6 +20,7 @@ const Map<String, Set<String>> allowedImports = {
     'server',
     'transport',
   },
+  'winio': {},
   'transfer': {
     'storage',
     'identity',
@@ -28,15 +29,19 @@ const Map<String, Set<String>> allowedImports = {
     'protocol',
     'server',
     'transport',
+    'winio',
   },
   'outbox': {'protocol', 'transfer'},
   'browse': {
+    'storage',
     'identity',
     'network',
     'pairing',
     'protocol',
     'server',
     'transport',
+    'transfer',
+    'winio',
   },
   'node': {
     'storage',
@@ -52,6 +57,7 @@ const Map<String, Set<String>> allowedImports = {
     'transfer',
     'outbox',
     'browse',
+    'winio',
   },
 };
 
@@ -185,6 +191,7 @@ void main() {
       'protocol',
       'server',
       'transport',
+      'winio',
     });
     expect(allowedImports['node'], contains('transfer'));
     expect(allowedImports['storage'], isEmpty);

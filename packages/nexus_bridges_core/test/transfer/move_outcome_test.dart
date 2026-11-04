@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_folder_io.dart';
+import 'package:nexus_bridges_core/src/winio/winio.dart';
 import 'package:test/test.dart';
 
 import 'folders_fakes.dart' hide join;

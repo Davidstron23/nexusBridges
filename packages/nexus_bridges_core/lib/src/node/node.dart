@@ -2,6 +2,24 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 
+import '../browse/browse.dart'
+    show
+        BrowseClient,
+        BrowseCheck,
+        BrowseFailure,
+        BrowseServer,
+        RemoteListing,
+        RemoteListingFailed,
+        ShareAdded,
+        ShareAddOutcome,
+        SharePickCancelled,
+        ShareRefusal,
+        ShareRefused,
+        ShareService,
+        ShareWriteFileSystem,
+        SharesLoadResult,
+        SharesStore,
+        WindowsShareFileSystem;
 import '../discovery/discovery.dart';
 import '../identity/identity.dart';
 import '../network/network.dart';
@@ -42,6 +60,7 @@ import '../transfer/transfer.dart'
         OutgoingPhase,
         PeerCancelledTransfer,
         ReceiveFolder,
+        ReceiveFolderDestination,
         ReceiveFolderNotSaved,
         ReceiveFolderStore,
         RevealResult,
@@ -232,6 +251,7 @@ final class NexusNode {
     required this._ownerWindowClass,
     required this._ownerWindowTitle,
     required this._fileSystem,
+    required this._shareFileSystem,
     required this._picker,
     required this._revealer,
     required this._clock,
@@ -261,6 +281,7 @@ final class NexusNode {
     String ownerWindowClass = '',
     String ownerWindowTitle = '',
     FileSystemPlatform? fileSystem,
+    ShareWriteFileSystem? shareFileSystem,
     FilePicker? picker,
     FolderRevealer? revealer,
     Duration Function() clock = monotonicClock,
@@ -288,6 +309,7 @@ final class NexusNode {
       ownerWindowClass: ownerWindowClass,
       ownerWindowTitle: ownerWindowTitle,
       fileSystem: fileSystem,
+      shareFileSystem: shareFileSystem,
       picker: picker,
       revealer: revealer,
       clock: clock,
@@ -325,6 +347,7 @@ final class NexusNode {
   final String _ownerWindowClass;
   final String _ownerWindowTitle;
   final FileSystemPlatform? _fileSystem;
+  final ShareWriteFileSystem? _shareFileSystem;
   final FilePicker? _picker;
   final FolderRevealer? _revealer;
   final Duration Function() _clock;
@@ -397,6 +420,8 @@ final class NexusNode {
   TransferCoordinator? _transfers;
   SendQueues? _queues;
   SendTray? _tray;
+  ShareService? _shares;
+  BrowseClient? _browseClient;
   PeerCheckScheduler? _scheduler;
   ApiServer? _server;
   MulticastChannel? _channel;
@@ -414,6 +439,8 @@ final class NexusNode {
   StreamSubscription<void>? _ignoredSubscription;
   StreamSubscription<void>? _pairedSaveSubscription;
   StreamSubscription<void>? _ignoredSaveSubscription;
+  StreamSubscription<void>? _sharesChangesSubscription;
+  StreamSubscription<void>? _sharesSaveSubscription;
   Timer? _suggestTimer;
 
   String get _effectiveName => _customName ?? _windowsName;
@@ -589,7 +616,11 @@ final class NexusNode {
   Future<SendResult> sendFolders(String fingerprint) =>
       _sendPicked(fingerprint, (transfers) => transfers.pickFoldersToSend());
 
-  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+  Future<SendResult> sendPaths(
+    String fingerprint,
+    List<String> paths, {
+    SendDestination destination = const ReceiveFolderDestination(),
+  }) async {
     SendQueues? queues;
     String? peerName;
     var result = SendResult.unavailable;
@@ -614,6 +645,7 @@ final class NexusNode {
         paths,
         refresh: () => _sendTargetOf(fingerprint),
         peerName: peerName,
+        destination: destination,
       );
       return switch (selection) {
         SelectionResult.started => SendResult.started,
@@ -1119,7 +1151,8 @@ final class NexusNode {
           _removeNotices(NoticeKind.networkStopNotSaved);
         }
       }
-      if (pairedSaved && ignoredSaved && trustSaved) {
+      final sharesSaved = await (_shares?.retrySave() ?? Future.value(true));
+      if (pairedSaved && ignoredSaved && trustSaved && sharesSaved) {
         _notices = List.unmodifiable([
           for (final notice in _notices)
             if (!notice.canRetry) notice,
@@ -1292,6 +1325,45 @@ final class NexusNode {
     } catch (e) {
       _log('ignored load failed: ${e.runtimeType}');
     }
+    final shareFs =
+        _shareFileSystem ??
+        WindowsShareFileSystem(
+          platform: _fileSystem ?? const WindowsFileSystemPlatform(),
+          dataDirs: [dir.path],
+        );
+    final shares = ShareService(
+      store: SharesStore(
+        JsonFileStore(_fileIn(dir, 'shares.json')),
+        ownerFingerprint: identity.fingerprint,
+        now: _now,
+      ),
+      paired: paired,
+      fileSystem: shareFs,
+      dataDirPath: dir.path,
+      clock: _clock,
+      now: _now,
+      log: _log,
+    );
+    try {
+      switch (await shares.load()) {
+        case SharesLoadResult.quarantined:
+          _addNotice(NoticeKind.sharesReset);
+        case SharesLoadResult.partlyDropped:
+          _addNotice(NoticeKind.sharesPartlyReset);
+        case SharesLoadResult.missing ||
+            SharesLoadResult.loaded ||
+            SharesLoadResult.previousIdentity:
+          break;
+      }
+    } catch (e) {
+      _log('shares load failed: ${e.runtimeType}');
+    }
+    final browseServer = BrowseServer(
+      shares: shares,
+      fileSystem: shareFs,
+      clock: _clock,
+      log: _log,
+    );
     final settings = SettingsStore(
       JsonFileStore(_fileIn(dir, 'settings.json')),
       now: _now,
@@ -1384,6 +1456,7 @@ final class NexusNode {
       confirmTimeout: _transferConfirmTimeout,
       writeBytes: _transferWriteBytes ?? writeAllBytes,
       exclusions: exclusions,
+      sharedFolders: shares,
       log: _log,
     );
     final queues = SendQueues(
@@ -1403,7 +1476,11 @@ final class NexusNode {
       paired: paired,
       selfInfo: selfInfo,
       onRegistered: discovery.handleRegistration,
-      routes: [...coordinator.routes, ...transfers.routes],
+      routes: [
+        ...coordinator.routes,
+        ...transfers.routes,
+        ...browseServer.routes,
+      ],
       uploadRoutes: transfers.uploadRoutes,
       port: _port,
       now: _now,
@@ -1423,6 +1500,8 @@ final class NexusNode {
     _transfers = transfers;
     _queues = queues;
     _tray = tray;
+    _shares = shares;
+    _browseClient = BrowseClient(identity: identity);
     _channel = channel;
     _discovery = discovery;
     _server = server;
@@ -1467,6 +1546,8 @@ final class NexusNode {
     );
     _pairedSaveSubscription = paired.saveStatusChanges.listen((_) => _emit());
     _ignoredSaveSubscription = ignored.saveStatusChanges.listen((_) => _emit());
+    _sharesChangesSubscription = shares.changes.listen((_) => _emit());
+    _sharesSaveSubscription = shares.saveStatusChanges.listen((_) => _emit());
     _changesSubscription = monitor.changes.listen(
       (change) => _enqueue('network change', () async {
         _lastChange = change;
@@ -1711,6 +1792,7 @@ final class NexusNode {
     final transfers = _transfers;
     final queues = _queues;
     final tray = _tray;
+    final shares = _shares;
     final queuesChanges = _queuesSubscription;
     final trayChanges = _traySubscription;
     final changes = _changesSubscription;
@@ -1723,6 +1805,8 @@ final class NexusNode {
     final ignoredChanges = _ignoredSubscription;
     final pairedSave = _pairedSaveSubscription;
     final ignoredSave = _ignoredSaveSubscription;
+    final sharesChanges = _sharesChangesSubscription;
+    final sharesSave = _sharesSaveSubscription;
     _trust = null;
     _paired = null;
     _ignored = null;
@@ -1730,6 +1814,8 @@ final class NexusNode {
     _transfers = null;
     _queues = null;
     _tray = null;
+    _shares = null;
+    _browseClient = null;
     _scheduler = null;
     _pairingRounds.clear();
     _resetProgress();
@@ -1756,6 +1842,8 @@ final class NexusNode {
     _ignoredSubscription = null;
     _pairedSaveSubscription = null;
     _ignoredSaveSubscription = null;
+    _sharesChangesSubscription = null;
+    _sharesSaveSubscription = null;
     await _guard('network changes cancel', () => changes?.cancel());
     await _guard('paired changes cancel', () => paired?.cancel());
     await _guard('pairing changes cancel', () => pairingChanges?.cancel());
@@ -1767,9 +1855,12 @@ final class NexusNode {
     await _guard('ignored changes cancel', () => ignoredChanges?.cancel());
     await _guard('paired save status cancel', () => pairedSave?.cancel());
     await _guard('ignored save status cancel', () => ignoredSave?.cancel());
+    await _guard('shares changes cancel', () => sharesChanges?.cancel());
+    await _guard('shares save status cancel', () => sharesSave?.cancel());
     await _guard('monitor stop', () => monitor?.stop());
     await _guard('queues close', () => queues?.close());
     await _guard('tray close', () => tray?.close());
+    await _guard('shares close', () => shares?.close());
     await _guard(
       'transfers close',
       () => transfers?.close().timeout(Limits.transferCloseBudget),
@@ -1904,6 +1995,139 @@ final class NexusNode {
       if (transfers == null) return;
       unawaited(_guard(what, () => action(transfers)));
     });
+  }
+
+  Future<RemoteListing> listRemoteRoots(
+    String fingerprint, {
+    List<BrowseCheck> check = const [],
+  }) async {
+    final client = _browseClient;
+    final target = _browseTargetOf(fingerprint);
+    if (client == null || target == null) {
+      return const RemoteListingFailed(BrowseFailure.notVisible);
+    }
+    try {
+      return await client.roots(target, checks: check);
+    } catch (e) {
+      _log('list remote roots failed: ${e.runtimeType}');
+      return const RemoteListingFailed(BrowseFailure.noAnswer);
+    }
+  }
+
+  Future<RemoteListing> listRemoteFolders(
+    String fingerprint,
+    String rootId,
+    List<String> path,
+  ) async {
+    final client = _browseClient;
+    final target = _browseTargetOf(fingerprint);
+    if (client == null || target == null) {
+      return const RemoteListingFailed(BrowseFailure.notVisible);
+    }
+    try {
+      return await client.folders(target, rootId, path);
+    } catch (e) {
+      _log('list remote folders failed: ${e.runtimeType}');
+      return const RemoteListingFailed(BrowseFailure.noAnswer);
+    }
+  }
+
+  Future<ShareAddOutcome> addShare(String fingerprint) async {
+    final shares = _shares;
+    final transfers = _transfers;
+    if (shares == null || transfers == null || !_isMine(fingerprint)) {
+      return const ShareRefused(ShareRefusal.missing);
+    }
+    try {
+      final path = await transfers.pickFolderToShare();
+      if (path == null) return const SharePickCancelled();
+      if (_closing || !identical(_shares, shares) || !_isMine(fingerprint)) {
+        return const ShareRefused(ShareRefusal.missing);
+      }
+      return _afterShareAdd(await shares.addPath(fingerprint, path));
+    } catch (e) {
+      _log('add share failed: ${e.runtimeType}');
+      return const ShareRefused(ShareRefusal.unknownDrive);
+    }
+  }
+
+  Future<ShareAddOutcome> confirmShare(
+    String fingerprint,
+    String pendingId,
+  ) async {
+    final shares = _shares;
+    if (shares == null || !_isMine(fingerprint)) {
+      return const ShareRefused(ShareRefusal.missing);
+    }
+    try {
+      final outcome = await shares.confirm(fingerprint, pendingId);
+      if (_closing || !identical(_shares, shares)) {
+        return const ShareRefused(ShareRefusal.missing);
+      }
+      return _afterShareAdd(outcome);
+    } catch (e) {
+      _log('confirm share failed: ${e.runtimeType}');
+      return const ShareRefused(ShareRefusal.unknownDrive);
+    }
+  }
+
+  void cancelPendingShare(String pendingId) {
+    _shares?.dropPending(pendingId);
+  }
+
+  Future<void> removeShare(String fingerprint, String rootId) async {
+    final shares = _shares;
+    if (shares == null || _closing) return;
+    try {
+      final saved = await shares.remove(fingerprint, rootId);
+      if (!saved) _addSharesNotSavedNotice();
+    } catch (e) {
+      _log('remove share failed: ${e.runtimeType}');
+    }
+    _emit();
+  }
+
+  Future<void> refreshShares(String fingerprint) async {
+    final shares = _shares;
+    if (shares == null || _closing) return;
+    try {
+      await shares.refreshAvailability(fingerprint);
+    } catch (e) {
+      _log('refresh shares failed: ${e.runtimeType}');
+    }
+    _emit();
+  }
+
+  ShareAddOutcome _afterShareAdd(ShareAddOutcome outcome) {
+    if (outcome is ShareAdded && !outcome.saved) {
+      _addNotice(NoticeKind.shareAddNotSaved);
+    }
+    _emit();
+    return outcome;
+  }
+
+  void _addSharesNotSavedNotice() {
+    if (_notices.any((notice) => notice.kind == NoticeKind.sharesNotSaved)) {
+      return;
+    }
+    _addNotice(NoticeKind.sharesNotSaved);
+  }
+
+  bool _isMine(String fingerprint) {
+    if (_closing) return false;
+    for (final entry in _entries) {
+      if (entry.fingerprint == fingerprint) return entry.paired && entry.mine;
+    }
+    return false;
+  }
+
+  SendTarget? _browseTargetOf(String fingerprint) {
+    for (final entry in _entries) {
+      if (entry.fingerprint == fingerprint) {
+        return entry.canSendFile ? _sendTargetOf(fingerprint) : null;
+      }
+    }
+    return null;
   }
 
   SendTarget? _sendTargetOf(String fingerprint) {
@@ -2370,6 +2594,24 @@ final class NexusNode {
     );
   }
 
+  Map<String, PeerSettingsView> _peerViews() {
+    final shares = _shares;
+    if (shares == null) return const {};
+    final unsaved = shares.hasUnsavedRemoval;
+    return {
+      for (final entry in _entries)
+        if (entry.paired)
+          entry.fingerprint: PeerSettingsView(
+            fingerprint: entry.fingerprint,
+            realName: entry.displayName,
+            mine: entry.mine,
+            visible: entry.visible,
+            shares: shares.viewsFor(entry.fingerprint),
+            sharesUnsaved: unsaved,
+          ),
+    };
+  }
+
   void _emit() {
     if (_closing) return;
     final view = _coordinator?.view;
@@ -2435,6 +2677,7 @@ final class NexusNode {
       selectionProgress: _selectionProgress(queuesView),
       ignoredDevices: ignoredDeviceViews(_ignored?.devices ?? const []),
       trustedNetworks: _trustedNetworkViews(),
+      peers: _peerViews(),
     );
     _state = next;
     final last = _lastEmitted;
@@ -2478,6 +2721,7 @@ bool _sameState(NodeState a, NodeState b) {
       _sameList(a.prompts, b.prompts, (x, y) => x == y) &&
       _sameList(a.pausedNetworks, b.pausedNetworks, (x, y) => x == y) &&
       _sameList(a.activeNetworks, b.activeNetworks, (x, y) => x == y) &&
+      _samePeers(a.peers, b.peers) &&
       _sameMap(a.displayNames, b.displayNames) &&
       _sameList(a.devices, b.devices, _sameDevice);
 }
@@ -2486,6 +2730,17 @@ bool _sameList<T>(List<T> a, List<T> b, bool Function(T, T) same) {
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
     if (!same(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+bool _samePeers(
+  Map<String, PeerSettingsView> a,
+  Map<String, PeerSettingsView> b,
+) {
+  if (a.length != b.length) return false;
+  for (final entry in a.entries) {
+    if (b[entry.key] != entry.value) return false;
   }
   return true;
 }

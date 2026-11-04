@@ -10,8 +10,6 @@ import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/storage/storage.dart';
-import 'package:nexus_bridges_core/src/transfer/folders.dart'
-    show tempFolderName;
 import 'package:nexus_bridges_core/src/transfer/folder_writer.dart'
     show ClearHidden, MarkFile;
 import 'package:nexus_bridges_core/src/transfer/platform.dart';

@@ -247,7 +247,7 @@ void main() {
         'longest',
         'manifestBytes',
       });
-      expect(offer['protocol'], '1.1');
+      expect(offer['protocol'], protocolVersion);
       expect(offer['name'], 'proj');
       expect(offer['entries'], 5);
       expect(offer['files'], 2);

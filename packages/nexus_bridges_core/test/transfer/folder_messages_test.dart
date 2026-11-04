@@ -11,7 +11,7 @@ const String permitValue = 'fedcba9876543210fedcba9876543210';
 Object? wire(Object? value) => jsonDecode(jsonEncode(value));
 
 Map<String, Object?> folderOfferJson() => {
-  'protocol': '1.1',
+  'protocol': protocolVersion,
   'transfer': transferId,
   'kind': 'folder',
   'name': 'proj',

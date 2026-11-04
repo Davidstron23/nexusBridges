@@ -103,6 +103,10 @@ abstract class AppStrings {
   String noticePairingFailed(String who);
   String noticeReceiveFolderNotSaved(String path);
   String noticePeerCancelledTransfer(String name);
+  String get noticeSharesNotSaved;
+  String get noticeShareAddNotSaved;
+  String get noticeSharesReset;
+  String get noticeSharesPartlyReset;
 
   String get sendNeedsVisible;
   String get sendNeedsPairAgain;

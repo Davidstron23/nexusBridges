@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:nexus_bridges_core/src/transfer/folder_walk.dart';
 import 'package:nexus_bridges_core/src/transfer/windows_folder_io.dart';
+import 'package:nexus_bridges_core/src/winio/winio.dart';
 import 'package:test/test.dart';
 
 import 'receiver_harness.dart' show realFs;

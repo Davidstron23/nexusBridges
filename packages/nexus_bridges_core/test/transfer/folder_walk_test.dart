@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/transfer/folder_walk.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
+import 'package:nexus_bridges_core/src/winio/winio.dart';
 import 'package:test/test.dart';
 
 const int junctionTag = 0xA0000003;

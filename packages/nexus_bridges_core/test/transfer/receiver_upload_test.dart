@@ -14,7 +14,6 @@ import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/transfer/folders.dart'
     show tempFolderName, tempPrefix, tempSuffix;
-import 'package:nexus_bridges_core/src/transfer/platform.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';

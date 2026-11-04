@@ -350,6 +350,24 @@ final class AppStringsEs implements AppStrings {
   String noticePeerCancelledTransfer(String name) => '$name canceló el envío.';
 
   @override
+  String get noticeSharesNotSaved =>
+      'No se ha podido guardar el cambio de carpetas; al reiniciar volvería '
+      'a estar abierta.';
+
+  @override
+  String get noticeShareAddNotSaved =>
+      'La carpeta se ha añadido, pero no se recordará al reiniciar.';
+
+  @override
+  String get noticeSharesReset =>
+      'El archivo de carpetas compartidas estaba dañado; ahora no hay '
+      'ninguna abierta.';
+
+  @override
+  String get noticeSharesPartlyReset =>
+      'Se quitaron las carpetas de equipos que ya no están vinculados.';
+
+  @override
   String get sendNeedsVisible =>
       'Tiene que estar a la vista para enviarle archivos.';
 
@@ -609,6 +627,17 @@ final class AppStringsEs implements AppStrings {
       'La carpeta es demasiado grande para el otro equipo.',
     TransferOutcome.unexpectedData =>
       'El otro equipo mandó datos que no había anunciado.',
+    TransferOutcome.defaultFolderOnly =>
+      'El otro equipo solo admite envíos a su carpeta por defecto.',
+    TransferOutcome.destinationUnavailable =>
+      'Esa carpeta ya no está disponible en el otro equipo.',
+    TransferOutcome.destinationMissing =>
+      'Esa carpeta ya no existe en el otro equipo.',
+    TransferOutcome.destinationLost =>
+      'Esa carpeta dejó de estar disponible en el otro equipo.',
+    TransferOutcome.shareRemoved =>
+      'Quitaste esa carpeta de las que puede usar el otro equipo.',
+    TransferOutcome.peerMarkedForeign => 'Marcaste al otro equipo como ajeno.',
   };
 
   @override
@@ -682,6 +711,17 @@ final class AppStringsEs implements AppStrings {
       'Se rechazó porque la carpeta es demasiado grande.',
     TransferOutcome.unexpectedData =>
       'Se cortó porque llegaron datos que no se habían anunciado.',
+    TransferOutcome.defaultFolderOnly =>
+      'El otro equipo solo admite envíos a su carpeta por defecto.',
+    TransferOutcome.destinationUnavailable =>
+      'Esa carpeta ya no está disponible en el otro equipo.',
+    TransferOutcome.destinationMissing =>
+      'Esa carpeta ya no existe en el otro equipo.',
+    TransferOutcome.destinationLost =>
+      'Esa carpeta dejó de estar disponible en el otro equipo.',
+    TransferOutcome.shareRemoved =>
+      'Quitaste esa carpeta de las que puede usar el otro equipo.',
+    TransferOutcome.peerMarkedForeign => 'Marcaste al otro equipo como ajeno.',
   };
 
   @override

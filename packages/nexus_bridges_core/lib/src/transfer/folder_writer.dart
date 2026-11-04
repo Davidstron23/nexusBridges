@@ -8,6 +8,7 @@ import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart' show HANDLE;
 
 import '../protocol/protocol.dart' show Limits;
+import '../winio/winio.dart';
 import 'folder_stream.dart';
 import 'folders.dart' show newFolderTempName, samePath;
 import 'hashing.dart' show Sha256Stream, startSha256;

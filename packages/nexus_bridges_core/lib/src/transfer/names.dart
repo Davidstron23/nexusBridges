@@ -311,3 +311,27 @@ bool isAppReservedName(String name) {
   return upper == '.NEXUSBRIDGES-INCOMING' ||
       upper.startsWith('~NEXUSBRIDGES-');
 }
+
+bool isValidFolderName(String name) =>
+    name.isNotEmpty &&
+    isValidFileName(name) &&
+    !isBlockedType(name) &&
+    !isAppReservedName(name);
+
+enum RelativePathProblem { tooDeep, invalidName, tooLong }
+
+RelativePathProblem? checkRelativePath(
+  List<String> components, {
+  String? newFolder,
+  required int rootPathUnits,
+}) {
+  final depth = components.length + (newFolder != null ? 1 : 0);
+  if (depth > Limits.maxRelativeDepth) return RelativePathProblem.tooDeep;
+  var total = rootPathUnits;
+  for (final name in [...components, ?newFolder]) {
+    if (!isValidFolderName(name)) return RelativePathProblem.invalidName;
+    total += 1 + name.length;
+  }
+  if (total > Limits.maxShareFolderChars) return RelativePathProblem.tooLong;
+  return null;
+}

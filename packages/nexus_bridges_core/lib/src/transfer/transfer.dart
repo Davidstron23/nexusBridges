@@ -7,8 +7,11 @@ import '../protocol/protocol.dart' show Limits, monotonicClock;
 import '../server/server.dart' show ApiRoute, ApiUploadRoute;
 import 'folder_writer.dart' show ClearHidden, MarkFile;
 import 'journal.dart' show TempJournal;
+import 'messages.dart' show DestinationRequest;
+import 'names.dart' show visibleFileName;
 import 'pickers.dart' show PickerTracker;
-import 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
+import 'platform.dart'
+    show FileSystemPlatform, FilePicker, FolderRevealer, FreeNameMove;
 import 'receiver.dart' show TransferReceiver;
 import 'sender.dart' show TransferSender;
 import 'windows_file_system.dart' show WindowsFileSystemPlatform;
@@ -17,9 +20,42 @@ import 'writer.dart' show writeAllBytes;
 
 export '../transport/transport.dart' show AbortSignal;
 export 'folder_size.dart' show measureFolderSize;
+export 'folders.dart'
+    show
+        ForbiddenFolders,
+        isAdminShare,
+        isForbiddenFolder,
+        isInsideTempFolder,
+        isSameOrInside,
+        loadForbiddenFolders,
+        samePath,
+        tempFolderName,
+        tempPrefix;
 export 'journal.dart' show TempJournal;
-export 'names.dart' show visibleFileName, isValidFileName;
-export 'platform.dart' show FileSystemPlatform, FilePicker, FolderRevealer;
+export 'messages.dart' show DestinationRequest;
+export 'names.dart'
+    show
+        RelativePathProblem,
+        baseName,
+        candidateFolderName,
+        candidateName,
+        checkRelativePath,
+        isAppReservedName,
+        isBlockedType,
+        isValidFileName,
+        isValidFolderName,
+        visibleFileName;
+export 'platform.dart'
+    show
+        DestinationChanged,
+        FileSystemPlatform,
+        FilePicker,
+        FolderRevealer,
+        FreeNameMove,
+        MoveFailed,
+        MovedTo,
+        NameTooLong,
+        NoFreeName;
 export 'windows_file_system.dart' show WindowsFileSystemPlatform;
 export 'windows_shell.dart' show WindowsFilePicker;
 export 'writer.dart' show writeAllBytes;
@@ -66,7 +102,13 @@ enum TransferOutcome {
   tooManyEntries,
   tooDeep,
   tooLargeForPeer,
-  unexpectedData;
+  unexpectedData,
+  defaultFolderOnly,
+  destinationUnavailable,
+  destinationMissing,
+  destinationLost,
+  shareRemoved,
+  peerMarkedForeign;
 
   TransferResultKind get kind => switch (this) {
     saved || savedWithoutMark => TransferResultKind.saved,
@@ -84,10 +126,15 @@ enum TransferOutcome {
     protectedData ||
     tooManyEntries ||
     tooDeep ||
-    tooLargeForPeer => TransferResultKind.rejected,
+    tooLargeForPeer ||
+    defaultFolderOnly ||
+    destinationUnavailable ||
+    destinationMissing => TransferResultKind.rejected,
     cancelledHere ||
     cancelledByPeer ||
-    unpaired => TransferResultKind.cancelled,
+    unpaired ||
+    shareRemoved ||
+    peerMarkedForeign => TransferResultKind.cancelled,
     unreadable ||
     noContact ||
     uploadNotStarted ||
@@ -102,7 +149,8 @@ enum TransferOutcome {
     noFreeName ||
     interfaceDown ||
     notFound ||
-    unexpectedData => TransferResultKind.failed,
+    unexpectedData ||
+    destinationLost => TransferResultKind.failed,
     unconfirmed => TransferResultKind.unconfirmed,
   };
 }
@@ -213,6 +261,44 @@ bool _sameItems(List<FirstLevelItem> a, List<FirstLevelItem> b) {
   return true;
 }
 
+final class DestinationLabel {
+  const DestinationLabel({
+    required this.rootName,
+    required this.path,
+    this.rootId,
+    this.home = false,
+  });
+
+  final String? rootId;
+  final String rootName;
+  final bool home;
+  final List<String> path;
+
+  String display({required String homeName}) => [
+    visibleFileName(home ? homeName : rootName),
+    for (final part in path) visibleFileName(part),
+  ].join(r'\');
+
+  @override
+  bool operator ==(Object other) =>
+      other is DestinationLabel &&
+      other.rootId == rootId &&
+      other.rootName == rootName &&
+      other.home == home &&
+      _sameNames(other.path, path);
+
+  @override
+  int get hashCode => Object.hash(rootId, rootName, home, Object.hashAll(path));
+}
+
+bool _sameNames(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
 final class OutgoingTransferView {
   const OutgoingTransferView({
     required this.peerFingerprint,
@@ -229,6 +315,7 @@ final class OutgoingTransferView {
     this.preparedEntries = 0,
     this.preparedFiles = 0,
     this.summary,
+    this.destination,
   });
 
   final String peerFingerprint;
@@ -245,6 +332,7 @@ final class OutgoingTransferView {
   final int preparedEntries;
   final int preparedFiles;
   final FolderSummaryView? summary;
+  final DestinationLabel? destination;
 
   @override
   bool operator ==(Object other) =>
@@ -262,7 +350,8 @@ final class OutgoingTransferView {
       other.sentFiles == sentFiles &&
       other.preparedEntries == preparedEntries &&
       other.preparedFiles == preparedFiles &&
-      other.summary == summary;
+      other.summary == summary &&
+      other.destination == destination;
 
   @override
   int get hashCode => Object.hash(
@@ -280,6 +369,7 @@ final class OutgoingTransferView {
     preparedEntries,
     preparedFiles,
     summary,
+    destination,
   );
 }
 
@@ -360,6 +450,7 @@ final class IncomingTransferView {
     this.moreFirstLevel = 0,
     this.canCancel = true,
     this.containsGitRepository = false,
+    this.destination,
   });
 
   final String sessionId;
@@ -379,6 +470,7 @@ final class IncomingTransferView {
   final int moreFirstLevel;
   final bool canCancel;
   final bool containsGitRepository;
+  final DestinationLabel? destination;
 
   @override
   bool operator ==(Object other) =>
@@ -399,7 +491,8 @@ final class IncomingTransferView {
       _sameItems(other.firstLevel, firstLevel) &&
       other.moreFirstLevel == moreFirstLevel &&
       other.canCancel == canCancel &&
-      other.containsGitRepository == containsGitRepository;
+      other.containsGitRepository == containsGitRepository &&
+      other.destination == destination;
 
   @override
   int get hashCode => Object.hash(
@@ -420,6 +513,7 @@ final class IncomingTransferView {
     moreFirstLevel,
     canCancel,
     containsGitRepository,
+    destination,
   );
 }
 
@@ -437,6 +531,7 @@ final class TransferResultView {
     this.problemPath,
     this.size = 0,
     this.containsGitRepository = false,
+    this.destination,
   });
 
   final TransferDirection direction;
@@ -451,6 +546,7 @@ final class TransferResultView {
   final String? problemPath;
   final int size;
   final bool containsGitRepository;
+  final DestinationLabel? destination;
 
   @override
   bool operator ==(Object other) =>
@@ -466,7 +562,8 @@ final class TransferResultView {
       other.fileCount == fileCount &&
       other.problemPath == problemPath &&
       other.size == size &&
-      other.containsGitRepository == containsGitRepository;
+      other.containsGitRepository == containsGitRepository &&
+      other.destination == destination;
 
   @override
   int get hashCode => Object.hash(
@@ -482,6 +579,7 @@ final class TransferResultView {
     problemPath,
     size,
     containsGitRepository,
+    destination,
   );
 }
 
@@ -527,6 +625,115 @@ sealed class SendDestination {
 
 final class ReceiveFolderDestination extends SendDestination {
   const ReceiveFolderDestination();
+}
+
+final class SharedFolderDestination extends SendDestination {
+  const SharedFolderDestination({
+    required this.rootId,
+    required this.rootName,
+    required this.path,
+    this.home = false,
+    this.newFolder,
+  });
+
+  final String rootId;
+  final String rootName;
+  final bool home;
+  final List<String> path;
+  final String? newFolder;
+
+  DestinationLabel get label => DestinationLabel(
+    rootId: rootId,
+    rootName: rootName,
+    home: home,
+    path: [...path, ?newFolder],
+  );
+}
+
+final class SharedRootGrant {
+  const SharedRootGrant({
+    required this.rootId,
+    required this.label,
+    required this.home,
+    required this.pathUnits,
+  });
+
+  final String rootId;
+  final String label;
+  final bool home;
+  final int pathUnits;
+}
+
+sealed class SharedResolution {
+  const SharedResolution();
+}
+
+final class SharedResolved extends SharedResolution {
+  const SharedResolved(this.lease);
+
+  final SharedLease lease;
+}
+
+final class SharedRefused extends SharedResolution {
+  const SharedRefused(this.reason);
+
+  final SharedRefusal reason;
+}
+
+enum SharedRefusal { unavailable, missing }
+
+abstract interface class SharedLease {
+  String get folderPath;
+
+  String get volumeId;
+
+  bool get supportsMark;
+
+  bool get cloud;
+
+  int? get freeBytes;
+
+  DestinationLabel get label;
+
+  Future<bool> prepare();
+
+  Future<FreeNameMove> recheckAndMove({
+    required String tempName,
+    required bool isFolder,
+    required String name,
+    int? maxNameUnits,
+  });
+
+  Future<void> release({required bool saved});
+}
+
+abstract interface class SharedFolders {
+  Stream<void> get changes;
+
+  SharedRootGrant? grantFor(String fingerprint, String rootId);
+
+  Future<SharedResolution> resolve(
+    String fingerprint,
+    DestinationRequest destination, {
+    required Duration timeout,
+  });
+}
+
+final class NoSharedFolders implements SharedFolders {
+  const NoSharedFolders();
+
+  @override
+  Stream<void> get changes => const Stream<void>.empty();
+
+  @override
+  SharedRootGrant? grantFor(String fingerprint, String rootId) => null;
+
+  @override
+  Future<SharedResolution> resolve(
+    String fingerprint,
+    DestinationRequest destination, {
+    required Duration timeout,
+  }) async => const SharedRefused(SharedRefusal.unavailable);
 }
 
 abstract interface class ExclusionSource {
@@ -628,6 +835,7 @@ final class TransferCoordinator {
     Future<void> Function(int entry)? beforeStreamEntry,
     MarkFile? markFile,
     ClearHidden? clearHidden,
+    SharedFolders sharedFolders = const NoSharedFolders(),
     this._log = _noLog,
   }) : _picker = picker,
        _revealer = revealer ?? const WindowsFolderRevealer() {
@@ -647,9 +855,11 @@ final class TransferCoordinator {
       idleTimeout: idleTimeout,
       markFile: markFile,
       clearHidden: clearHidden,
+      shared: sharedFolders,
       picker: picker,
       pickers: _pickers,
       onChanged: _notify,
+      onResult: _result,
       emit: _emit,
       log: _log,
     );
@@ -663,6 +873,7 @@ final class TransferCoordinator {
       idleTimeout: idleTimeout,
       confirmTimeout: confirmTimeout,
       onChanged: _notify,
+      onResult: _result,
       onFilePicker: (open) => open ? _pickers.open() : _pickers.close(),
       log: _log,
       dataDirPath: dataDirPath,
@@ -691,6 +902,9 @@ final class TransferCoordinator {
 
   final StreamController<TransferEvent> _events =
       StreamController<TransferEvent>.broadcast();
+
+  final StreamController<TransferResultView> _finished =
+      StreamController<TransferResultView>.broadcast();
 
   Timer? _timer;
 
@@ -729,6 +943,8 @@ final class TransferCoordinator {
   Stream<void> get changes => _changes.stream;
 
   Stream<TransferEvent> get events => _events.stream;
+
+  Stream<TransferResultView> get finished => _finished.stream;
 
   void start() {
     if (_closed || _timer != null) return;
@@ -800,6 +1016,7 @@ final class TransferCoordinator {
     _closed = true;
     await _changes.close();
     await _events.close();
+    await _finished.close();
   }
 
   void _tick() {
@@ -848,6 +1065,11 @@ final class TransferCoordinator {
     _events.add(event);
   }
 
+  void _result(TransferResultView result) {
+    if (_closed) return;
+    _finished.add(result);
+  }
+
   OutgoingTransferView? get outgoing => _sender.outgoing;
 
   TransferResultView? get lastSent => _sender.lastSent;
@@ -857,6 +1079,23 @@ final class TransferCoordinator {
   Future<List<String>> pickFilesToSend() => _pickMany(_picker.pickFiles);
 
   Future<List<String>> pickFoldersToSend() => _pickMany(_picker.pickFolders);
+
+  Future<String?> pickFolderToShare() async {
+    if (_closed || _closing != null || _pickers.isOpen) return null;
+    _pickers.open();
+    _notify();
+    String? chosen;
+    try {
+      chosen = await _picker.pickFolder();
+    } catch (e) {
+      _log('share picker failed: ${e.runtimeType}');
+    } finally {
+      _pickers.close();
+      _notify();
+    }
+    if (_closed || _closing != null) return null;
+    return chosen;
+  }
 
   Future<List<String>> _pickMany(Future<List<String>> Function() pick) async {
     if (_closed || _closing != null || _pickers.isOpen) return const [];

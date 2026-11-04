@@ -482,6 +482,11 @@ void main() {
         TransferOutcome.tooManyEntries,
         TransferOutcome.tooDeep,
         TransferOutcome.tooLargeForPeer,
+        TransferOutcome.defaultFolderOnly,
+        TransferOutcome.destinationUnavailable,
+        TransferOutcome.destinationMissing,
+        TransferOutcome.shareRemoved,
+        TransferOutcome.peerMarkedForeign,
       });
     });
 

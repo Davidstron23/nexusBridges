@@ -1,1 +1,1 @@
-const String protocolVersion = '1.1';
+const String protocolVersion = '1.2';

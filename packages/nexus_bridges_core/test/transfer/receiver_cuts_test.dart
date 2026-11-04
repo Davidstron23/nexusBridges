@@ -10,8 +10,6 @@ import 'package:crypto/crypto.dart';
 import 'package:nexus_bridges_core/src/identity/identity.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart';
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
-import 'package:nexus_bridges_core/src/transfer/folders.dart'
-    show tempFolderName;
 import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';

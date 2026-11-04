@@ -15,6 +15,8 @@ import 'manifest.dart';
 import 'messages.dart';
 import 'names.dart'
     show
+        baseName,
+        checkRelativePath,
         isAppReservedName,
         isBlockedType,
         isProgram,
@@ -60,6 +62,16 @@ const ApiReply _uploadForbidden = ApiReply(403, {'error': 'forbidden'});
 const ApiReply _tooLarge = ApiReply(413, {'error': 'too_large'});
 
 const ApiReply _rateLimited = ApiReply(429, {'error': 'rate_limited'});
+
+const ApiReply _defaultOnly = ApiReply(403, {'error': 'default_only'});
+
+const ApiReply _destinationUnavailable = ApiReply(403, {
+  'error': 'destination_unavailable',
+});
+
+const ApiReply _destinationMissing = ApiReply(404, {
+  'error': 'destination_missing',
+});
 
 const RouteLimit _transferRouteLimit = RouteLimit(
   maxPerWindow: Limits.mineTransferRequestsPerMinute,
@@ -134,9 +146,16 @@ final class _InSession {
     required this.sha256,
     required this.isProgram,
     this.folderOffer,
+    this.destination,
   });
 
   final FolderOfferRequest? folderOffer;
+
+  final DestinationRequest? destination;
+
+  SharedLease? lease;
+
+  DestinationLabel? destinationLabel;
 
   FolderManifest? manifest;
 
@@ -366,6 +385,8 @@ final class TransferReceiver {
     this._idleTimeout = Limits.transferIdleTimeout,
     this._markFile,
     this._clearHidden,
+    this._shared = const NoSharedFolders(),
+    this._onResult,
   });
 
   final PairedDevicesStore _paired;
@@ -400,6 +421,10 @@ final class TransferReceiver {
   final MarkFile? _markFile;
 
   final ClearHidden? _clearHidden;
+
+  final SharedFolders _shared;
+
+  final void Function(TransferResultView result)? _onResult;
 
   late final RecentRejections _recentRejections = RecentRejections(
     clock: _clock,
@@ -551,6 +576,7 @@ final class TransferReceiver {
               : manifest.firstLevelCount - firstLevel.length,
           canCancel: _canCancelNow(session),
           containsGitRepository: session.containsGit,
+          destination: session.destinationLabel,
         );
       }
     }
@@ -1388,7 +1414,7 @@ final class TransferReceiver {
     } catch (_) {}
   }
 
-  void _track(Future<void> Function() work) {
+  Future<void> _track(Future<void> Function() work) {
     late final Future<void> task;
     task = (() async {
       try {
@@ -1398,6 +1424,7 @@ final class TransferReceiver {
       }
     })().whenComplete(() => _cleanups.remove(task));
     _cleanups.add(task);
+    return task;
   }
 
   String? _parentFolder(String path) {
@@ -1512,6 +1539,26 @@ final class TransferReceiver {
     if (_recordOf(fingerprint, transferId)?.tombstone ?? false) {
       return (refusal: _cancelled, session: null);
     }
+    final destination = request != null
+        ? request.destination
+        : folderRequest!.destination;
+    if (destination != null) {
+      if (device.relation == PeerRelation.foreign ||
+          !device.permissions.contains(Permission.browse)) {
+        return (refusal: _defaultOnly, session: null);
+      }
+      final grant = _shared.grantFor(fingerprint, destination.rootId);
+      if (grant == null ||
+          folderRequest != null ||
+          checkRelativePath(
+                destination.path,
+                newFolder: destination.newFolder,
+                rootPathUnits: grant.pathUnits,
+              ) !=
+              null) {
+        return (refusal: _destinationUnavailable, session: null);
+      }
+    }
     if (!isValidFileName(name) ||
         (folderRequest != null && isAppReservedName(name))) {
       return (refusal: _invalidName, session: null);
@@ -1541,6 +1588,7 @@ final class TransferReceiver {
       sha256: request?.sha256 ?? '',
       isProgram: folderRequest == null && isProgram(name),
       folderOffer: folderRequest,
+      destination: destination,
     );
     _active = session;
     return (refusal: null, session: session);
@@ -1560,6 +1608,10 @@ final class TransferReceiver {
       return _unavailable;
     }
     if (_gone(session)) return _cancelled;
+    final destination = session.destination;
+    if (destination != null) {
+      return _admitShared(session, destination, type);
+    }
     final loaded = await _race(_rememberedFolder(), checkUntil);
     if (_gone(session)) return _cancelled;
     final remembered = loaded.value;
@@ -1595,6 +1647,76 @@ final class TransferReceiver {
       ..proposedPath = proposal;
     if (isFolder) return _askManifest(session);
     return _decide(session);
+  }
+
+  ReceiveTarget _targetOf(SharedLease lease) => ReceiveTarget(
+    path: lease.folderPath,
+    volumeId: lease.volumeId,
+    supportsMark: lease.supportsMark,
+    remote: false,
+    cloud: lease.cloud,
+    freeBytes: lease.freeBytes,
+  );
+
+  TransferOutcome _revokedOutcome(_InSession session) {
+    final device = _paired.deviceOf(session.fingerprint);
+    if (device == null) return TransferOutcome.unpaired;
+    if (device.relation == PeerRelation.foreign) {
+      return TransferOutcome.peerMarkedForeign;
+    }
+    return TransferOutcome.shareRemoved;
+  }
+
+  Future<ApiReply> _admitShared(
+    _InSession session,
+    DestinationRequest destination,
+    Future<bool> type,
+  ) async {
+    final resolution = await _shared.resolve(
+      session.fingerprint,
+      destination,
+      timeout: Limits.transferFolderCheckTimeout,
+    );
+    if (_gone(session)) {
+      if (resolution is SharedResolved) {
+        final lease = resolution.lease;
+        _track(() => lease.release(saved: false));
+      }
+      return _destinationUnavailable;
+    }
+    switch (resolution) {
+      case SharedRefused(:final reason):
+        _end(session, TransferOutcome.cancelledByPeer, register: false);
+        return reason == SharedRefusal.missing
+            ? _destinationMissing
+            : _destinationUnavailable;
+      case SharedResolved(:final lease):
+        session
+          ..lease = lease
+          ..destinationLabel = lease.label
+          ..target = _targetOf(lease);
+        session.isProgram = await type;
+        if (_gone(session)) return _destinationUnavailable;
+        final refusal = _limitReply(session, session.target!);
+        if (refusal != null) return refusal;
+        final prepared = await _race(
+          lease.prepare(),
+          _clock() + Limits.transferFolderCheckTimeout,
+        );
+        if (_gone(session)) return _destinationUnavailable;
+        if (prepared.expired || prepared.value != true) {
+          _end(session, TransferOutcome.cancelledByPeer, register: false);
+          return _destinationUnavailable;
+        }
+        session
+          ..destinationLabel = lease.label
+          ..target = _targetOf(lease);
+        if (_shared.grantFor(session.fingerprint, destination.rootId) == null) {
+          _end(session, _revokedOutcome(session), register: false);
+          return _destinationUnavailable;
+        }
+        return _decide(session);
+    }
   }
 
   ApiReply _askManifest(_InSession session) {
@@ -2169,6 +2291,8 @@ final class TransferReceiver {
         return fail(TransferOutcome.noFreeName);
       case MoveFailed():
         return fail(TransferOutcome.moveFailed);
+      case DestinationChanged():
+        return fail(TransferOutcome.destinationLost);
     }
   }
 
@@ -2265,6 +2389,7 @@ final class TransferReceiver {
       result = await writer.finish(
         name: session.name,
         expectedSha256: session.sha256,
+        move: session.lease == null ? null : _sharedMove(session),
       );
     } catch (e) {
       _log('incoming file finish failed: ${e.runtimeType}');
@@ -2286,7 +2411,32 @@ final class TransferReceiver {
     return _uploadReply(session);
   }
 
-  void _releaseUpload(
+  Future<FreeNameMove> Function(String tempPath, String name) _sharedMove(
+    _InSession session,
+  ) {
+    return (tempPath, name) async {
+      final lease = session.lease;
+      final destination = session.destination;
+      if (lease == null ||
+          destination == null ||
+          session.phase != _InPhase.finishing) {
+        return const DestinationChanged();
+      }
+      if (_shared.grantFor(session.fingerprint, destination.rootId) == null) {
+        _end(session, _revokedOutcome(session), cut: false);
+        return const DestinationChanged();
+      }
+      session.moving = true;
+      _onChanged();
+      return lease.recheckAndMove(
+        tempName: baseName(tempPath),
+        isFolder: false,
+        name: name,
+      );
+    };
+  }
+
+  Future<void> _releaseUpload(
     _InSession session,
     _InPhase previous, {
     required bool cut,
@@ -2310,16 +2460,20 @@ final class TransferReceiver {
           _log('manifest cut failed: ${e.runtimeType}');
         }
       }
-      return;
+      return Future<void>.value();
     }
+    final pending = <Future<void>>[];
     if (previous == _InPhase.finishing) {
       final target = session.target;
       if (folderWriter != null && target != null) {
-        _discardFolder(folderWriter, target);
+        pending.add(_discardFolder(folderWriter, target));
       }
-      return;
+      if (writer != null && target != null && session.lease != null) {
+        pending.add(_track(() => writer.discard()));
+      }
+      return Future.wait(pending).then((_) {});
     }
-    if (previous != _InPhase.uploading) return;
+    if (previous != _InPhase.uploading) return Future<void>.value();
     if (cut && upload != null) {
       try {
         upload.cut();
@@ -2329,20 +2483,23 @@ final class TransferReceiver {
     }
     final target = session.target;
     if (writer != null && target != null) {
-      _track(() async {
-        await writer.discard();
-        await _forgetJournal(target);
-      });
+      pending.add(
+        _track(() async {
+          await writer.discard();
+          await _forgetJournal(target);
+        }),
+      );
     }
     if (folderWriter != null && target != null) {
-      _discardFolder(folderWriter, target);
+      pending.add(_discardFolder(folderWriter, target));
     }
+    return Future.wait(pending).then((_) {});
   }
 
-  void _discardFolder(FolderWriterHost host, ReceiveTarget target) {
+  Future<void> _discardFolder(FolderWriterHost host, ReceiveTarget target) {
     final temp = host.tempRoot;
     _discardingTemps.add(temp);
-    _track(() async {
+    return _track(() async {
       try {
         await host.discard();
         await _releaseFolderTemp(target);
@@ -2634,7 +2791,20 @@ final class TransferReceiver {
       ..permit = null
       ..tempPath = null;
     if (identical(_active, session)) _active = null;
-    _releaseUpload(session, previous, cut: cut);
+    final discarded = _releaseUpload(session, previous, cut: cut);
+    final lease = session.lease;
+    if (lease != null) {
+      session.lease = null;
+      final target = session.target;
+      final saved =
+          outcome == TransferOutcome.saved ||
+          outcome == TransferOutcome.savedWithoutMark;
+      _track(() async {
+        await discarded;
+        await lease.release(saved: saved);
+        if (target != null) await _forgetJournal(target);
+      });
+    }
     final ask = session.ask;
     if (ask != null) {
       final created = ask.takeCreatedPending();
@@ -2664,8 +2834,10 @@ final class TransferReceiver {
                 problemEntry <= manifest.length
             ? visibleFileName(manifest.relativePath(problemEntry))
             : null,
+        destination: session.destinationLabel,
       );
       _lastReceivedPath = finalPath;
+      _onResult?.call(_lastReceived!);
     }
     _addRecord(
       _Record(
@@ -2691,6 +2863,12 @@ final class TransferReceiver {
         marked: outcome == TransferOutcome.saved,
         name: name,
       );
+    }
+    if (session.destination != null &&
+        (outcome == TransferOutcome.shareRemoved ||
+            outcome == TransferOutcome.peerMarkedForeign ||
+            outcome == TransferOutcome.unpaired)) {
+      return const RemoteState.failed(reason: 'destination_lost');
     }
     return remoteOf(outcome) ?? const RemoteState.cancelled();
   }
