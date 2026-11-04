@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:nexus_bridges_core/src/browse/browse.dart';
+import 'package:nexus_bridges_core/src/pairing/pairing.dart' show PeerRelation;
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/server/server.dart';
 import 'package:nexus_bridges_core/src/transfer/platform.dart' show VolumeFacts;
@@ -13,6 +14,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart'
 import 'package:test/test.dart';
 
 import '../server/api_server_harness.dart' show loopbackInterface;
+import '../node/pairing_nodes_harness.dart' show pairedEntryFor;
 import 'share_admission_support.dart';
 import 'share_fs_support.dart' show junction;
 
@@ -858,6 +860,115 @@ void main() {
       }
       expect(probe.remote, isTrue);
       expect(probe.drive, isNull);
+    });
+  });
+
+  group('B-4 forgetting at the paired change, not on the node queue [SEG]', () {
+    const settle = Duration(milliseconds: 60);
+
+    test('B-4 a removal forgets the roots and the pendings at once, also of '
+        'a peer with no roots', () async {
+      final place = await admissionPlace();
+      expect(
+        await place.service.addPath(mine.fingerprint, place.folder('kept')),
+        addedSaved(true),
+      );
+      place.platform.noMarkSupport = true;
+      final askedMine = await place.service.addPath(
+        mine.fingerprint,
+        place.folder('p'),
+      ) as ShareNeedsConfirmation;
+      final askedOther = await place.service.addPath(
+        other.fingerprint,
+        place.folder('q'),
+      ) as ShareNeedsConfirmation;
+      expect(place.service.knownPeers, {mine.fingerprint});
+
+      await place.paired.remove(mine.fingerprint);
+      await place.paired.remove(other.fingerprint);
+      await Future<void>.delayed(settle);
+
+      expect(place.service.knownPeers, isEmpty);
+      expect(place.service.viewsFor(mine.fingerprint), isEmpty);
+      await place.paired.replaceAll([
+        pairedEntryFor(mine, name: 'Mine', relation: PeerRelation.mine),
+        pairedEntryFor(other, name: 'Other', relation: PeerRelation.mine),
+      ]);
+      expect(
+        await place.service.confirm(mine.fingerprint, askedMine.pendingId),
+        refusedWith(ShareRefusal.missing),
+      );
+      expect(
+        await place.service.confirm(other.fingerprint, askedOther.pendingId),
+        refusedWith(ShareRefusal.missing),
+      );
+      expect(place.service.viewsFor(mine.fingerprint), isEmpty);
+    });
+
+    test('B-4 the same fingerprint paired again before the listener runs '
+        'still loses its roots', () async {
+      final place = await admissionPlace();
+      expect(
+        await place.service.addPath(mine.fingerprint, place.folder('kept')),
+        addedSaved(true),
+      );
+      await place.paired.replaceAll([
+        pairedEntryFor(
+          mine,
+          name: 'Mine',
+          relation: PeerRelation.mine,
+          pairedAt: DateTime.utc(2026, 11, 4),
+        ),
+        pairedEntryFor(other, name: 'Other', relation: PeerRelation.mine),
+        pairedEntryFor(
+          foreign,
+          name: 'Foreign',
+          relation: PeerRelation.foreign,
+        ),
+      ]);
+      await Future<void>.delayed(settle);
+      expect(place.service.rootsFor(mine.fingerprint), isEmpty);
+      expect(place.service.viewsFor(mine.fingerprint), isEmpty);
+    });
+
+    test('B-4 a rename or a relation change is not a new pairing: the roots '
+        'stay', () async {
+      final place = await admissionPlace();
+      expect(
+        await place.service.addPath(mine.fingerprint, place.folder('kept')),
+        addedSaved(true),
+      );
+      expect(await place.paired.rename(mine.fingerprint, 'Renamed'), isTrue);
+      expect(
+        await place.paired.setRelation(mine.fingerprint, PeerRelation.foreign),
+        isTrue,
+      );
+      await Future<void>.delayed(settle);
+      expect(place.service.rootsFor(mine.fingerprint), isEmpty);
+      expect(place.service.viewsFor(mine.fingerprint), hasLength(1));
+      expect(
+        await place.paired.setRelation(mine.fingerprint, PeerRelation.mine),
+        isTrue,
+      );
+      await Future<void>.delayed(settle);
+      expect(place.service.rootsFor(mine.fingerprint), hasLength(1));
+    });
+
+    test('B-4 two removals together lose none of the two', () async {
+      final place = await admissionPlace();
+      for (final peer in [mine, other]) {
+        expect(
+          await place.service.addPath(
+            peer.fingerprint,
+            place.folder('d${peer == mine ? 1 : 2}'),
+          ),
+          addedSaved(true),
+        );
+      }
+      unawaited(place.paired.remove(mine.fingerprint));
+      unawaited(place.paired.remove(other.fingerprint));
+      await Future<void>.delayed(settle);
+      expect(place.service.knownPeers, isEmpty);
     });
   });
 }

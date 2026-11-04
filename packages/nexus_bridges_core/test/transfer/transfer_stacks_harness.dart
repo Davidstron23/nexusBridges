@@ -305,6 +305,12 @@ final class TransferStack {
     MarkFile? markFile,
     ClearHidden? clearHidden,
     ExclusionSource exclusions = const NoExclusionSource(),
+    SharedFolders Function(
+      PairedDevicesStore paired,
+      TransferPlatform platform,
+      String dataDir,
+    )?
+    sharedFolders,
   }) async {
     final root = await transferFolder('nexus_t11_');
     final base = (await realFs.realPath(root.path))!;
@@ -377,6 +383,9 @@ final class TransferStack {
       revealer: revealer,
       markFile: markFile,
       clearHidden: clearHidden,
+      sharedFolders:
+          sharedFolders?.call(paired, stack.platform, dataDir) ??
+          const NoSharedFolders(),
       log: stack.logs.add,
     );
     stack.coordinator.changes.listen((_) {

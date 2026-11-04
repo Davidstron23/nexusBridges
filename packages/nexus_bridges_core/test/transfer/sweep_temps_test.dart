@@ -226,4 +226,88 @@ void main() {
       expect(await Directory(sub).exists(), isFalse);
     });
   });
+
+  group('sweepTemps at the long-path limit (Q-1, G11)', () {
+    Future<String> folderOfLength(int length) async {
+      var current = root;
+      while (current.length + 1 < length) {
+        final room = length - current.length - 1;
+        final segment = room > 50 ? 50 : room;
+        current = '$current\\${'a' * segment}';
+        await Directory('\\\\?\\$current').create();
+      }
+      expect(current.length, length);
+      addTearDown(() async {
+        await Process.run('cmd', ['/c', 'rmdir', '/s', '/q', '\\\\?\\$root']);
+      });
+      return current;
+    }
+
+    String extended(String path) => '\\\\?\\$path';
+
+    for (final length in [234, 235, 236]) {
+      test('a folder of $length characters has its own temps swept and the '
+          'subfolder removed', () async {
+        final long = await folderOfLength(length);
+        final longSub = join(long, tempFolderName);
+        await Directory(extended(longSub)).create();
+        final partial = join(longSub, ownTemp(hexA));
+        final hold = join(longSub, '~nexusbridges-0123456789abcdef.hold');
+        final tree = join(longSub, '~nexusbridges-0123456789ab');
+        await File(extended(partial)).writeAsString('parcial');
+        await File(extended(hold)).writeAsString('');
+        await Directory(extended(tree)).create();
+        await File(extended(join(tree, 'dentro.txt'))).writeAsString('x');
+
+        final clean = await sweepTemps(long, windowsFs);
+
+        expect(clean, isTrue);
+        expect(await File(extended(partial)).exists(), isFalse);
+        expect(await File(extended(hold)).exists(), isFalse);
+        expect(await Directory(extended(tree)).exists(), isFalse);
+        expect(await Directory(extended(longSub)).exists(), isFalse);
+      });
+
+      test('a folder of $length characters keeps what is not its own and '
+          'is not clean', () async {
+        final long = await folderOfLength(length);
+        final longSub = join(long, tempFolderName);
+        await Directory(extended(longSub)).create();
+        final partial = join(longSub, ownTemp(hexA));
+        final foreign = join(longSub, 'ajeno.txt');
+        await File(extended(partial)).writeAsString('parcial');
+        await File(extended(foreign)).writeAsString('del usuario');
+
+        final clean = await sweepTemps(long, windowsFs);
+
+        expect(clean, isFalse);
+        expect(await File(extended(partial)).exists(), isFalse);
+        expect(await File(extended(foreign)).readAsString(), 'del usuario');
+      });
+
+      test('a folder of $length characters keeps a temp that is in keep and '
+          'hands a temp folder to deferTree with its plain path', () async {
+        final long = await folderOfLength(length);
+        final longSub = join(long, tempFolderName);
+        await Directory(extended(longSub)).create();
+        final active = join(longSub, ownTemp(hexA));
+        final tree = join(longSub, '~nexusbridges-0123456789ab');
+        await File(extended(active)).writeAsString('activo');
+        await Directory(extended(tree)).create();
+        final deferred = <String>[];
+
+        final clean = await sweepTemps(
+          long,
+          windowsFs,
+          keep: {active.toUpperCase()},
+          deferTree: deferred.add,
+        );
+
+        expect(clean, isFalse);
+        expect(await File(extended(active)).readAsString(), 'activo');
+        expect(deferred, [tree]);
+        expect(await Directory(extended(tree)).exists(), isTrue);
+      });
+    }
+  });
 }

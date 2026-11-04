@@ -471,6 +471,37 @@ void main() {
       expect((await zero2).status, 403);
     });
 
+    test(
+      'E731 a level zero that ran out of budget answers what arrived, the '
+      'rest as unavailable or false, and keeps the slot (punto 10)',
+      () async {
+        final b = bench();
+        b.reader.roots[peerA] = [
+          record(1, r'C:\datos\docs'),
+          record(3, r'C:\personal\dev'),
+        ];
+        final exited = b.fs.exited = Completer<void>();
+        b.fs.available = (_) => [true, false];
+        b.fs.checked = (_) => [false, true];
+        final reply = await b.roots(
+          peerA,
+          check: [
+            {'root': hexId(1), 'path': <String>[]},
+            {'root': hexId(3), 'path': <String>[]},
+          ],
+        );
+        expect(reply.status, 200);
+        final body = reply.json;
+        final roots = (body['roots']! as List<Object?>)
+            .cast<Map<String, Object?>>();
+        expect([for (final root in roots) root['available']], [true, false]);
+        expect(body['checks'], [false, true]);
+        expect((await b.roots(peerA)).status, 200);
+        expect((await b.roots(peerA)).status, 429);
+        exited.complete();
+      },
+    );
+
     test('G9 an exception while listing answers 404 unavailable and logs no '
         'path', () async {
       final b = bench();

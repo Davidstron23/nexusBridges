@@ -422,6 +422,7 @@ final class NexusNode {
   SendQueues? _queues;
   SendTray? _tray;
   ShareService? _shares;
+  BrowseServer? _browseServer;
   BrowseClient? _browseClient;
   PeerCheckScheduler? _scheduler;
   ApiServer? _server;
@@ -430,6 +431,8 @@ final class NexusNode {
   NetworkMonitor? _monitor;
   StreamSubscription<NetworkChange>? _changesSubscription;
   StreamSubscription<void>? _pairedSubscription;
+  Map<String, DateTime> _pairedSeen = const {};
+  final Set<String> _departedPeers = {};
   StreamSubscription<List<DiscoveredDevice>>? _devicesSubscription;
   StreamSubscription<void>? _coordinatorChangesSubscription;
   StreamSubscription<PairingEvent>? _coordinatorEventsSubscription;
@@ -1502,6 +1505,7 @@ final class NexusNode {
     _queues = queues;
     _tray = tray;
     _shares = shares;
+    _browseServer = browseServer;
     _browseClient = BrowseClient(identity: identity);
     _channel = channel;
     _discovery = discovery;
@@ -1523,9 +1527,11 @@ final class NexusNode {
 
     _devicesSubscription = discovery.devices.listen(_onDevices);
     await discovery.start();
-    _pairedSubscription = paired.changes.listen(
-      (_) => _enqueue('paired change', _onPairedChanged),
-    );
+    _pairedSeen = _pairedSnapshot(paired);
+    _pairedSubscription = paired.changes.listen((_) {
+      _noteDeparted(paired);
+      _enqueue('paired change', _onPairedChanged);
+    });
     coordinator.start();
     _coordinatorChangesSubscription = coordinator.changes.listen(
       (_) => _emit(),
@@ -1586,6 +1592,7 @@ final class NexusNode {
   Future<void> _onPairedChanged() async {
     _callTransfers('paired changed', (transfers) => transfers.pairedChanged());
     _stopQueuesIfUnpaired();
+    _forgetUnpairedShares();
     final current = _paired;
     if (current != null) {
       _seenAt.removeWhere((fingerprint, _) => !current.isPaired(fingerprint));
@@ -1600,6 +1607,38 @@ final class NexusNode {
       _log('trust rebuild failed: ${e.runtimeType}');
     }
     await _reconcileLocked();
+  }
+
+  Map<String, DateTime> _pairedSnapshot(PairedDevicesStore paired) => {
+    for (final device in paired.devices) device.fingerprint: device.pairedAt,
+  };
+
+  void _noteDeparted(PairedDevicesStore paired) {
+    final before = _pairedSeen;
+    final now = _pairedSnapshot(paired);
+    _pairedSeen = now;
+    for (final entry in before.entries) {
+      if (now[entry.key] != entry.value) _departedPeers.add(entry.key);
+    }
+  }
+
+  void _forgetUnpairedShares() {
+    final departed = Set<String>.of(_departedPeers);
+    _departedPeers.clear();
+    final browse = _browseServer;
+    if (browse != null) {
+      for (final fingerprint in departed) {
+        browse.forget(fingerprint);
+      }
+    }
+    final shares = _shares;
+    final paired = _paired;
+    if (shares == null || paired == null) return;
+    for (final fingerprint in shares.knownPeers) {
+      if (paired.isPaired(fingerprint)) continue;
+      _browseServer?.forget(fingerprint);
+      unawaited(_guard('shares forget', () => shares.forget(fingerprint)));
+    }
   }
 
   Future<void> _retryPortLocked() async {
@@ -1816,8 +1855,11 @@ final class NexusNode {
     _queues = null;
     _tray = null;
     _shares = null;
+    _browseServer = null;
     _browseClient = null;
     _scheduler = null;
+    _departedPeers.clear();
+    _pairedSeen = const {};
     _pairingRounds.clear();
     _resetProgress();
     _questions = const [];

@@ -42,6 +42,7 @@ export 'names.dart'
         checkRelativePath,
         isAppReservedName,
         isBlockedType,
+        isRepositoryFolderName,
         isValidFileName,
         isValidFolderName,
         visibleFileName;
@@ -880,7 +881,12 @@ final class TransferCoordinator {
       exclusions: exclusions,
       beforeStreamEntry: beforeStreamEntry,
     );
+    _sharesSubscription = sharedFolders.changes.listen(
+      (_) => _receiver.sharesChanged(),
+    );
   }
+
+  StreamSubscription<void>? _sharesSubscription;
 
   final Duration _tickInterval;
 
@@ -1012,6 +1018,9 @@ final class TransferCoordinator {
   Future<void> _close() async {
     _timer?.cancel();
     _timer = null;
+    final shares = _sharesSubscription;
+    _sharesSubscription = null;
+    await shares?.cancel();
     await Future.wait([_receiver.close(), _sender.close()]);
     _closed = true;
     await _changes.close();

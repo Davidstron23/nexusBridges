@@ -1,4 +1,4 @@
-import '../protocol/protocol.dart' show Limits;
+import '../protocol/protocol.dart' show Limits, folderKey;
 
 const String _replacement = '\uFFFD';
 
@@ -18,6 +18,8 @@ final RegExp _clsidSegment = RegExp(
 final RegExp _trailingDotsAndSpaces = RegExp(r'[. ]+$');
 
 final RegExp _trailingSpaces = RegExp(r' +$');
+
+final RegExp _repositoryShortName = RegExp(r'^GIT~[0-9]+$');
 
 const Set<String> _reservedNames = {
   'CON',
@@ -318,6 +320,11 @@ bool isValidFolderName(String name) =>
     !isBlockedType(name) &&
     !isAppReservedName(name);
 
+bool isRepositoryFolderName(String name) {
+  final key = folderKey(name.replaceFirst(_trailingDotsAndSpaces, ''));
+  return key == '.GIT' || _repositoryShortName.hasMatch(key);
+}
+
 enum RelativePathProblem { tooDeep, invalidName, tooLong }
 
 RelativePathProblem? checkRelativePath(
@@ -329,7 +336,9 @@ RelativePathProblem? checkRelativePath(
   if (depth > Limits.maxRelativeDepth) return RelativePathProblem.tooDeep;
   var total = rootPathUnits;
   for (final name in [...components, ?newFolder]) {
-    if (!isValidFolderName(name)) return RelativePathProblem.invalidName;
+    if (!isValidFolderName(name) || isRepositoryFolderName(name)) {
+      return RelativePathProblem.invalidName;
+    }
     total += 1 + name.length;
   }
   if (total > Limits.maxShareFolderChars) return RelativePathProblem.tooLong;

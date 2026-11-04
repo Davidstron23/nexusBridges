@@ -246,7 +246,12 @@ final class ShareService implements ShareReader, SharedFolders {
     this._clock = monotonicClock,
     this._now = DateTime.now,
     this._log = _noLog,
-  }) : _fs = fileSystem;
+  }) : _fs = fileSystem {
+    _pairedSeen = _pairedNow();
+    _pairedSubscription = _paired.changes.listen((_) => _onPairedChanged());
+  }
+
+  StreamSubscription<void>? _pairedSubscription;
 
   final SharesStore _store;
   final PairedDevicesStore _paired;
@@ -260,6 +265,7 @@ final class ShareService implements ShareReader, SharedFolders {
   final Map<String, _PendingShare> _pending = {};
   final Map<String, bool> _availability = {};
 
+  Map<String, DateTime> _pairedSeen = const {};
   Map<String, List<ShareRecord>> _shares = const {};
   Future<void> _tail = Future<void>.value();
   bool _closed = false;
@@ -289,6 +295,37 @@ final class ShareService implements ShareReader, SharedFolders {
       _profile = null;
     }
     return result;
+  }
+
+  Map<String, DateTime> _pairedNow() => {
+    for (final device in _paired.devices) device.fingerprint: device.pairedAt,
+  };
+
+  void _onPairedChanged() {
+    if (_closed) return;
+    final before = _pairedSeen;
+    final now = _pairedNow();
+    _pairedSeen = now;
+    final gone = <String>{
+      for (final entry in before.entries)
+        if (now[entry.key] != entry.value) entry.key,
+      for (final fingerprint in _shares.keys)
+        if (!now.containsKey(fingerprint)) fingerprint,
+      for (final pending in _pending.values)
+        if (!now.containsKey(pending.fingerprint)) pending.fingerprint,
+    };
+    for (final fingerprint in gone) {
+      unawaited(_forgetQuietly(fingerprint));
+    }
+    _notifyChanges();
+  }
+
+  Future<void> _forgetQuietly(String fingerprint) async {
+    try {
+      await forget(fingerprint);
+    } catch (e) {
+      _log('shares forget failed: ${e.runtimeType}');
+    }
   }
 
   String _visibleNameOf(String fingerprint, ShareRecord record) {
@@ -384,6 +421,9 @@ final class ShareService implements ShareReader, SharedFolders {
     if (_closed) return;
     _closed = true;
     _pending.clear();
+    final paired = _pairedSubscription;
+    _pairedSubscription = null;
+    await paired?.cancel();
     await _changes.close();
     await _saveStatus.close();
   }

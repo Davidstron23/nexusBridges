@@ -1,5 +1,10 @@
 import '../transfer/transfer.dart'
-    show SendDestination, SendTarget, TransferOutcome, TransferResultView;
+    show
+        DestinationLabel,
+        SendDestination,
+        SendTarget,
+        TransferOutcome,
+        TransferResultView;
 
 enum ElementKind { file, folder, missing, other }
 
@@ -42,6 +47,7 @@ final class QueueItemView {
     required this.state,
     this.outcome,
     this.problemPath,
+    this.destination,
   });
 
   final String id;
@@ -51,6 +57,7 @@ final class QueueItemView {
   final QueueItemState state;
   final TransferOutcome? outcome;
   final String? problemPath;
+  final DestinationLabel? destination;
 
   @override
   bool operator ==(Object other) =>
@@ -61,11 +68,20 @@ final class QueueItemView {
       other.isArchive == isArchive &&
       other.state == state &&
       other.outcome == outcome &&
-      other.problemPath == problemPath;
+      other.problemPath == problemPath &&
+      other.destination == destination;
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, isFolder, isArchive, state, outcome, problemPath);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    isFolder,
+    isArchive,
+    state,
+    outcome,
+    problemPath,
+    destination,
+  );
 }
 
 bool _sameItems(List<QueueItemView> a, List<QueueItemView> b) {

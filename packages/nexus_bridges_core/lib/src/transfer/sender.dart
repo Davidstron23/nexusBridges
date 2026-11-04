@@ -48,6 +48,8 @@ const Duration _pollMargin = Duration(seconds: 3);
 
 const Duration _retryDelay = Duration(seconds: 1);
 
+const Duration _unpairNoticeGrace = Duration(seconds: 1);
+
 Future<DataCheck> _checkData(String path, String dataPath) =>
     Isolate.run(() => checkAgainstData(path, dataPath));
 
@@ -761,6 +763,7 @@ final class TransferSender {
       manifestBytes: plan.encodedLength,
       destination: _requestOf(session.destination),
     );
+    final offered = Stopwatch()..start();
     final reply = await session.link.post(
       ApiPaths.transferOffer,
       offer.toJson(),
@@ -768,6 +771,8 @@ final class TransferSender {
     );
     if (session.done) return;
     if (reply == null) {
+      await _awaitUnpairNotice(session, offered);
+      if (session.done) return;
       unawaited(
         _sendCancel(
           session,
@@ -842,6 +847,8 @@ final class TransferSender {
               : offerOutcome(status, json ?? const <String, Object?>{}),
         );
       case StreamPostFailed():
+        await _pause(session, _unpairNoticeGrace);
+        if (session.done) return;
         unawaited(
           _sendCancel(
             session,
@@ -935,6 +942,7 @@ final class TransferSender {
       sha256: hexOfDigest(hashed.sha256),
       destination: _requestOf(session.destination),
     );
+    final offered = Stopwatch()..start();
     final reply = await session.link.post(
       ApiPaths.transferOffer,
       offer.toJson(),
@@ -942,6 +950,8 @@ final class TransferSender {
     );
     if (session.done) return;
     if (reply == null) {
+      await _awaitUnpairNotice(session, offered);
+      if (session.done) return;
       unawaited(
         _sendCancel(
           session,
@@ -1436,6 +1446,18 @@ final class TransferSender {
     final elapsed = _clock() - sentAt;
     if (elapsed >= _retryDelay) return Future.value();
     return _pause(session, _retryDelay - elapsed);
+  }
+
+  Future<void> _awaitUnpairNotice(
+    _OutSession session,
+    Stopwatch offered,
+  ) async {
+    final left = Limits.transferMessageTimeout - offered.elapsed;
+    if (left <= Duration.zero) return;
+    await _pause(
+      session,
+      left < _unpairNoticeGrace ? left : _unpairNoticeGrace,
+    );
   }
 
   Future<void> _pause(_OutSession session, Duration span) {

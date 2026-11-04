@@ -23,6 +23,7 @@ import '../transfer/transfer.dart'
         isBlockedType,
         isForbiddenFolder,
         isInsideTempFolder,
+        isRepositoryFolderName,
         isSameOrInside,
         isValidFileName,
         isValidFolderName,
@@ -93,7 +94,9 @@ bool _acceptable(
 ) {
   if (facts.isLink || facts.hidden || facts.system) return false;
   final realName = facts.realName;
-  if (!isValidFolderName(realName) || folderKey(realName) != folderKey(name)) {
+  if (!isValidFolderName(realName) ||
+      isRepositoryFolderName(realName) ||
+      folderKey(realName) != folderKey(name)) {
     return false;
   }
   if (!_strictlyInside(facts.finalPath, rootFinal)) return false;
@@ -392,6 +395,9 @@ _OpenReply _openChainSync(
   try {
     var folderPath = chain.facts.last.finalPath;
     if (newFolder != null) {
+      if (isRepositoryFolderName(newFolder)) {
+        return const _OpenReply(_Walk.unavailable);
+      }
       final probe = openFolderRelativeSync(
         chain.handles.last,
         newFolder,
@@ -780,6 +786,7 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
     if (roots.isEmpty && checks.isEmpty) {
       return LevelZeroFacts(available: available, checks: checked);
     }
+    final watch = Stopwatch()..start();
     final forbidden = await forbiddenFolders().timeout(
       budget,
       onTimeout: () => null,
@@ -834,7 +841,10 @@ final class WindowsShareFileSystem implements ShareWriteFileSystem {
         checks: List<bool>.filled(checks.length, false),
       );
     }
-    await done.future.timeout(budget, onTimeout: () {});
+    final remaining = budget - watch.elapsed;
+    if (remaining > Duration.zero) {
+      await done.future.timeout(remaining, onTimeout: () {});
+    }
     return LevelZeroFacts(
       available: List<bool>.of(available),
       checks: List<bool>.of(checked),

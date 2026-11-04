@@ -464,4 +464,83 @@ void main() {
       });
     },
   );
+
+  group('M-1 the .git folder by name on a real tree [SEG]', () {
+    test('M-1 a visible .git is not listed, not explored and not a '
+        'destination, in any case', () async {
+      final tree = await shareTree();
+      attrib('-h', tree.child('.git'));
+      Directory(tree.child('sub\\.git\\hooks')).createSync(recursive: true);
+      Directory(tree.child('sub\\ok\\hooks')).createSync(recursive: true);
+      expect(
+        (await list(tree, const []) as FolderListed).names,
+        isNot(contains('.git')),
+      );
+      expect((await list(tree, ['sub']) as FolderListed).names, ['ok']);
+      for (final name in ['.git', '.GIT', '.Git']) {
+        expect(
+          await list(tree, ['sub', name]),
+          isA<FolderUnavailable>(),
+          reason: name,
+        );
+        expect(
+          await tree.fs.openChain(tree.root, ['sub', name, 'hooks']),
+          isA<ChainUnavailable>(),
+          reason: name,
+        );
+        expect(
+          await tree.fs.openChain(tree.root, [name]),
+          isA<ChainUnavailable>(),
+          reason: name,
+        );
+      }
+      await openedChain(tree, ['sub', 'ok', 'hooks']);
+      expect(Directory(tree.child('sub\\.git\\hooks')).listSync(), isEmpty);
+    });
+
+    test('M-1 a new folder named .git is refused and nothing is created '
+        'in any case', () async {
+      final tree = await shareTree();
+      for (final name in ['.git', '.GIT', '.Git']) {
+        expect(
+          await tree.fs.openChain(tree.root, ['sub'], newFolder: name),
+          isA<ChainUnavailable>(),
+          reason: name,
+        );
+      }
+      expect(Directory(tree.child('sub')).listSync(), isEmpty);
+    });
+
+    test('M-1 the 8.3 name of a visible .git gives unavailable', () async {
+      final tree = await shareTree();
+      Directory(tree.child('sub\\.git')).createSync();
+      final short = shortNameOf(tree.child('sub\\.git'));
+      if (short.isEmpty) {
+        markTestSkipped('the test volume does not make 8.3 names');
+        return;
+      }
+      expect(await list(tree, ['sub', short]), isA<FolderUnavailable>());
+      expect(
+        await tree.fs.openChain(tree.root, ['sub', short]),
+        isA<ChainUnavailable>(),
+      );
+    });
+
+    test('M-1 .git with a trailing dot or space gives unavailable', () async {
+      final tree = await shareTree();
+      Directory(tree.child('sub\\.git')).createSync();
+      for (final name in ['.git.', '.git ']) {
+        expect(
+          await list(tree, ['sub', name]),
+          isA<FolderUnavailable>(),
+          reason: '"$name"',
+        );
+        expect(
+          await tree.fs.openChain(tree.root, ['sub', name]),
+          isNot(isA<ChainOpened>()),
+          reason: '"$name"',
+        );
+      }
+    });
+  });
 }

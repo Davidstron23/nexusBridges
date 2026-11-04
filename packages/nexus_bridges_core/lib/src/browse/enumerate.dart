@@ -4,6 +4,7 @@ import '../transfer/transfer.dart'
         ForbiddenFolders,
         isForbiddenFolder,
         isInsideTempFolder,
+        isRepositoryFolderName,
         isValidFolderName;
 import '../winio/winio.dart' show DirectoryBatches, RawEntry, isLinkTag;
 import 'share_fs.dart' show FolderListed;
@@ -53,6 +54,7 @@ final class FolderCollector {
     final tag = entry.reparseTag;
     if (tag != null && isLinkTag(tag)) return false;
     if (!isValidFolderName(entry.name)) return false;
+    if (isRepositoryFolderName(entry.name)) return false;
     final full = '$_parent${entry.name}';
     return !isForbiddenFolder(full, _forbidden) && !isInsideTempFolder(full);
   }
