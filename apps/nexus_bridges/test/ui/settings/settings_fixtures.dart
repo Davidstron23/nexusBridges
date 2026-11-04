@@ -106,6 +106,7 @@ Future<(FakeAppController, SettingsController)> pumpSettings(
   bool open = true,
   ThemeChoice theme = ThemeChoice.dark,
   bool closeToTray = true,
+  bool systemTray = true,
 }) async {
   setSize(tester, size);
   final controller = FakeAppController(
@@ -113,6 +114,7 @@ Future<(FakeAppController, SettingsController)> pumpSettings(
     languageCode: code,
     theme: theme,
     closeToTray: closeToTray,
+    systemTray: systemTray,
   );
   final settings = SettingsController();
   await pumpHome(

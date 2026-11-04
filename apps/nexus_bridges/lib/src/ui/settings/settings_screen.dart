@@ -119,11 +119,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  int get _visibleSections =>
+      widget.controller.systemTrayAvailable ? _sectionCount : _sectionCount - 1;
+
   List<double>? _tops() {
     final content = _contentKey.currentContext?.findRenderObject();
     if (content is! RenderBox || !content.attached) return null;
     final tops = <double>[];
-    for (final key in _keys) {
+    for (final key in _keys.take(_visibleSections)) {
       final render = key.currentContext?.findRenderObject();
       if (render is! RenderBox || !render.attached) return null;
       tops.add(render.localToGlobal(Offset.zero, ancestor: content).dy);
@@ -224,11 +227,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: strings.sectionExclusions,
         build: () => ExclusionsSection(controller: controller),
       ),
-      _Entry(
-        icon: Glyphs.taskbar,
-        title: strings.sectionSystemTray,
-        build: () => SystemTraySection(controller: controller),
-      ),
+      if (controller.systemTrayAvailable)
+        _Entry(
+          icon: Glyphs.taskbar,
+          title: strings.sectionSystemTray,
+          build: () => SystemTraySection(controller: controller),
+        ),
       _Entry(
         icon: Glyphs.wifi,
         title: strings.sectionNetworks,
