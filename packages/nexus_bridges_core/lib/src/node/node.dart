@@ -116,7 +116,8 @@ export '../transfer/transfer.dart'
         TransferResultKind,
         RevealResult;
 export 'node_state.dart';
-export 'settings_rules.dart' show ExclusionProblem, exclusionProblem;
+export 'settings_rules.dart'
+    show ExclusionProblem, exclusionProblem, isDefaultExclusionList;
 
 void _noLog(String message) {}
 

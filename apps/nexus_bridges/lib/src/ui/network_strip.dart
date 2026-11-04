@@ -19,6 +19,7 @@ class NetworkStrip extends StatefulWidget {
     required this.state,
     required this.onRescan,
     required this.onTrust,
+    this.onSettings,
     this.compact = false,
     super.key,
   });
@@ -26,6 +27,7 @@ class NetworkStrip extends StatefulWidget {
   final NodeState state;
   final VoidCallback onRescan;
   final void Function(String networkId) onTrust;
+  final VoidCallback? onSettings;
   final bool compact;
 
   @override
@@ -95,6 +97,17 @@ class _NetworkStripState extends State<NetworkStrip>
         minimumSize: WidgetStatePropertyAll(Size(0, _rescanHeight)),
         padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 16)),
         shape: WidgetStatePropertyAll(StadiumBorder()),
+      ),
+    );
+  }
+
+  Widget _settingsButton(AppStrings strings) {
+    return IconButton.outlined(
+      onPressed: widget.onSettings,
+      tooltip: strings.settingsButton,
+      icon: const GlyphIcon(Glyphs.sliders, size: 16),
+      style: const ButtonStyle(
+        fixedSize: WidgetStatePropertyAll(Size.square(_rescanHeight)),
       ),
     );
   }
@@ -181,6 +194,10 @@ class _NetworkStripState extends State<NetworkStrip>
                   ),
                   const SizedBox(width: 12),
                   _rescanButton(strings, iconSize: widget.compact ? 16 : 14),
+                  if (widget.onSettings != null) ...[
+                    const SizedBox(width: 8),
+                    _settingsButton(strings),
+                  ],
                 ],
               ),
             ),
@@ -261,6 +278,10 @@ class _NetworkStripState extends State<NetworkStrip>
               ),
               const SizedBox(width: 12),
               _rescanButton(strings, iconSize: widget.compact ? 16 : 14),
+              if (widget.onSettings != null) ...[
+                const SizedBox(width: 8),
+                _settingsButton(strings),
+              ],
             ],
           ),
         ),

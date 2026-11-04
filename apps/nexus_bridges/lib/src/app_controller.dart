@@ -3,16 +3,27 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
+bool _alwaysOpen() => true;
+
 class AppController extends ChangeNotifier {
-  AppController({required this._startNode, required this._loadLanguage});
+  AppController({
+    required this._startNode,
+    required this._loadStartup,
+    this.settingsOpen = _alwaysOpen,
+  });
 
   final Future<NexusNode> Function() _startNode;
-  final Future<String> Function() _loadLanguage;
+  final Future<StartupSettings> Function() _loadStartup;
+
+  bool Function() settingsOpen;
 
   NexusNode? _node;
   StreamSubscription<NodeState>? _subscription;
   NodeState? _state;
   String _languageCode = 'en';
+  ThemeChoice _theme = ThemeChoice.dark;
+  bool _closeToTray = true;
+  bool _trayHintShown = false;
   bool _startFailed = false;
   bool _identityWarningDismissed = false;
   bool _closed = false;
@@ -22,6 +33,12 @@ class AppController extends ChangeNotifier {
   NodeState? get state => _state;
 
   String get languageCode => _languageCode;
+
+  ThemeChoice get theme => _theme;
+
+  bool get closeToTray => _closeToTray;
+
+  bool get trayHintShown => _trayHintShown;
 
   bool get startFailed => _startFailed;
 
@@ -36,7 +53,11 @@ class AppController extends ChangeNotifier {
   Future<void> _init() async {
     if (_node != null || _closed) return;
     try {
-      _languageCode = await _loadLanguage();
+      final startup = await _loadStartup();
+      _languageCode = startup.language;
+      _theme = startup.theme;
+      _closeToTray = startup.closeToTray;
+      _trayHintShown = startup.trayHintShown;
     } catch (_) {
       _languageCode = 'en';
     }
@@ -60,6 +81,73 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     });
     notifyListeners();
+  }
+
+  Future<void> setLanguage(String code) {
+    if (code == _languageCode) return Future<void>.value();
+    _languageCode = code;
+    notifyListeners();
+    return _node?.saveLanguage(code) ?? Future<void>.value();
+  }
+
+  Future<void> setTheme(ThemeChoice theme) {
+    if (theme == _theme) return Future<void>.value();
+    _theme = theme;
+    notifyListeners();
+    return _node?.saveTheme(theme) ?? Future<void>.value();
+  }
+
+  Future<void> setCloseToTray(bool enabled) {
+    if (enabled == _closeToTray) return Future<void>.value();
+    _closeToTray = enabled;
+    notifyListeners();
+    return _node?.saveCloseToTray(enabled) ?? Future<void>.value();
+  }
+
+  Future<DeviceNameResult> setDeviceName(String? name) async {
+    final node = _node;
+    if (node == null) return const DeviceNameResult(saved: false);
+    return node.setDeviceName(name);
+  }
+
+  String? namesakeOf(String candidate) => _node?.namesakeOf(candidate);
+
+  Future<ExclusionOutcome> addExclusion(String raw) async {
+    final node = _node;
+    if (node == null) return const ExclusionOutcome(saved: false);
+    return node.addExclusion(raw);
+  }
+
+  Future<void> removeExclusion(String name) {
+    return _node?.removeExclusion(name) ?? Future<void>.value();
+  }
+
+  Future<void> restoreExclusions() {
+    return _node?.restoreExclusions() ?? Future<void>.value();
+  }
+
+  Future<FolderChangeResult> changeReceiveFolder() async {
+    final node = _node;
+    if (node == null) return const FolderChangeBlocked();
+    final result = await node.changeReceiveFolder();
+    if (result is FolderChangeNeedsConfirmation && !settingsOpen()) {
+      node.cancelReceiveFolderChange(result.changeId);
+    }
+    return result;
+  }
+
+  Future<FolderChangeResult> confirmReceiveFolder(String changeId) async {
+    final node = _node;
+    if (node == null) return const FolderChangeBlocked();
+    return node.confirmReceiveFolder(changeId);
+  }
+
+  void cancelReceiveFolderChange(String changeId) {
+    _node?.cancelReceiveFolderChange(changeId);
+  }
+
+  Future<void> stopUsingNetwork(String networkId) {
+    return _node?.stopUsingNetwork(networkId) ?? Future<void>.value();
   }
 
   void dismissIdentityWarning() {

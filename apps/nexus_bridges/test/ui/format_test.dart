@@ -452,4 +452,55 @@ void main() {
       }
     });
   });
+
+  group('formatShortDate (RF-531, RF-536, DA-21)', () {
+    final es = stringsFor('es');
+    final en = stringsFor('en');
+
+    test('Spanish is numeric dd/MM/yyyy and English is "Mon d, yyyy"', () {
+      final at = DateTime.utc(2026, 10, 30, 12);
+      expect(formatShortDate(at, 'es', es), '30/10/2026');
+      expect(formatShortDate(at, 'en', en), 'Oct 30, 2026');
+      final early = DateTime.utc(2026, 3, 5, 12);
+      expect(formatShortDate(early, 'es', es), '05/03/2026');
+      expect(formatShortDate(early, 'en', en), 'Mar 5, 2026');
+    });
+
+    test('every month has its short name in English', () {
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      for (var m = 1; m <= 12; m++) {
+        expect(en.monthShort(m), months[m - 1]);
+        expect(
+          formatShortDate(DateTime.utc(2026, m, 15, 12), 'en', en),
+          '${months[m - 1]} 15, 2026',
+        );
+        expect(es.monthShort(m), isNotEmpty);
+      }
+    });
+
+    test('the date is the local one, not the UTC one', () {
+      final utc = DateTime.utc(2026, 12, 31, 23, 30);
+      final local = utc.toLocal();
+      final day = local.day.toString().padLeft(2, '0');
+      final month = local.month.toString().padLeft(2, '0');
+      expect(formatShortDate(utc, 'es', es), '$day/$month/${local.year}');
+      expect(
+        formatShortDate(utc, 'en', en),
+        '${en.monthShort(local.month)} ${local.day}, ${local.year}',
+      );
+    });
+  });
 }

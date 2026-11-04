@@ -953,4 +953,248 @@ final class AppStringsEs implements AppStrings {
   @override
   String get dragTipBody =>
       'Sobre un equipo para enviárselo; fuera de ellos, a Para enviar';
+
+  @override
+  String get settingsButton => 'Ajustes';
+
+  @override
+  String get settingsTitle => 'Ajustes';
+
+  @override
+  String settingsSubtitle(String name) => 'Este equipo · $name';
+
+  @override
+  String get settingsBack => 'Volver';
+
+  @override
+  String get settingsNavFoot => 'Esc o la flecha vuelven a tus equipos.';
+
+  @override
+  String get settingsFooter =>
+      'Todo se guarda al momento, salvo el nombre: Intro o Guardar.';
+
+  @override
+  String moreInfo(String text) => 'Más información: $text';
+
+  @override
+  String get sectionAppearance => 'Apariencia';
+
+  @override
+  String get appearanceInfo =>
+      'Cambia al momento, también la barra de título de Windows.';
+
+  @override
+  String get themeDark => 'Oscuro';
+
+  @override
+  String get themeLight => 'Claro';
+
+  @override
+  String get themeWindows => 'Windows';
+
+  @override
+  String get sectionLanguage => 'Idioma';
+
+  @override
+  String get languageSpanish => 'Español';
+
+  @override
+  String get languageEnglish => 'English';
+
+  @override
+  String get sectionDevice => 'Este equipo';
+
+  @override
+  String get deviceNameLabel => 'Nombre del equipo';
+
+  @override
+  String get deviceNameDesc => 'Así te ven los equipos de tus redes.';
+
+  @override
+  String get deviceNameInfo =>
+      'Lo ven todos los equipos con NexusBridges de tus redes de confianza, también los que aún no has vinculado.';
+
+  @override
+  String get saveButton => 'Guardar';
+
+  @override
+  String useWindowsName(String name) => 'Usar el nombre de Windows · $name';
+
+  @override
+  String get nameEmpty => 'Escribe un nombre.';
+
+  @override
+  String get nameTooLong => 'Como mucho 64 caracteres.';
+
+  @override
+  String get nameInvalid =>
+      'Tiene caracteres que los demás no verían igual: invisibles, de control '
+      'o partes de algunos emojis compuestos. Quítalos o escribe el nombre a '
+      'mano.';
+
+  @override
+  String get nameNamesake =>
+      'Otro equipo de la lista se llama así: los demás verán la huella junto '
+      'al nombre para distinguiros.';
+
+  @override
+  String get sectionReceive => 'Recepción';
+
+  @override
+  String get receiveDesc => 'Aquí llega lo que viene sin destino.';
+
+  @override
+  String get receiveInfo =>
+      'También todo lo que te envía un equipo ajeno, que nunca ve tus carpetas.';
+
+  @override
+  String get receiveNotSet => 'Se preguntará la primera vez que recibas algo';
+
+  @override
+  String get changeFolderButton => 'Cambiar…';
+
+  @override
+  String get changeFolderLocked =>
+      'Antes responde a la pregunta de la carpeta.';
+
+  @override
+  String get sectionExclusions => 'Carpetas excluidas';
+
+  @override
+  String ofMax(int n, int max) => '$n de $max';
+
+  @override
+  String get exclusionsDesc => 'Subcarpetas que nunca se envían.';
+
+  @override
+  String get exclusionsInfo =>
+      'Al enviar una carpeta, las que se llamen así se quedan fuera, estén al nivel que estén. Los archivos sueltos se envían igual.';
+
+  @override
+  String get exclusionsEmpty => 'Ninguna: se envía todo.';
+
+  @override
+  String get exclusionPlaceholder => 'Nombre de carpeta, por ejemplo dist';
+
+  @override
+  String get addButton => 'Añadir';
+
+  @override
+  String removeExclusion(String name) => 'Quitar $name';
+
+  @override
+  String get exclusionEmpty => 'Escribe un nombre de carpeta.';
+
+  @override
+  String get exclusionInvalid =>
+      'Ese nombre no vale para una carpeta en Windows.';
+
+  @override
+  String get exclusionDuplicate => 'Ya está en la lista.';
+
+  @override
+  String get exclusionFull => 'Como mucho 64 nombres.';
+
+  @override
+  String get restoreDefaults => 'Restaurar la lista por defecto';
+
+  @override
+  String get restoreConfirm =>
+      '¿Volver a node_modules, build y .dart_tool? Se quitan los nombres que '
+      'hayas añadido.';
+
+  @override
+  String get restoreButton => 'Restaurar';
+
+  @override
+  String get sectionSystemTray => 'Bandeja del sistema';
+
+  @override
+  String get systemTrayInfo =>
+      'Para salir del todo: clic derecho en el icono de la bandeja y Salir.';
+
+  @override
+  String get systemTraySwitch => 'Seguir en la bandeja al cerrar';
+
+  @override
+  String get systemTraySwitchHelp =>
+      'La X esconde la ventana y sigue recibiendo.';
+
+  @override
+  String get systemTrayOffHelp =>
+      'La X cerrará la app. Si hay un envío, te preguntará.';
+
+  @override
+  String get sectionNetworks => 'Redes de confianza';
+
+  @override
+  String get networksInfo => 'Solo funciona en estas. En las demás, en pausa.';
+
+  @override
+  String get connectedNow => 'Conectada ahora';
+
+  @override
+  String get unnamedNetwork => 'Red sin nombre';
+
+  @override
+  String get networksEmpty => 'Aún no usas NexusBridges en ninguna red';
+
+  @override
+  String trustedOn(String date) => 'Aceptada el $date';
+
+  @override
+  String get stopUsingButton => 'Dejar de usar en esta red';
+
+  @override
+  String stopUsingConfirm(String network) =>
+      '¿Dejar de usar NexusBridges en $network? Estás conectado a ella: la '
+      'app se pondrá en pausa aquí y tus otros equipos dejarán de ver este.';
+
+  @override
+  String transfersStopped(int count) => count == 1
+      ? 'Se cortará 1 envío en curso.'
+      : 'Se cortarán $count envíos en curso.';
+
+  @override
+  String get pairingCancelled => 'Se cancelará la vinculación en curso.';
+
+  @override
+  String get stopUsingConfirmButton => 'Dejar de usar';
+
+  @override
+  String noticeNetworkStopNotSaved(String network) =>
+      'Has dejado de usar $network hasta que cierres la app, pero no se ha '
+      'podido guardar: al volver a abrirla se usaría otra vez.';
+
+  @override
+  String get sectionIgnored => 'Equipos ignorados';
+
+  @override
+  String get ignoredInfo => 'Estos equipos no pueden pedirte vincularse.';
+
+  @override
+  String get ignoredEmpty => 'No has ignorado ningún equipo';
+
+  @override
+  String ignoredOn(String date) => 'Ignorado el $date';
+
+  @override
+  String get noticeSettingNotSaved =>
+      'No se pudo guardar el cambio: se aplica hasta que cierres la app.';
+
+  @override
+  String monthShort(int month) => const [
+    'ene',
+    'feb',
+    'mar',
+    'abr',
+    'may',
+    'jun',
+    'jul',
+    'ago',
+    'sep',
+    'oct',
+    'nov',
+    'dic',
+  ][month - 1];
 }

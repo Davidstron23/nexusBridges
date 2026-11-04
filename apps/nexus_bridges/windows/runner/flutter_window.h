@@ -5,6 +5,7 @@
 #include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
+#include <flutter/method_result.h>
 
 #include <memory>
 
@@ -32,6 +33,12 @@ class FlutterWindow : public Win32Window {
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
+  void HandleWindowCall(
+      const flutter::MethodCall<flutter::EncodableValue>& call,
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      window_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> drop_channel_;
   DropTarget* drop_target_ = nullptr;
   HWND drop_view_ = nullptr;

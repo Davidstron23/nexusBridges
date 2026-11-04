@@ -6,26 +6,133 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/app_controller.dart';
 import 'package:nexus_bridges/src/drop/drop_events.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/attention.dart';
 import 'package:nexus_bridges/src/ui/home_screen.dart';
 import 'package:nexus_bridges/src/ui/network_prompt_dialog.dart';
 import 'package:nexus_bridges/src/ui/pairing_dialogs.dart';
+import 'package:nexus_bridges/src/ui/settings/settings_controller.dart';
 import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 const List<String> languageCodes = ['es', 'en'];
 
 class FakeAppController extends AppController {
-  FakeAppController({NodeState? state, bool startFailed = false})
-    : _fakeState = state,
-      _fakeStartFailed = startFailed,
-      super(
-        startNode: () async => throw StateError('not used by widget tests'),
-        loadLanguage: () async => 'en',
-      );
+  FakeAppController({
+    NodeState? state,
+    bool startFailed = false,
+    String languageCode = 'en',
+    ThemeChoice theme = ThemeChoice.dark,
+    bool closeToTray = true,
+  }) : _fakeState = state,
+       _fakeStartFailed = startFailed,
+       _fakeLanguage = languageCode,
+       _fakeTheme = theme,
+       _fakeCloseToTray = closeToTray,
+       super(
+         startNode: () async => throw StateError('not used by widget tests'),
+         loadStartup: () async => const StartupSettings(language: 'en'),
+       );
 
   NodeState? _fakeState;
   bool _fakeStartFailed;
+  String _fakeLanguage;
+  ThemeChoice _fakeTheme;
+  bool _fakeCloseToTray;
   final List<String> calls = [];
+
+  @override
+  String get languageCode => _fakeLanguage;
+
+  @override
+  ThemeChoice get theme => _fakeTheme;
+
+  @override
+  bool get closeToTray => _fakeCloseToTray;
+
+  @override
+  Future<void> setLanguage(String code) async {
+    calls.add('setLanguage $code');
+    if (code == _fakeLanguage) return;
+    _fakeLanguage = code;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setTheme(ThemeChoice theme) async {
+    calls.add('setTheme ${theme.name}');
+    if (theme == _fakeTheme) return;
+    _fakeTheme = theme;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setCloseToTray(bool enabled) async {
+    calls.add('setCloseToTray $enabled');
+    if (enabled == _fakeCloseToTray) return;
+    _fakeCloseToTray = enabled;
+    notifyListeners();
+  }
+
+  Future<DeviceNameResult> Function(String? name) deviceNameResult = (
+    _,
+  ) async => const DeviceNameResult();
+  final Map<String, String> namesakes = {};
+
+  @override
+  Future<DeviceNameResult> setDeviceName(String? name) {
+    calls.add('setDeviceName $name');
+    return deviceNameResult(name);
+  }
+
+  @override
+  String? namesakeOf(String candidate) => namesakes[candidate];
+
+  Future<ExclusionOutcome> Function(String raw) exclusionResult = (_) async =>
+      const ExclusionOutcome();
+
+  @override
+  Future<ExclusionOutcome> addExclusion(String raw) {
+    calls.add('addExclusion $raw');
+    return exclusionResult(raw);
+  }
+
+  @override
+  Future<void> removeExclusion(String name) async {
+    calls.add('removeExclusion $name');
+  }
+
+  @override
+  Future<void> restoreExclusions() async {
+    calls.add('restoreExclusions');
+  }
+
+  Future<FolderChangeResult> Function() changeFolderResult = () async =>
+      const FolderUnchanged();
+  Future<FolderChangeResult> Function(String changeId) confirmFolderResult = (
+    _,
+  ) async => const FolderChanged(r'C:\Recibidos');
+
+  @override
+  Future<FolderChangeResult> changeReceiveFolder() {
+    calls.add('changeReceiveFolder');
+    return changeFolderResult();
+  }
+
+  @override
+  Future<FolderChangeResult> confirmReceiveFolder(String changeId) {
+    calls.add('confirmReceiveFolder $changeId');
+    return confirmFolderResult(changeId);
+  }
+
+  @override
+  void cancelReceiveFolderChange(String changeId) {
+    calls.add('cancelReceiveFolderChange $changeId');
+  }
+
+  @override
+  Future<void> stopUsingNetwork(String networkId) async {
+    calls.add('stopUsingNetwork $networkId');
+  }
 
   @override
   NodeState? get state => _fakeState;
@@ -282,6 +389,9 @@ Widget homeApp(
   String languageCode, {
   bool reduceMotion = false,
   DropEvents? dropEvents,
+  SettingsController? settings,
+  AttentionWatcher? attention,
+  FocusNode? neutralFocus,
 }) {
   return MaterialApp(
     locale: Locale(languageCode),
@@ -306,7 +416,13 @@ Widget homeApp(
       controller: controller,
       child: PairingHost(
         controller: controller,
-        child: HomeScreen(controller, dropEvents: dropEvents),
+        child: HomeScreen(
+          controller,
+          dropEvents: dropEvents,
+          settings: settings,
+          attention: attention,
+          neutralFocus: neutralFocus,
+        ),
       ),
     ),
   );
@@ -319,6 +435,8 @@ Future<void> pumpHome(
   bool settle = true,
   bool reduceMotion = false,
   DropEvents? dropEvents,
+  SettingsController? settings,
+  AttentionWatcher? attention,
 }) async {
   await tester.pumpWidget(
     homeApp(
@@ -326,6 +444,8 @@ Future<void> pumpHome(
       languageCode,
       reduceMotion: reduceMotion,
       dropEvents: dropEvents,
+      settings: settings,
+      attention: attention,
     ),
   );
   if (settle) {

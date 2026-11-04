@@ -1,3 +1,5 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/material.dart';
 
 final class NbColors extends ThemeExtension<NbColors> {
@@ -625,6 +627,99 @@ final class NbColors extends ThemeExtension<NbColors> {
   @override
   NbColors lerp(ThemeExtension<NbColors>? other, double t) {
     if (other is! NbColors) return this;
-    return t < 0.5 ? this : other;
+    return NbColors(
+      primary: Color.lerp(primary, other.primary, t)!,
+      primaryHover: Color.lerp(primaryHover, other.primaryHover, t)!,
+      primaryWeak: Color.lerp(primaryWeak, other.primaryWeak, t)!,
+      primaryInk: Color.lerp(primaryInk, other.primaryInk, t)!,
+      onPrimary: Color.lerp(onPrimary, other.onPrimary, t)!,
+      hubTop: Color.lerp(hubTop, other.hubTop, t)!,
+      hubBottom: Color.lerp(hubBottom, other.hubBottom, t)!,
+      glow: Color.lerp(glow, other.glow, t)!,
+      halo: Color.lerp(halo, other.halo, t)!,
+      success: Color.lerp(success, other.success, t)!,
+      successWeak: Color.lerp(successWeak, other.successWeak, t)!,
+      onSuccessDisc: Color.lerp(onSuccessDisc, other.onSuccessDisc, t)!,
+      netSurface: Color.lerp(netSurface, other.netSurface, t)!,
+      netDiscTop: Color.lerp(netDiscTop, other.netDiscTop, t)!,
+      netDiscBottom: Color.lerp(netDiscBottom, other.netDiscBottom, t)!,
+      warning: Color.lerp(warning, other.warning, t)!,
+      warningRing: Color.lerp(warningRing, other.warningRing, t)!,
+      warningWeak: Color.lerp(warningWeak, other.warningWeak, t)!,
+      danger: Color.lerp(danger, other.danger, t)!,
+      dangerWeak: Color.lerp(dangerWeak, other.dangerWeak, t)!,
+      ground: Color.lerp(ground, other.ground, t)!,
+      card: Color.lerp(card, other.card, t)!,
+      surfaceWeak: Color.lerp(surfaceWeak, other.surfaceWeak, t)!,
+      track: Color.lerp(track, other.track, t)!,
+      nodeTop: Color.lerp(nodeTop, other.nodeTop, t)!,
+      nodeBottom: Color.lerp(nodeBottom, other.nodeBottom, t)!,
+      border: Color.lerp(border, other.border, t)!,
+      borderWeak: Color.lerp(borderWeak, other.borderWeak, t)!,
+      text: Color.lerp(text, other.text, t)!,
+      textWeak: Color.lerp(textWeak, other.textWeak, t)!,
+      hint: Color.lerp(hint, other.hint, t)!,
+      tooltip: Color.lerp(tooltip, other.tooltip, t)!,
+      successInk: Color.lerp(successInk, other.successInk, t)!,
+      primaryButton: Color.lerp(primaryButton, other.primaryButton, t)!,
+      cardShadow: BoxShadow.lerpList(cardShadow, other.cardShadow, t)!,
+      popoverShadow: BoxShadow.lerpList(popoverShadow, other.popoverShadow, t)!,
+      discShadow: BoxShadow.lerpList(discShadow, other.discShadow, t)!,
+      nodeShadow: Color.lerp(nodeShadow, other.nodeShadow, t)!,
+      primaryButtonHover: Color.lerp(
+        primaryButtonHover,
+        other.primaryButtonHover,
+        t,
+      )!,
+      dangerFill: Color.lerp(dangerFill, other.dangerFill, t)!,
+      ice: Color.lerp(ice, other.ice, t)!,
+      iceWeak: Color.lerp(iceWeak, other.iceWeak, t)!,
+      scrim: Color.lerp(scrim, other.scrim, t)!,
+      segment: Color.lerp(segment, other.segment, t)!,
+      keyFill: Color.lerp(keyFill, other.keyFill, t)!,
+      keyShadow: BoxShadow.lerpList(keyShadow, other.keyShadow, t)!,
+      keyOkBorder: Color.lerp(keyOkBorder, other.keyOkBorder, t)!,
+      okShadow: BoxShadow.lerpList(okShadow, other.okShadow, t)!,
+      sheen: Color.lerp(sheen, other.sheen, t)!,
+      neutralWeak: Color.lerp(neutralWeak, other.neutralWeak, t)!,
+      stageBorder: Color.lerp(stageBorder, other.stageBorder, t)!,
+      stageTrack: Color.lerp(stageTrack, other.stageTrack, t)!,
+      stageWeak: Color.lerp(stageWeak, other.stageWeak, t)!,
+      stageHint: Color.lerp(stageHint, other.stageHint, t)!,
+      stageDashedRing: Color.lerp(stageDashedRing, other.stageDashedRing, t)!,
+      discTint: lerpDouble(discTint, other.discTint, t)!,
+      haloOpacity: lerpDouble(haloOpacity, other.haloOpacity, t)!,
+      primaryButtonShadow: BoxShadow.lerpList(
+        primaryButtonShadow,
+        other.primaryButtonShadow,
+        t,
+      )!,
+      primaryButtonHoverShadow: BoxShadow.lerpList(
+        primaryButtonHoverShadow,
+        other.primaryButtonHoverShadow,
+        t,
+      )!,
+      dangerButtonHoverShadow: BoxShadow.lerpList(
+        dangerButtonHoverShadow,
+        other.dangerButtonHoverShadow,
+        t,
+      )!,
+      buttonHighlight: Color.lerp(buttonHighlight, other.buttonHighlight, t)!,
+      buttonHighlightHover: Color.lerp(
+        buttonHighlightHover,
+        other.buttonHighlightHover,
+        t,
+      )!,
+      headingWeight: lerpDouble(headingWeight, other.headingWeight, t)!,
+      menuSurface: Color.lerp(menuSurface, other.menuSurface, t)!,
+      menuBorder: Color.lerp(menuBorder, other.menuBorder, t)!,
+      menuShadow: BoxShadow.lerpList(menuShadow, other.menuShadow, t)!,
+      controlHover: Color.lerp(controlHover, other.controlHover, t)!,
+      softButtonHoverShadow: BoxShadow.lerpList(
+        softButtonHoverShadow,
+        other.softButtonHoverShadow,
+        t,
+      )!,
+    );
   }
 }

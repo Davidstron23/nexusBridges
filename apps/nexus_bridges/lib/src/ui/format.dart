@@ -1,3 +1,5 @@
+import '../l10n/app_strings.dart';
+
 const int _maxExtensionRunes = 16;
 
 const int _ellipsis = 0x2026;
@@ -88,4 +90,15 @@ String formatCount(int count, String languageCode) {
     buffer.write(digits[i]);
   }
   return buffer.toString();
+}
+
+String formatShortDate(DateTime utc, String languageCode, AppStrings strings) {
+  final local = utc.toLocal();
+  final year = local.year.toString().padLeft(4, '0');
+  if (languageCode == 'es') {
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    return '$day/$month/$year';
+  }
+  return '${strings.monthShort(local.month)} ${local.day}, $year';
 }

@@ -47,6 +47,7 @@ class DropController extends ChangeNotifier {
     required this.onPortal,
     required this.onOutcome,
     this.isBlocked = _never,
+    this.blocked = _never,
     this.portalAfter = portalDelay,
   });
 
@@ -55,6 +56,7 @@ class DropController extends ChangeNotifier {
   final void Function(String fingerprint) onPortal;
   final void Function(DropOutcome outcome) onOutcome;
   final bool Function() isBlocked;
+  final bool Function() blocked;
   final Duration portalAfter;
 
   final List<_Zone> _zones = [];
@@ -79,6 +81,10 @@ class DropController extends ChangeNotifier {
   }
 
   void handle(DropEvent event) {
+    if (blocked()) {
+      _reset();
+      return;
+    }
     switch (event) {
       case DropEnter(:final position):
         _track(position);

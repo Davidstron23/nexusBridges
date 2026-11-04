@@ -229,4 +229,95 @@ void main() {
       expect(offenders, isEmpty);
     });
   });
+
+  group('E858 the files of spec 008 take every text from AppStrings', () {
+    final named = RegExp(
+      r'''(?<![A-Za-z])(?:tooltip|label|message|title|semanticsLabel|hintText):\s*['"]''',
+    );
+
+    List<File> sources() {
+      final sep = Platform.pathSeparator;
+      final settings = Directory('lib${sep}src${sep}ui${sep}settings');
+      final window = Directory('lib${sep}src${sep}window');
+      return [
+        for (final directory in [settings, window])
+          for (final entity in directory.listSync(recursive: true))
+            if (entity is File && entity.path.endsWith('.dart')) entity,
+        File('lib${sep}src${sep}ui${sep}attention.dart'),
+      ];
+    }
+
+    test('the scan covers the settings screen, its sections, attention and '
+        'the window host', () {
+      final names = sources().map((file) => file.uri.pathSegments.last).toSet();
+      expect(
+        names,
+        containsAll([
+          'settings_screen.dart',
+          'settings_layer.dart',
+          'device_name_section.dart',
+          'appearance_section.dart',
+          'language_section.dart',
+          'receive_section.dart',
+          'exclusions_section.dart',
+          'system_tray_section.dart',
+          'networks_section.dart',
+          'ignored_section.dart',
+          'inline_confirm.dart',
+          'attention.dart',
+          'window_host.dart',
+          'method_channel_window_host.dart',
+          'title_bar_sync.dart',
+        ]),
+      );
+    });
+
+    test('the named-argument pattern catches literals and lets AppStrings '
+        'through', () {
+      expect(named.hasMatch("tooltip: 'Ajustes'"), isTrue);
+      expect(named.hasMatch('label: "Quitar"'), isTrue);
+      expect(named.hasMatch('tooltip: strings.settingsButton'), isFalse);
+      expect(named.hasMatch('label: widget.label'), isFalse);
+    });
+
+    test('no literal Text, TextSpan, Icons or named text argument', () {
+      final offenders = <String>[];
+      for (final file in sources()) {
+        final source = file.readAsStringSync();
+        for (final pattern in [
+          _literalText,
+          _literalSpan,
+          _materialIcon,
+          named,
+        ]) {
+          for (final match in pattern.allMatches(source)) {
+            final line = RegExp(r'\n')
+                .allMatches(source.substring(0, match.start))
+                .length;
+            offenders.add('${file.path}:${line + 1}');
+          }
+        }
+      }
+      expect(offenders, isEmpty);
+    });
+
+    test('the settings files read their texts from AppStringsDelegate', () {
+      final sep = Platform.pathSeparator;
+      for (final name in [
+        'settings_screen.dart',
+        'device_name_section.dart',
+        'appearance_section.dart',
+        'language_section.dart',
+        'receive_section.dart',
+        'exclusions_section.dart',
+        'system_tray_section.dart',
+        'networks_section.dart',
+        'ignored_section.dart',
+      ]) {
+        final source = File('lib${sep}src${sep}ui${sep}settings$sep$name')
+            .readAsStringSync();
+        expect(source, contains('AppStringsDelegate.of('), reason: name);
+      }
+    });
+  });
 }
