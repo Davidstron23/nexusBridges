@@ -576,12 +576,18 @@ void main() {
       ]);
     });
 
-    test('lerp does not blend: it keeps this below half and takes the '
-        'other from half on', () {
-      expect(NbColors.light.lerp(NbColors.dark, 0), same(NbColors.light));
-      expect(NbColors.light.lerp(NbColors.dark, 0.49), same(NbColors.light));
-      expect(NbColors.light.lerp(NbColors.dark, 0.5), same(NbColors.dark));
-      expect(NbColors.light.lerp(NbColors.dark, 1), same(NbColors.dark));
+    test('lerp blends every field: the ends are the themes and the middle '
+        'is neither', () {
+      final light = _colorsOf(NbColors.light);
+      final dark = _colorsOf(NbColors.dark);
+      expect(_colorsOf(NbColors.light.lerp(NbColors.dark, 0)), light);
+      expect(_colorsOf(NbColors.light.lerp(NbColors.dark, 1)), dark);
+      final middle = _colorsOf(NbColors.light.lerp(NbColors.dark, 0.5));
+      for (final entry in light.entries) {
+        if (entry.value == dark[entry.key]) continue;
+        expect(middle[entry.key], isNot(entry.value), reason: entry.key);
+        expect(middle[entry.key], isNot(dark[entry.key]), reason: entry.key);
+      }
       expect(NbColors.light.lerp(null, 0.7), same(NbColors.light));
     });
 
@@ -949,7 +955,7 @@ void main() {
   group('E280: the app is dark by default, whatever the Windows theme', () {
     for (final code in languageCodes) {
       testWidgets('NexusBridgesApp uses ThemeMode.dark and keeps the light '
-          'theme ready, without animation ($code)', (tester) async {
+          'theme ready, with the 500 ms fade ($code)', (tester) async {
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         tester.platformDispatcher.platformBrightnessTestValue =
             Brightness.light;
@@ -958,7 +964,7 @@ void main() {
 
         final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
         expect(app.themeMode, ThemeMode.dark);
-        expect(app.themeAnimationDuration, Duration.zero);
+        expect(app.themeAnimationDuration, themeFade);
         expect(app.theme!.extension<NbColors>(), same(NbColors.light));
         expect(app.theme!.brightness, Brightness.light);
         expect(app.darkTheme!.extension<NbColors>(), same(NbColors.dark));

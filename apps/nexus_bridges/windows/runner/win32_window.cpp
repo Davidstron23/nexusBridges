@@ -282,8 +282,19 @@ void Win32Window::OnDestroy() {
   // No-op; provided for subclasses.
 }
 
+void Win32Window::SetDarkTitleBar(bool dark) {
+  dark_title_bar_ = dark;
+  if (!window_handle_) {
+    return;
+  }
+  UpdateTheme(window_handle_);
+  SetWindowPos(window_handle_, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                   SWP_FRAMECHANGED);
+}
+
 void Win32Window::UpdateTheme(HWND const window) {
-  BOOL enable_dark_mode = TRUE;
+  BOOL enable_dark_mode = dark_title_bar_ ? TRUE : FALSE;
   DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
                         &enable_dark_mode, sizeof(enable_dark_mode));
 }

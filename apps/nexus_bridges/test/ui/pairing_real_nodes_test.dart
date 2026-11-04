@@ -173,7 +173,7 @@ final class _Side {
     );
     controller = AppController(
       startNode: () async => started,
-      loadLanguage: () async => code,
+      loadStartup: () async => StartupSettings(language: code),
     );
     await controller.init();
   }

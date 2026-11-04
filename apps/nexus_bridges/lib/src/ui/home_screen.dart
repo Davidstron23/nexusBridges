@@ -9,6 +9,7 @@ import '../drop/drop_events.dart';
 import '../drop/drop_zone.dart';
 import '../l10n/app_strings.dart';
 import 'activity_cards.dart';
+import 'attention.dart';
 import 'diagram/flow_diagram.dart';
 import 'home_layout.dart';
 import 'device_list.dart';
@@ -17,6 +18,8 @@ import 'modal/timeline.dart';
 import 'network_strip.dart';
 import 'progress/selection_progress_painter.dart';
 import 'send_action.dart';
+import 'settings/settings_controller.dart';
+import 'settings/settings_layer.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -25,10 +28,20 @@ import 'tray_panel.dart';
 const double _narrowHeader = 600;
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen(this.controller, {this.dropEvents, super.key});
+  const HomeScreen(
+    this.controller, {
+    this.dropEvents,
+    this.settings,
+    this.attention,
+    this.neutralFocus,
+    super.key,
+  });
 
   final AppController controller;
   final DropEvents? dropEvents;
+  final SettingsController? settings;
+  final AttentionWatcher? attention;
+  final FocusNode? neutralFocus;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -42,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> {
         widget.controller.state?.canSendTo(fingerprint) ?? false,
     isMine: _isMine,
     isBlocked: () => mounted && ModalRoute.of(context)?.isCurrent == false,
+    blocked: () => _settings.isOpen || _settings.closing,
     onPortal: (fingerprint) =>
         unawaited(widget.controller.requestPortal(fingerprint)),
     onOutcome: (outcome) {
@@ -50,6 +64,16 @@ class _HomeScreenState extends State<HomeScreen> {
     },
   );
   StreamSubscription<DropEvent>? _dropSubscription;
+  late final SettingsController _settings =
+      widget.settings ?? SettingsController();
+  AttentionWatcher? _ownAttention;
+
+  AttentionWatcher get _attention =>
+      widget.attention ??
+      (_ownAttention ??= AttentionWatcher(widget.controller));
+  late final FocusNode _neutral =
+      widget.neutralFocus ??
+      FocusNode(debugLabel: 'neutral', skipTraversal: true);
   NodeState? _previous;
   bool _tabSet = false;
   bool _dropHovering = false;
@@ -104,6 +128,9 @@ class _HomeScreenState extends State<HomeScreen> {
     widget.controller.removeListener(_syncTab);
     _tab.dispose();
     _hovered.dispose();
+    if (widget.settings == null) _settings.dispose();
+    _ownAttention?.dispose();
+    if (widget.neutralFocus == null) _neutral.dispose();
     super.dispose();
   }
 
@@ -122,48 +149,58 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    return DropScope(
-      controller: _drop,
-      child: ListenableBuilder(
-        listenable: controller,
-        builder: (context, child) =>
-            SelectionProgressScope(state: controller.state, child: child!),
-        child: Scaffold(
-          body: Column(
-            children: [
-              ListenableBuilder(
-                listenable: controller,
-                builder: (context, _) {
-                  final strings = AppStringsDelegate.of(context);
-                  return _Header(
-                    controller: controller,
-                    state: _failureMessage(controller, strings) == null
-                        ? controller.state
-                        : null,
-                  );
-                },
-              ),
-              Expanded(
-                child: ListenableBuilder(
-                  listenable: controller,
-                  builder: (context, body) {
-                    final strings = AppStringsDelegate.of(context);
-                    final failure = _failureMessage(controller, strings);
-                    if (failure == null) return body!;
-                    return _MessageWithRetry(
-                      message: failure,
-                      retryLabel: strings.retryButton,
-                      onRetry: controller.retry,
-                    );
-                  },
-                  child: _Body(
-                    controller: controller,
-                    tab: _tab,
-                    hovered: _hovered,
+    return Focus(
+      focusNode: _neutral,
+      skipTraversal: true,
+      child: DropScope(
+        controller: _drop,
+        child: ListenableBuilder(
+          listenable: controller,
+          builder: (context, child) =>
+              SelectionProgressScope(state: controller.state, child: child!),
+          child: SettingsLayer(
+            controller: controller,
+            settings: _settings,
+            attention: _attention,
+            child: Scaffold(
+              body: Column(
+                children: [
+                  ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final strings = AppStringsDelegate.of(context);
+                      return _Header(
+                        controller: controller,
+                        onSettings: _settings.open,
+                        state: _failureMessage(controller, strings) == null
+                            ? controller.state
+                            : null,
+                      );
+                    },
                   ),
-                ),
+                  Expanded(
+                    child: ListenableBuilder(
+                      listenable: controller,
+                      builder: (context, body) {
+                        final strings = AppStringsDelegate.of(context);
+                        final failure = _failureMessage(controller, strings);
+                        if (failure == null) return body!;
+                        return _MessageWithRetry(
+                          message: failure,
+                          retryLabel: strings.retryButton,
+                          onRetry: controller.retry,
+                        );
+                      },
+                      child: _Body(
+                        controller: controller,
+                        tab: _tab,
+                        hovered: _hovered,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -195,9 +232,11 @@ String _noticeText(AppStrings strings, Notice notice) {
     NoticeKind.replaceWithdrawn => strings.noticeReplaceWithdrawn(name),
     NoticeKind.unpairedByPeer => strings.noticeUnpairedByPeer(name),
     NoticeKind.unpairNotSaved => strings.noticeUnpairNotSaved(name),
-    NoticeKind.changeNotSaved ||
-    NoticeKind.settingNotSaved ||
-    NoticeKind.networkStopNotSaved => strings.noticeChangeNotSaved,
+    NoticeKind.changeNotSaved => strings.noticeChangeNotSaved,
+    NoticeKind.settingNotSaved => strings.noticeSettingNotSaved,
+    NoticeKind.networkStopNotSaved => strings.noticeNetworkStopNotSaved(
+      notice.detail ?? strings.unnamedNetwork,
+    ),
     NoticeKind.ignoreNotSaved => strings.noticeIgnoreNotSaved(name),
     NoticeKind.pairingNotSaved => strings.noticePairingNotSaved(name),
     NoticeKind.pairingFailed => strings.noticePairingFailed(name),
@@ -216,10 +255,15 @@ String _noticeText(AppStrings strings, Notice notice) {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.controller, required this.state});
+  const _Header({
+    required this.controller,
+    required this.state,
+    required this.onSettings,
+  });
 
   final AppController controller;
   final NodeState? state;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -233,6 +277,7 @@ class _Header extends StatelessWidget {
             state: state,
             onRescan: controller.rescan,
             onTrust: controller.askAgain,
+            onSettings: onSettings,
             compact: constraints.maxWidth < _narrowHeader,
           ),
         );

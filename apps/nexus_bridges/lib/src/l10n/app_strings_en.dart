@@ -930,4 +930,250 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String get dragTipBody => 'On a device to send it; anywhere else to To send';
+
+  @override
+  String get settingsButton => 'Settings';
+
+  @override
+  String get settingsTitle => 'Settings';
+
+  @override
+  String settingsSubtitle(String name) => 'This device · $name';
+
+  @override
+  String get settingsBack => 'Back';
+
+  @override
+  String get settingsNavFoot =>
+      'Esc or the arrow take you back to your devices.';
+
+  @override
+  String get settingsFooter =>
+      'Everything is saved at once, except the name: Enter or Save.';
+
+  @override
+  String moreInfo(String text) => 'More information: $text';
+
+  @override
+  String get sectionAppearance => 'Appearance';
+
+  @override
+  String get appearanceInfo =>
+      'Changes at once, including the Windows title bar.';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get themeWindows => 'Windows';
+
+  @override
+  String get sectionLanguage => 'Language';
+
+  @override
+  String get languageSpanish => 'Español';
+
+  @override
+  String get languageEnglish => 'English';
+
+  @override
+  String get sectionDevice => 'This device';
+
+  @override
+  String get deviceNameLabel => 'Device name';
+
+  @override
+  String get deviceNameDesc => 'This is how devices on your networks see you.';
+
+  @override
+  String get deviceNameInfo =>
+      "Every device with NexusBridges on your trusted networks sees it, including the ones you haven't paired yet.";
+
+  @override
+  String get saveButton => 'Save';
+
+  @override
+  String useWindowsName(String name) => 'Use the Windows name · $name';
+
+  @override
+  String get nameEmpty => 'Type a name.';
+
+  @override
+  String get nameTooLong => '64 characters at most.';
+
+  @override
+  String get nameInvalid =>
+      "It has characters others wouldn't see the same way: invisible or "
+      'control characters, or parts of some combined emojis. Remove them or '
+      'type the name by hand.';
+
+  @override
+  String get nameNamesake =>
+      'Another device in the list has this name: others will see the '
+      'fingerprint next to it to tell you apart.';
+
+  @override
+  String get sectionReceive => 'Receiving';
+
+  @override
+  String get receiveDesc => 'Things sent without a destination arrive here.';
+
+  @override
+  String get receiveInfo =>
+      "Also everything sent by someone else's device, which never sees your folders.";
+
+  @override
+  String get receiveNotSet =>
+      "You'll be asked the first time you receive something";
+
+  @override
+  String get changeFolderButton => 'Change…';
+
+  @override
+  String get changeFolderLocked => 'Answer the folder question first.';
+
+  @override
+  String get sectionExclusions => 'Excluded folders';
+
+  @override
+  String ofMax(int n, int max) => '$n of $max';
+
+  @override
+  String get exclusionsDesc => 'Subfolders that are never sent.';
+
+  @override
+  String get exclusionsInfo =>
+      'When you send a folder, the ones with these names are left out at any level. Single files are sent as usual.';
+
+  @override
+  String get exclusionsEmpty => 'None: everything is sent.';
+
+  @override
+  String get exclusionPlaceholder => 'Folder name, for example dist';
+
+  @override
+  String get addButton => 'Add';
+
+  @override
+  String removeExclusion(String name) => 'Remove $name';
+
+  @override
+  String get exclusionEmpty => 'Type a folder name.';
+
+  @override
+  String get exclusionInvalid =>
+      "That name can't be used for a folder in Windows.";
+
+  @override
+  String get exclusionDuplicate => "It's already in the list.";
+
+  @override
+  String get exclusionFull => '64 names at most.';
+
+  @override
+  String get restoreDefaults => 'Restore the default list';
+
+  @override
+  String get restoreConfirm =>
+      'Go back to node_modules, build and .dart_tool? The names you added are '
+      'removed.';
+
+  @override
+  String get restoreButton => 'Restore';
+
+  @override
+  String get sectionSystemTray => 'System tray';
+
+  @override
+  String get systemTrayInfo =>
+      'To quit completely: right-click the tray icon and choose Quit.';
+
+  @override
+  String get systemTraySwitch => 'Keep running in the tray when closed';
+
+  @override
+  String get systemTraySwitchHelp =>
+      'The X hides the window and keeps receiving.';
+
+  @override
+  String get systemTrayOffHelp =>
+      'The X will close the app. If a transfer is running, it will ask you.';
+
+  @override
+  String get sectionNetworks => 'Trusted networks';
+
+  @override
+  String get networksInfo => 'Only works on these. Paused on any other.';
+
+  @override
+  String get connectedNow => 'Connected now';
+
+  @override
+  String get unnamedNetwork => 'Unnamed network';
+
+  @override
+  String get networksEmpty =>
+      'You are not using NexusBridges on any network yet';
+
+  @override
+  String trustedOn(String date) => 'Trusted on $date';
+
+  @override
+  String get stopUsingButton => 'Stop using on this network';
+
+  @override
+  String stopUsingConfirm(String network) =>
+      'Stop using NexusBridges on $network? You are connected to it: the app '
+      'will pause here and your other devices will stop seeing this one.';
+
+  @override
+  String transfersStopped(int count) => count == 1
+      ? '1 transfer in progress will be stopped.'
+      : '$count transfers in progress will be stopped.';
+
+  @override
+  String get pairingCancelled => 'The pairing in progress will be cancelled.';
+
+  @override
+  String get stopUsingConfirmButton => 'Stop using';
+
+  @override
+  String noticeNetworkStopNotSaved(String network) =>
+      'You stopped using $network until you close the app, but this could '
+      'not be saved: it would be used again next time.';
+
+  @override
+  String get sectionIgnored => 'Ignored devices';
+
+  @override
+  String get ignoredInfo => 'These devices cannot ask to pair with you.';
+
+  @override
+  String get ignoredEmpty => 'You have not ignored any device';
+
+  @override
+  String ignoredOn(String date) => 'Ignored on $date';
+
+  @override
+  String get noticeSettingNotSaved =>
+      'The change could not be saved: it applies until you close the app.';
+
+  @override
+  String monthShort(int month) => const [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ][month - 1];
 }

@@ -23,7 +23,7 @@ class TestAppController extends AppController {
        _testState = state,
        super(
          startNode: () async => throw StateError('not used by app tests'),
-         loadLanguage: () async => languageCode,
+         loadStartup: () async => StartupSettings(language: languageCode),
        );
 
   final String _testLanguageCode;
@@ -161,7 +161,7 @@ void main() {
     ) async {
       final controller = AppController(
         startNode: () async => throw StateError('no node in this test'),
-        loadLanguage: () async => 'es',
+        loadStartup: () async => const StartupSettings(language: 'es'),
       );
       await controller.init();
       await pumpApp(tester, controller);
@@ -178,7 +178,7 @@ void main() {
     ) async {
       final controller = AppController(
         startNode: () async => throw StateError('no node in this test'),
-        loadLanguage: () async => throw const FileSystemException('broken'),
+        loadStartup: () async => throw const FileSystemException('broken'),
       );
       await controller.init();
       await pumpApp(tester, controller);
@@ -215,8 +215,10 @@ void main() {
             }
             final controller = AppController(
               startNode: () async => throw StateError('no node in this test'),
-              loadLanguage: () =>
-                  loadLanguage(platformLanguageCode: c.windows, dataDir: dir),
+              loadStartup: () => loadStartupSettings(
+                platformLanguageCode: c.windows,
+                dataDir: dir,
+              ),
             );
             await controller.init();
             return controller;
@@ -301,7 +303,7 @@ void main() {
     ) async {
       final controller = AppController(
         startNode: () async => throw StateError('no node in this test'),
-        loadLanguage: () async => 'en',
+        loadStartup: () async => const StartupSettings(language: 'en'),
       );
       await controller.init();
       await pumpApp(tester, controller);

@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <optional>
+#include <variant>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -29,6 +30,15 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "nexus_bridges/window",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) { HandleWindowCall(call, std::move(result)); });
 
   drop_view_ = flutter_controller_->view()->GetNativeWindow();
   drop_channel_ =
@@ -69,12 +79,36 @@ void FlutterWindow::OnDestroy() {
     drop_target_ = nullptr;
   }
   drop_channel_ = nullptr;
+  window_channel_ = nullptr;
 
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
 
   Win32Window::OnDestroy();
+}
+
+void FlutterWindow::HandleWindowCall(
+    const flutter::MethodCall<flutter::EncodableValue>& call,
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+  if (call.method_name() == "setDarkTitleBar") {
+    const auto* arguments =
+        std::get_if<flutter::EncodableMap>(call.arguments());
+    if (arguments == nullptr) {
+      result->Error("bad_arguments");
+      return;
+    }
+    const auto dark = arguments->find(flutter::EncodableValue("dark"));
+    if (dark == arguments->end() ||
+        std::get_if<bool>(&dark->second) == nullptr) {
+      result->Error("bad_arguments");
+      return;
+    }
+    SetDarkTitleBar(std::get<bool>(dark->second));
+    result->Success();
+    return;
+  }
+  result->NotImplemented();
 }
 
 LRESULT

@@ -223,7 +223,7 @@ void main() {
     });
   });
 
-  group('E254 and E280: minimum client area and an always dark title bar', () {
+  group('E254 and E280: minimum client area and the title bar theme', () {
     late String rawWindow;
     late String window;
 
@@ -252,8 +252,8 @@ void main() {
       expect(rawWindow.contains('#include <cwchar>'), isFalse);
     });
 
-    test('UpdateTheme sets TRUE in DWMWA_USE_IMMERSIVE_DARK_MODE without '
-        'reading the registry', () {
+    test('UpdateTheme sets dark_title_bar_ in DWMWA_USE_IMMERSIVE_DARK_MODE '
+        'without reading the registry', () {
       final start = _indexOf(
         window,
         'void Win32Window::UpdateTheme(HWND const window) {',
@@ -267,7 +267,7 @@ void main() {
           .trim();
       expect(
         body,
-        'BOOL enable_dark_mode = TRUE; '
+        'BOOL enable_dark_mode = dark_title_bar_ ? TRUE : FALSE; '
         'DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, '
         '&enable_dark_mode, sizeof(enable_dark_mode));',
       );
@@ -651,6 +651,116 @@ void main() {
       expect(detach, lessThan(release));
       expect(detach, lessThan(channel));
       expect(_count(flutterWindow, 'drop_target_->Detach();'), 1);
+    });
+  });
+
+  group('E859: the title bar follows the theme through the window channel '
+      '(RF-511)', () {
+    late String flutterWindow;
+    late String flutterWindowHeader;
+    late String window;
+    late String windowHeader;
+
+    setUpAll(() {
+      flutterWindow = File(_flutterWindowPath).readAsStringSync();
+      flutterWindowHeader = File('windows/runner/flutter_window.h')
+          .readAsStringSync();
+      window = File(_windowPath).readAsStringSync();
+      windowHeader = File('windows/runner/win32_window.h').readAsStringSync();
+    });
+
+    String body(String source, String signature) {
+      final start = _indexOf(source, signature);
+      final open = _indexOf(source, '{', start);
+      var depth = 0;
+      for (var i = open; i < source.length; i++) {
+        if (source[i] == '{') depth++;
+        if (source[i] == '}') depth--;
+        if (depth == 0) return source.substring(open + 1, i);
+      }
+      fail('unbalanced braces after $signature');
+    }
+
+    test('the window channel exists next to the drop channel, with the '
+        'standard codec', () {
+      expect(_count(flutterWindow, '"nexus_bridges/window"'), 1);
+      expect(_count(flutterWindow, '"nexus_bridges/drop"'), 1);
+      final create = body(flutterWindow, 'bool FlutterWindow::OnCreate()');
+      final channel = _indexOf(create, '"nexus_bridges/window"');
+      expect(
+        create.indexOf('&flutter::StandardMethodCodec::GetInstance()', channel),
+        isNonNegative,
+      );
+      expect(create, contains('window_channel_->SetMethodCallHandler('));
+      expect(create, contains('HandleWindowCall(call, std::move(result))'));
+      expect(flutterWindowHeader, contains('window_channel_;'));
+    });
+
+    test('setDarkTitleBar reads the "dark" bool, calls SetDarkTitleBar and '
+        'anything else is not implemented', () {
+      final handler = body(
+        flutterWindow,
+        'void FlutterWindow::HandleWindowCall(',
+      );
+      expect(handler, contains('call.method_name() == "setDarkTitleBar"'));
+      expect(handler, contains('flutter::EncodableValue("dark")'));
+      expect(handler, contains('std::get_if<bool>(&dark->second) == nullptr'));
+      expect(
+        handler,
+        contains('SetDarkTitleBar(std::get<bool>(dark->second));'),
+      );
+      expect(handler, contains('result->Success();'));
+      expect(_count(handler, 'result->Error("bad_arguments");'), 2);
+      expect(handler.trim(), endsWith('result->NotImplemented();'));
+      expect(handler, isNot(contains('//')));
+    });
+
+    test('OnDestroy lets go of the window channel before the controller', () {
+      final destroy = body(flutterWindow, 'void FlutterWindow::OnDestroy()');
+      final release = _indexOf(destroy, 'window_channel_ = nullptr;');
+      final controller = _indexOf(destroy, 'flutter_controller_ = nullptr;');
+      expect(release, lessThan(controller));
+    });
+
+    test('SetDarkTitleBar keeps the value, repaints the frame without '
+        'activating the window, and the bar starts dark', () {
+      final setter = body(
+        window,
+        'void Win32Window::SetDarkTitleBar(bool dark)',
+      );
+      expect(setter, contains('dark_title_bar_ = dark;'));
+      expect(setter, contains('UpdateTheme(window_handle_);'));
+      expect(setter, contains('SWP_FRAMECHANGED'));
+      expect(setter, contains('SWP_NOACTIVATE'));
+      expect(setter, contains('SWP_NOZORDER'));
+      expect(setter, isNot(contains('SetForegroundWindow')));
+      expect(setter, isNot(contains('//')));
+      final guard = _indexOf(setter, 'if (!window_handle_)');
+      expect(guard, lessThan(_indexOf(setter, 'UpdateTheme(')));
+      expect(windowHeader, contains('void SetDarkTitleBar(bool dark);'));
+      expect(windowHeader, contains('bool dark_title_bar_ = true;'));
+      expect(windowHeader, isNot(contains('static void UpdateTheme(')));
+    });
+
+    test('UpdateTheme only uses dark_title_bar_ and nothing in the runner '
+        'reads the Windows theme from the registry', () {
+      final update = body(
+        window,
+        'void Win32Window::UpdateTheme(HWND const window)',
+      );
+      expect(update, contains('dark_title_bar_ ? TRUE : FALSE'));
+      for (final file in Directory('windows/runner').listSync()) {
+        if (file is! File) continue;
+        final text = file.readAsStringSync();
+        for (final banned in [
+          'RegGetValue',
+          'RegOpenKey',
+          'RegQueryValue',
+          'AppsUseLightTheme',
+        ]) {
+          expect(text, isNot(contains(banned)), reason: '${file.path} $banned');
+        }
+      }
     });
   });
 }

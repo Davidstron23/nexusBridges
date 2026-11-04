@@ -316,6 +316,171 @@ abstract final class Glyphs {
     parts: [GlyphPart(SvgShape('M3.5 6L8 10.5 12.5 6'))],
   );
 
+  static const Glyph sliders = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(SvgShape('M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6')),
+      GlyphPart(CircleShape(Offset(10, 4.5), 1.5)),
+      GlyphPart(CircleShape(Offset(6, 11.5), 1.5)),
+    ],
+  );
+
+  static const Glyph moon = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(SvgShape('M13 9.6A5.5 5.5 0 0 1 6.4 3 5.5 5.5 0 1 0 13 9.6z')),
+    ],
+  );
+
+  static const Glyph sun = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(CircleShape(Offset(8, 8), 2.8)),
+      GlyphPart(
+        SvgShape(
+          'M8 1.8v1.4M8 12.8v1.4M1.8 8h1.4M12.8 8h1.4M3.6 3.6l1 1'
+          'M11.4 11.4l1 1M3.6 12.4l1-1M11.4 4.6l1-1',
+        ),
+      ),
+    ],
+  );
+
+  static const Glyph auto = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(RectShape(Rect.fromLTWH(2, 3, 12, 8.5), 1.6)),
+      GlyphPart(SvgShape('M5.5 14h5M8 11.5V14')),
+      GlyphPart(SvgShape('M8 3v8.5')),
+      GlyphPart(SvgShape('M8 4.5h4.6v5.5H8z'), stroke: false, tint: true),
+    ],
+  );
+
+  static const Glyph globe = Glyph(
+    box: 16,
+    strokeWidth: 1.3,
+    parts: [
+      GlyphPart(CircleShape(Offset(8, 8), 5.6)),
+      GlyphPart(
+        SvgShape(
+          'M2.6 8h10.8M8 2.4c1.6 1.6 2.3 3.5 2.3 5.6C10.3 10.1 9.6 12 8 13.6'
+          'C6.4 12 5.7 10.1 5.7 8C5.7 5.9 6.4 4 8 2.4z',
+        ),
+      ),
+    ],
+  );
+
+  static const Glyph back = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M13 8H3.5M7.5 4L3.5 8l4 4'))],
+  );
+
+  static const Glyph monitor = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(RectShape(Rect.fromLTWH(2, 3, 12, 8.5), 1.6)),
+      GlyphPart(SvgShape('M5.5 14h5M8 11.5V14')),
+    ],
+  );
+
+  static const Glyph inbox = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M2.5 9.5l1.6-5.2a1 1 0 0 1 1-.8h5.8a1 1 0 0 1 1 .8l1.6 5.2V12'
+          'a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1z',
+        ),
+      ),
+      GlyphPart(SvgShape('M2.5 9.5h3l.8 1.5h3.4l.8-1.5h3')),
+    ],
+  );
+
+  static const Glyph folderX = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M2 4.5a1 1 0 0 1 1-1h3.2l1.5 1.6H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1'
+          'H3a1 1 0 0 1-1-1z',
+        ),
+      ),
+      GlyphPart(SvgShape('M6 9h4')),
+    ],
+  );
+
+  static const Glyph taskbar = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(RectShape(Rect.fromLTWH(2, 3, 12, 10), 2)),
+      GlyphPart(SvgShape('M2 10.2h12')),
+      GlyphPart(SvgShape('M10.4 11.7h.01M12.1 11.7h.01')),
+    ],
+  );
+
+  static const Glyph wifi = Glyph(
+    box: 16,
+    strokeWidth: 1.6,
+    parts: [
+      GlyphPart(SvgShape('M2.5 6.6a7.8 7.8 0 0 1 11 0')),
+      GlyphPart(SvgShape('M4.6 8.9a4.8 4.8 0 0 1 6.8 0')),
+      GlyphPart(SvgShape('M8 11.8h.01')),
+    ],
+  );
+
+  static const Glyph eyeOff = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M2.5 8C2.5 8 4.5 4 8 4C11.5 4 13.5 8 13.5 8C13.5 8 11.5 12 8 12'
+          'C4.5 12 2.5 8 2.5 8z',
+        ),
+      ),
+      GlyphPart(CircleShape(Offset(8, 8), 1.8)),
+      GlyphPart(SvgShape('M3 13L13 3')),
+    ],
+  );
+
+  static const Glyph info = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(CircleShape(Offset(8, 8), 5.6)),
+      GlyphPart(SvgShape('M8 7.3v3.6M8 5.2h.01')),
+    ],
+  );
+
+  static const Glyph plus = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M8 3.5v9M3.5 8h9'))],
+  );
+
+  static const Glyph close = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M4 4l8 8M12 4l-8 8'))],
+  );
+
+  static const Glyph restore = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [
+      GlyphPart(SvgShape('M3 8a5 5 0 1 0 1.5-3.6')),
+      GlyphPart(SvgShape('M3 2.5v2.8h2.8')),
+    ],
+  );
+
   static const Glyph more = Glyph(
     box: 16,
     strokeWidth: 1.5,

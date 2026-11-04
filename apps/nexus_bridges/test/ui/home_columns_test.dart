@@ -84,6 +84,12 @@ Finder get _strip => find.byType(NetworkStrip);
 
 Finder _inStrip(Finder finder) => find.descendant(of: _strip, matching: finder);
 
+Finder get _rescanIcon => _inStrip(
+  find.byWidgetPredicate(
+    (widget) => widget is IconButton && widget.icon is RotationTransition,
+  ),
+);
+
 Finder get _stripOutlined =>
     _inStrip(find.byWidgetPredicate((widget) => widget is OutlinedButton));
 
@@ -318,7 +324,7 @@ void main() {
         expect(tester.widget<NetworkStrip>(_strip).compact, isFalse);
         expect(tester.getRect(_strip), const Rect.fromLTRB(16, 12, 784, 72));
         expect(_stripOutlined, findsOneWidget);
-        expect(_inStrip(find.byType(IconButton)), findsNothing);
+        expect(_rescanIcon, findsNothing);
         expect(find.text(strings.rescanButton), findsOneWidget);
         expect(
           tester.getRect(_strip).bottom,
@@ -345,22 +351,17 @@ void main() {
         expect(strip.width, closeTo(320 - 32, 0.01));
         expect(find.byType(BrandMark), findsNothing);
         expect(find.text(strings.appTitle), findsNothing);
-        expect(_inStrip(find.byType(IconButton)), findsOneWidget);
+        expect(_rescanIcon, findsOneWidget);
         expect(_stripOutlined, findsNothing);
         expect(find.text(strings.rescanButton), findsNothing);
         expect(find.byTooltip(strings.rescanButton), findsOneWidget);
-        expect(
-          tester
-              .widget<IconButton>(_inStrip(find.byType(IconButton)))
-              .onPressed,
-          isNotNull,
-        );
+        expect(tester.widget<IconButton>(_rescanIcon).onPressed, isNotNull);
         expect(
           strip.bottom,
           lessThan(tester.getTopLeft(_tab(strings.devicesTab)).dy),
         );
 
-        await tester.tap(_inStrip(find.byType(IconButton)));
+        await tester.tap(_rescanIcon);
         await tester.pumpAndSettle();
         expect(controller.calls, ['rescan']);
       });
@@ -379,17 +380,9 @@ void main() {
         await pumpHome(tester, controller, code, settle: false);
 
         expect(tester.takeException(), isNull);
-        expect(
-          tester
-              .widget<IconButton>(_inStrip(find.byType(IconButton)))
-              .onPressed,
-          isNull,
-        );
+        expect(tester.widget<IconButton>(_rescanIcon).onPressed, isNull);
         expect(_inStrip(find.text(strings.searchingDevices)), findsOneWidget);
-        await tester.tap(
-          _inStrip(find.byType(IconButton)),
-          warnIfMissed: false,
-        );
+        await tester.tap(_rescanIcon, warnIfMissed: false);
         await tester.pump(const Duration(milliseconds: 100));
         expect(controller.calls, isEmpty);
       }, timeout: const Timeout(Duration(seconds: 30)));
@@ -432,10 +425,7 @@ void main() {
           expect(strip.top, closeTo(12, 0.01));
           expect(strip.left, closeTo(16, 0.01));
           expect(strip.right, closeTo(width - 16, 0.01));
-          expect(
-            _inStrip(find.byType(IconButton)),
-            compact ? findsOneWidget : findsNothing,
-          );
+          expect(_rescanIcon, compact ? findsOneWidget : findsNothing);
           expect(_stripOutlined, compact ? findsNothing : findsOneWidget);
           expect(find.byType(BrandMark), findsNothing);
         });

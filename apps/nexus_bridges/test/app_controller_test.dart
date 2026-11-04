@@ -196,9 +196,11 @@ void main() {
     _Harness? using,
   }) {
     final source = using ?? harness;
+    final language = loadLanguage ?? () async => 'es';
     final controller = AppController(
       startNode: source.startNode,
-      loadLanguage: loadLanguage ?? () async => 'es',
+      loadStartup: () =>
+          language().then((code) => StartupSettings(language: code)),
     );
     controllers.add(controller);
     return controller;

@@ -138,4 +138,70 @@ void main() {
       expect(done, isTrue);
     });
   });
+
+  group('FakeAppController for the settings of spec 008', () {
+    test('the settings methods note one line each and change the values '
+        'that the screen reads', () async {
+      final fake = FakeAppController(languageCode: 'es');
+      var notified = 0;
+      fake.addListener(() => notified++);
+
+      await fake.setLanguage('en');
+      await fake.setTheme(ThemeChoice.light);
+      await fake.setCloseToTray(false);
+      await fake.setDeviceName('PC');
+      await fake.setDeviceName(null);
+      await fake.addExclusion('dist');
+      await fake.removeExclusion('dist');
+      await fake.restoreExclusions();
+      await fake.changeReceiveFolder();
+      await fake.confirmReceiveFolder('c1');
+      fake.cancelReceiveFolderChange('c1');
+      await fake.stopUsingNetwork('{N}');
+
+      expect(fake.calls, [
+        'setLanguage en',
+        'setTheme light',
+        'setCloseToTray false',
+        'setDeviceName PC',
+        'setDeviceName null',
+        'addExclusion dist',
+        'removeExclusion dist',
+        'restoreExclusions',
+        'changeReceiveFolder',
+        'confirmReceiveFolder c1',
+        'cancelReceiveFolderChange c1',
+        'stopUsingNetwork {N}',
+      ]);
+      expect(fake.languageCode, 'en');
+      expect(fake.theme, ThemeChoice.light);
+      expect(fake.closeToTray, isFalse);
+      expect(notified, 3);
+    });
+
+    test('the answers are programmable', () async {
+      final fake = FakeAppController();
+      expect(await fake.setDeviceName('x'), const DeviceNameResult());
+      expect(await fake.addExclusion('x'), const ExclusionOutcome());
+      expect(await fake.changeReceiveFolder(), isA<FolderUnchanged>());
+      expect(fake.namesakeOf('Torre'), isNull);
+
+      fake.deviceNameResult = (_) async =>
+          const DeviceNameResult(problem: DeviceNameProblem.tooLong);
+      fake.exclusionResult = (_) async =>
+          const ExclusionOutcome(problem: ExclusionProblem.full);
+      fake.changeFolderResult = () async => const FolderChangeBlocked();
+      fake.confirmFolderResult = (_) async => const FolderUnchanged();
+      fake.namesakes['Torre'] = 'FP';
+
+      expect(
+        (await fake.setDeviceName('x')).problem,
+        DeviceNameProblem.tooLong,
+      );
+      expect((await fake.addExclusion('x')).problem, ExclusionProblem.full);
+      expect(await fake.changeReceiveFolder(), isA<FolderChangeBlocked>());
+      expect(await fake.confirmReceiveFolder('c'), isA<FolderUnchanged>());
+      expect(fake.namesakeOf('Torre'), 'FP');
+    });
+  });
 }

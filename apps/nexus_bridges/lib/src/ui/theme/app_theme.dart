@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
+const Duration themeFade = Duration(milliseconds: 500);
+
 const String _textFamily = 'Segoe UI Variable Text';
 const String _displayFamily = 'Segoe UI Variable Display';
 const List<String> _fallbackFamilies = ['Segoe UI'];
