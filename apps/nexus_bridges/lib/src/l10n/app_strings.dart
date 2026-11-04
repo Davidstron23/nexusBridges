@@ -124,6 +124,9 @@ abstract class AppStrings {
   String progressLine(int percent, String done, String total);
   String peerCheckingFile(String name);
   String get cancellingTransfer;
+  String arrivesIn(String time);
+  String get arrivesInFewSeconds;
+  String get calculatingTime;
 
   String incomingRequestTitle(String name);
   String incomingFolderRequestTitle(String name);

@@ -413,6 +413,15 @@ final class AppStringsEn implements AppStrings {
   String get cancellingTransfer => 'Cancelling…';
 
   @override
+  String arrivesIn(String time) => 'Arrives in $time';
+
+  @override
+  String get arrivesInFewSeconds => 'Arrives in a few seconds';
+
+  @override
+  String get calculatingTime => 'Calculating…';
+
+  @override
   String incomingRequestTitle(String name) => '$name wants to send you a file';
 
   @override

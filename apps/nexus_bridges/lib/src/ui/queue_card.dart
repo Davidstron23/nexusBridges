@@ -11,6 +11,7 @@ import 'icons/folder_icon.dart';
 import 'icons/glyphs.dart';
 import 'modal/timeline.dart';
 import 'progress/selection_progress_painter.dart';
+import 'progress/time_left_scope.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -614,26 +615,40 @@ class _ItemRow extends StatelessWidget {
         }
         footer = Padding(
           padding: const EdgeInsets.only(top: 6),
-          child: Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: view != null && view.cancelling
-                ? Text(
+          child: view != null && view.cancelling
+              ? Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: Text(
                     strings.cancellingTransfer,
                     style: captionStyle,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                  )
-                : Armed(
-                    armKey: item.id,
-                    builder: (context, armed) => OutlinedButton(
-                      style: smallButton,
-                      onPressed: armed
-                          ? () => controller.cancelQueueItem(item.id)
-                          : null,
-                      child: Text(strings.cancelButton),
-                    ),
                   ),
-          ),
+                )
+              : Row(
+                  children: [
+                    const Expanded(
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: TimeLeftLabel(
+                          track: ProgressTrack.outgoing,
+                          lowered: false,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Armed(
+                      armKey: item.id,
+                      builder: (context, armed) => OutlinedButton(
+                        style: smallButton,
+                        onPressed: armed
+                            ? () => controller.cancelQueueItem(item.id)
+                            : null,
+                        child: Text(strings.cancelButton),
+                      ),
+                    ),
+                  ],
+                ),
         );
       case QueueItemState.done:
       case QueueItemState.notSent:
