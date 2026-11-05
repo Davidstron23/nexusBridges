@@ -36,6 +36,8 @@ class AppController extends ChangeNotifier {
 
   ThemeChoice get theme => _theme;
 
+  bool get systemTrayAvailable => false;
+
   bool get closeToTray => _closeToTray;
 
   bool get trayHintShown => _trayHintShown;

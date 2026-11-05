@@ -5,9 +5,20 @@ All notable changes to NexusBridges are listed here. The format follows [Keep a 
 ## [Unreleased]
 
 ### In progress
-- Send whole folders, several files at once and drag and drop from the Explorer, with send queues and a "To send" tray.
+- System tray: the app keeps running in the background when you close the window.
 - Choose the destination folder on the other device, with per-device shared folders.
-- Settings screen and system tray.
+
+## [0.1.1] - 2026-11-04
+
+### Added
+- Send whole folders and several files at once, with a SHA-256 check of every file.
+- Drag and drop from the Explorer onto a device, or onto the "To send" tray to prepare a send.
+- Send queues, with one continuous progress for everything you sent together.
+- Settings screen: device name, theme (dark, light or Windows), language, receive folder, excluded folders, trusted networks and ignored devices.
+- Time left during a transfer: "Arrives in 3 min" appears after 5 seconds.
+
+### Changed
+- The progress bar of a transfer is thicker and sits at the bottom of the card, with Cancel above it.
 
 ## [0.1.0] - 2026-10-30
 
@@ -24,5 +35,6 @@ First public release, for Windows.
 - Dark interface with an animated network diagram, English and Spanish.
 - Windows installer with firewall rules limited to the local subnet.
 
-[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Davidstron23/nexusBridges/releases/tag/v0.1.0
