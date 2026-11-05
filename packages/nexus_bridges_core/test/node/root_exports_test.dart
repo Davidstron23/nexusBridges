@@ -255,6 +255,7 @@ void main() {
         'DeviceType',
         'DeviceNameProblem',
         'deviceNameProblem',
+        'folderKey',
       });
     });
 
@@ -289,6 +290,84 @@ void main() {
       expect(exports['../identity/identity.dart'], {'SecretProtector'});
     });
 
+    test('E790 from peers it only shows what the views need, never the '
+        'store', () {
+      expect(exports['../peers/peers.dart'], {
+        'FavoriteResult',
+        'HistoryDirection',
+        'SavedDestination',
+      });
+    });
+
+    test('E790 from browse it only shows the listing and share types', () {
+      expect(exports['../browse/browse.dart'], {
+        'BrowseFailure',
+        'DriveKind',
+        'RemoteFolders',
+        'RemoteListing',
+        'RemoteListingFailed',
+        'RemoteRoot',
+        'RemoteRoots',
+        'ShareAddOutcome',
+        'ShareAdded',
+        'ShareNeedsConfirmation',
+        'SharePickCancelled',
+        'ShareRefusal',
+        'ShareRefused',
+        'ShareView',
+      });
+    });
+
+    test('E790 the root library gives the app the types of the notes', () {
+      const destination = SavedDestination(
+        rootId: 'r',
+        rootName: 'docs',
+        path: ['sub'],
+      );
+      final view = PeerSettingsView(
+        fingerprint: 'F',
+        realName: 'PC',
+        alias: 'Casa',
+        mine: true,
+        visible: true,
+        favorites: const [destination],
+        history: [
+          HistoryEntryView(
+            at: DateTime.utc(2026, 11, 5),
+            direction: HistoryDirection.sent,
+            name: 'a.txt',
+            isFolder: false,
+            fileCount: 0,
+            itemCount: 3,
+            delivered: 2,
+            size: 7,
+            destination: const DestinationLabel(rootName: 'docs', path: []),
+            outcome: TransferOutcome.noSpace,
+          ),
+        ],
+      );
+
+      expect(view.favorites.single, destination);
+      expect(view.history.single.delivered, 2);
+      expect(FavoriteResult.values, [
+        FavoriteResult.added,
+        FavoriteResult.alreadyThere,
+        FavoriteResult.full,
+      ]);
+      expect(isValidFolderName('sub'), isTrue);
+      expect(folderKey('Sub'), folderKey('SUB'));
+      expect(NoticeKind.values, contains(NoticeKind.peerNotesNotSaved));
+      expect(
+        const SharedFolderDestination(
+          rootId: 'r',
+          rootName: 'docs',
+          path: [],
+          newFolder: 'n',
+        ).label.path,
+        ['n'],
+      );
+    });
+
     test('exports node_state.dart and nothing else without a show list', () {
       final unrestricted = [
         for (final MapEntry(:key, :value) in exports.entries)
@@ -301,7 +380,9 @@ void main() {
     test('does not export reconcile.dart or any other module', () {
       expect(exports.keys, isNot(contains('reconcile.dart')));
       expect(exports.keys.where((uri) => uri.startsWith('../')).toSet(), {
+        '../browse/browse.dart',
         '../discovery/discovery.dart',
+        '../peers/peers.dart',
         '../protocol/protocol.dart',
         '../settings/settings.dart',
         '../network/network.dart',
@@ -335,6 +416,9 @@ void main() {
         'TransferOutcome',
         'TransferResultKind',
         'RevealResult',
+        'DestinationLabel',
+        'SharedFolderDestination',
+        'isValidFolderName',
       });
     });
 

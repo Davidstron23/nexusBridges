@@ -2,11 +2,14 @@ import '../browse/browse.dart' show ShareView;
 import '../discovery/discovery.dart';
 import '../outbox/outbox.dart' show SendQueuesView, TrayItemView;
 import '../pairing_flow/pairing_flow.dart' show PairingView;
+import '../peers/peers.dart' show HistoryDirection, SavedDestination;
 import '../protocol/protocol.dart' show DeviceNameProblem, DeviceType;
 import '../transfer/transfer.dart'
     show
+        DestinationLabel,
         IncomingTransferView,
         OutgoingTransferView,
+        TransferOutcome,
         TransferResultView,
         defaultExclusions;
 import 'settings_rules.dart' show ExclusionProblem;
@@ -49,6 +52,7 @@ enum NoticeKind {
   networkStopNotSaved,
   sharesNotSaved,
   shareAddNotSaved,
+  peerNotesNotSaved,
   sharesReset,
   sharesPartlyReset,
 }
@@ -80,10 +84,14 @@ final class DeviceEntry {
     required this.ignored,
     required this.mismatch,
     required this.possiblyReplaces,
-  });
+    this.alias,
+    String? realName,
+  }) : realName = realName ?? displayName;
 
   final String fingerprint;
   final String displayName;
+  final String? alias;
+  final String realName;
   final DeviceType? deviceType;
   final bool visible;
   final bool paired;
@@ -101,6 +109,8 @@ final class DeviceEntry {
       other is DeviceEntry &&
       other.fingerprint == fingerprint &&
       other.displayName == displayName &&
+      other.alias == alias &&
+      other.realName == realName &&
       other.deviceType == deviceType &&
       other.visible == visible &&
       other.paired == paired &&
@@ -113,6 +123,8 @@ final class DeviceEntry {
   int get hashCode => Object.hash(
     fingerprint,
     displayName,
+    alias,
+    realName,
     deviceType,
     visible,
     paired,
@@ -123,44 +135,120 @@ final class DeviceEntry {
   );
 }
 
+final class HistoryEntryView {
+  const HistoryEntryView({
+    required this.at,
+    required this.direction,
+    required this.name,
+    required this.isFolder,
+    required this.fileCount,
+    required this.itemCount,
+    required this.delivered,
+    required this.size,
+    required this.destination,
+    required this.outcome,
+  });
+
+  final DateTime at;
+  final HistoryDirection direction;
+  final String name;
+  final bool isFolder;
+  final int fileCount;
+  final int itemCount;
+  final int delivered;
+  final int size;
+  final DestinationLabel? destination;
+  final TransferOutcome outcome;
+
+  @override
+  bool operator ==(Object other) =>
+      other is HistoryEntryView &&
+      other.at == at &&
+      other.direction == direction &&
+      other.name == name &&
+      other.isFolder == isFolder &&
+      other.fileCount == fileCount &&
+      other.itemCount == itemCount &&
+      other.delivered == delivered &&
+      other.size == size &&
+      other.destination == destination &&
+      other.outcome == outcome;
+
+  @override
+  int get hashCode => Object.hash(
+    at,
+    direction,
+    name,
+    isFolder,
+    fileCount,
+    itemCount,
+    delivered,
+    size,
+    destination,
+    outcome,
+  );
+}
+
 final class PeerSettingsView {
   const PeerSettingsView({
     required this.fingerprint,
     required this.realName,
     required this.mine,
     required this.visible,
+    this.alias,
     this.shares = const [],
     this.sharesUnsaved = false,
+    this.favorites = const [],
+    this.recent = const [],
+    this.history = const [],
   });
 
   final String fingerprint;
   final String realName;
+  final String? alias;
   final bool mine;
   final bool visible;
   final List<ShareView> shares;
   final bool sharesUnsaved;
+  final List<SavedDestination> favorites;
+  final List<SavedDestination> recent;
+  final List<HistoryEntryView> history;
 
   @override
   bool operator ==(Object other) =>
       other is PeerSettingsView &&
       other.fingerprint == fingerprint &&
       other.realName == realName &&
+      other.alias == alias &&
       other.mine == mine &&
       other.visible == visible &&
       other.sharesUnsaved == sharesUnsaved &&
-      other.shares.length == shares.length &&
-      Iterable<int>.generate(shares.length)
-          .every((i) => other.shares[i] == shares[i]);
+      _sameItems(other.shares, shares) &&
+      _sameItems(other.favorites, favorites) &&
+      _sameItems(other.recent, recent) &&
+      _sameItems(other.history, history);
 
   @override
   int get hashCode => Object.hash(
     fingerprint,
     realName,
+    alias,
     mine,
     visible,
     sharesUnsaved,
     Object.hashAll(shares),
+    Object.hashAll(favorites),
+    Object.hashAll(recent),
+    Object.hashAll(history),
   );
+}
+
+bool _sameItems<T>(List<T> a, List<T> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 final class Notice {

@@ -38,6 +38,26 @@ enum SelectionResult {
 
 enum QueueItemState { pending, inProgress, done, notSent }
 
+final class SelectionFinished {
+  const SelectionFinished({
+    required this.fingerprint,
+    required this.selectionId,
+    required this.results,
+    required this.itemCount,
+    required this.delivered,
+    required this.bytes,
+    required this.destination,
+  });
+
+  final String fingerprint;
+  final int selectionId;
+  final List<TransferResultView> results;
+  final int itemCount;
+  final int delivered;
+  final int bytes;
+  final SendDestination destination;
+}
+
 final class QueueItemView {
   const QueueItemView({
     required this.id,

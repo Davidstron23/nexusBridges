@@ -68,6 +68,7 @@ List<DeviceEntry> buildEntries({
   required bool Function(String) isIgnored,
   required Set<String> mismatched,
   required bool Function(String) isReplaceable,
+  Map<String, String> aliases = const {},
 }) {
   final storedBy = {for (final device in paired) device.fingerprint: device};
   final visibleBy = <String, DiscoveredDevice>{};
@@ -88,7 +89,9 @@ List<DeviceEntry> buildEntries({
     for (final row in rows)
       DeviceEntry(
         fingerprint: row.fingerprint,
-        displayName: names[row.fingerprint]!,
+        displayName: aliases[row.fingerprint] ?? names[row.fingerprint]!,
+        alias: aliases[row.fingerprint],
+        realName: names[row.fingerprint]!,
         deviceType: row.device?.info.deviceType,
         visible: row.device != null,
         paired: row.stored != null,

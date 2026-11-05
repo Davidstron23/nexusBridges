@@ -357,6 +357,11 @@ final class AppStringsEn implements AppStrings {
       'The folder was added but will not be remembered after restarting.';
 
   @override
+  String get noticePeerNotesNotSaved =>
+      'Favourites, nicknames and history will not be remembered after '
+      'restarting.';
+
+  @override
   String get noticeSharesReset =>
       'The shared folders file was damaged; no folder is open now.';
 

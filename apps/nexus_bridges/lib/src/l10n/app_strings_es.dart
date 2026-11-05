@@ -359,6 +359,10 @@ final class AppStringsEs implements AppStrings {
       'La carpeta se ha añadido, pero no se recordará al reiniciar.';
 
   @override
+  String get noticePeerNotesNotSaved =>
+      'Los favoritos, apodos e historial no se recordarán al reiniciar.';
+
+  @override
   String get noticeSharesReset =>
       'El archivo de carpetas compartidas estaba dañado; ahora no hay '
       'ninguna abierta.';

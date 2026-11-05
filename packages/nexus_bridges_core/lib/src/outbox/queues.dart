@@ -8,6 +8,7 @@ import '../transfer/transfer.dart'
         SendDestination,
         SharedFolderDestination,
         SendTarget,
+        TransferDirection,
         TransferOutcome,
         TransferResultView,
         visibleFileName;
@@ -18,6 +19,22 @@ import 'selection.dart';
 void _noLog(String message) {}
 
 enum _Mode { none, single, queues }
+
+final class _Batch {
+  _Batch({
+    required this.fingerprint,
+    required this.peerName,
+    required this.destination,
+  });
+
+  final String fingerprint;
+  final String? peerName;
+  final SendDestination destination;
+  final List<_Item> finished = [];
+  int selectionId = 0;
+  int total = 0;
+  bool emitted = false;
+}
 
 final class _Item {
   _Item({
@@ -30,6 +47,7 @@ final class _Item {
     required this.isBundle,
     required this.probeSize,
     required this.destination,
+    required this.batch,
   }) : key = pathKey(path);
 
   final String id;
@@ -42,9 +60,11 @@ final class _Item {
   final bool isBundle;
   final int? probeSize;
   final SendDestination destination;
+  final _Batch batch;
 
   QueueItemState state = QueueItemState.pending;
   TransferOutcome? outcome;
+  TransferResultView? result;
   String? problemPath;
   int resultSize = 0;
   int? measuredSize;
@@ -105,6 +125,8 @@ final class SendQueues {
   final void Function(String) _log;
 
   final StreamController<void> _changes = StreamController<void>.broadcast();
+  final StreamController<SelectionFinished> _finishedSelections =
+      StreamController<SelectionFinished>.broadcast();
   final List<_Item> _loose = [];
   final List<_Item> _bundles = [];
 
@@ -126,6 +148,9 @@ final class SendQueues {
   static SendTarget? _noTarget() => null;
 
   Stream<void> get changes => _changes.stream;
+
+  Stream<SelectionFinished> get finishedSelections =>
+      _finishedSelections.stream;
 
   bool get active => _pumpRunning;
 
@@ -206,11 +231,16 @@ final class SendQueues {
       if (_pumpRunning && _fingerprint != fingerprint) {
         return SelectionResult.otherTargetBusy;
       }
+      final batch = _Batch(
+        fingerprint: fingerprint,
+        peerName: peerName,
+        destination: destination,
+      );
       final fresh = <_Item>[];
       final seen = <String>{};
       for (final path in paths) {
         if (!seen.add(pathKey(path))) continue;
-        fresh.add(await _describe(path, destination));
+        fresh.add(await _describe(path, destination, batch));
         if (_closed) return SelectionResult.closed;
       }
       if (_pumpRunning) {
@@ -227,6 +257,8 @@ final class SendQueues {
       if (_pumpRunning) {
         if (fresh.isEmpty) return SelectionResult.queued;
         if (_mode == _Mode.single) _mode = _Mode.queues;
+        batch.selectionId = _selectionCounter;
+        batch.total = fresh.length;
         _refresh = refresh;
         _peerName = peerName ?? _peerName;
         _loose.addAll(newLoose);
@@ -245,6 +277,8 @@ final class SendQueues {
       _peerName = peerName;
       _refresh = refresh;
       _selectionCounter++;
+      batch.selectionId = _selectionCounter;
+      batch.total = fresh.length;
       _loose.addAll(newLoose);
       _bundles.addAll(newBundles);
       _mode = fresh.length == 1 ? _Mode.single : _Mode.queues;
@@ -261,7 +295,11 @@ final class SendQueues {
     }
   }
 
-  Future<_Item> _describe(String path, SendDestination destination) async {
+  Future<_Item> _describe(
+    String path,
+    SendDestination destination,
+    _Batch batch,
+  ) async {
     ElementProbe probe;
     try {
       probe = await _probe(path);
@@ -282,6 +320,7 @@ final class SendQueues {
       isBundle: isFolder || isArchive,
       probeSize: probe.size,
       destination: destination,
+      batch: batch,
     );
   }
 
@@ -298,6 +337,8 @@ final class SendQueues {
     item.stopMeasuring();
     _loose.remove(item);
     _bundles.remove(item);
+    item.batch.total--;
+    _checkBatch(item.batch);
     _emit();
   }
 
@@ -330,6 +371,7 @@ final class SendQueues {
     final pump = _pumpFuture;
     if (pump != null && _current == null) await pump;
     await _changes.close();
+    await _finishedSelections.close();
   }
 
   _Item? _find(String id) {
@@ -366,7 +408,63 @@ final class SendQueues {
       item.stopMeasuring();
       item.state = QueueItemState.notSent;
       item.outcome = reason;
+      _finishItem(item);
     }
+  }
+
+  void _finishItem(_Item item) {
+    item.batch.finished.add(item);
+    _checkBatch(item.batch);
+  }
+
+  void _checkBatch(_Batch batch) {
+    if (_closed || batch.emitted || _finishedSelections.isClosed) return;
+    if (batch.total <= 0 || batch.finished.length < batch.total) return;
+    batch.emitted = true;
+    var delivered = 0;
+    var bytes = 0;
+    for (final item in batch.finished) {
+      bytes += item.finishedBytes;
+      final outcome = item.outcome;
+      if (item.state == QueueItemState.done &&
+          (outcome == TransferOutcome.saved ||
+              outcome == TransferOutcome.savedWithoutMark)) {
+        delivered++;
+      }
+    }
+    _finishedSelections.add(
+      SelectionFinished(
+        fingerprint: batch.fingerprint,
+        selectionId: batch.selectionId,
+        results: List.unmodifiable([
+          for (final item in batch.finished) _resultOf(item),
+        ]),
+        itemCount: batch.total,
+        delivered: delivered,
+        bytes: bytes,
+        destination: batch.destination,
+      ),
+    );
+  }
+
+  TransferResultView _resultOf(_Item item) {
+    final known = item.result;
+    if (known != null) return known;
+    final destination = item.destination;
+    return TransferResultView(
+      direction: TransferDirection.outgoing,
+      peerFingerprint: item.batch.fingerprint,
+      peerName: item.batch.peerName,
+      fileName: item.name,
+      isProgram: false,
+      outcome: item.outcome ?? TransferOutcome.noContact,
+      canReveal: false,
+      isFolder: item.isFolder,
+      size: item.finishedBytes,
+      destination: destination is SharedFolderDestination
+          ? destination.label
+          : null,
+    );
   }
 
   void _clearAll() {
@@ -406,6 +504,8 @@ final class SendQueues {
         item.outcome = outcome;
         item.problemPath = result?.problemPath;
         item.resultSize = result?.size ?? 0;
+        item.result = result;
+        _finishItem(item);
         _log('queues: element ended with ${outcome.name}');
         final stops =
             !continuesAfter(outcome) ||

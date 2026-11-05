@@ -32,6 +32,7 @@ const Map<String, Set<String>> allowedImports = {
     'winio',
   },
   'outbox': {'protocol', 'transfer'},
+  'peers': {'storage', 'protocol'},
   'browse': {
     'storage',
     'identity',
@@ -57,6 +58,7 @@ const Map<String, Set<String>> allowedImports = {
     'transfer',
     'outbox',
     'browse',
+    'peers',
     'winio',
   },
 };
