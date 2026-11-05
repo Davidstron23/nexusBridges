@@ -89,6 +89,20 @@ Future<void> expectEmptyPlace(Guarded g) async {
   g.expectNothingLocked(['$sub\\deep', sub, g.docs]);
 }
 
+bool readsAs(File file, bool Function(String text) check) {
+  try {
+    return check(file.readAsStringSync());
+  } on FileSystemException {
+    return false;
+  }
+}
+
+bool lists(File file, String fingerprint) =>
+    readsAs(file, (text) => text.contains(fingerprint));
+
+bool leavesOut(File file, String fingerprint) =>
+    readsAs(file, (text) => !text.contains(fingerprint));
+
 Future<void> rePair(TransferNode initiator, TransferNode receiver) async {
   await eventually(
     () async {
@@ -115,10 +129,8 @@ Future<void> rePair(TransferNode initiator, TransferNode receiver) async {
   receiver.node.answerRequest(ReceiverAnswer.matches);
   await eventually(
     () =>
-        initiator.pairedFile.readAsStringSync().contains(
-          receiver.fingerprint,
-        ) &&
-        receiver.pairedFile.readAsStringSync().contains(initiator.fingerprint),
+        lists(initiator.pairedFile, receiver.fingerprint) &&
+        lists(receiver.pairedFile, initiator.fingerprint),
     limit: scaled(transferWait),
     reason: 'both saved',
   );
@@ -742,7 +754,7 @@ void main() {
       await g.a.node.unpair(g.b.fingerprint);
       await eventually(
         () =>
-            !g.b.pairedFile.readAsStringSync().contains(g.a.fingerprint) &&
+            leavesOut(g.b.pairedFile, g.a.fingerprint) &&
             !g.b.state.peers.containsKey(g.a.fingerprint),
         limit: scaled(transferWait),
         reason: 'A gone at B',
@@ -764,7 +776,7 @@ void main() {
       ]).whenComplete(() => drained = true);
       await g.a.node.unpair(g.b.fingerprint);
       await eventually(
-        () => !g.b.pairedFile.readAsStringSync().contains(g.a.fingerprint),
+        () => leavesOut(g.b.pairedFile, g.a.fingerprint),
         limit: scaled(transferWait),
         reason: 'A out of paired.json at B',
       );
