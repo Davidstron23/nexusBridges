@@ -105,6 +105,7 @@ abstract class AppStrings {
   String noticePeerCancelledTransfer(String name);
   String get noticeSharesNotSaved;
   String get noticeShareAddNotSaved;
+  String get noticePeerNotesNotSaved;
   String get noticeSharesReset;
   String get noticeSharesPartlyReset;
 

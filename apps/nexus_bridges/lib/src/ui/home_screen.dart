@@ -260,6 +260,7 @@ String _noticeText(AppStrings strings, Notice notice) {
     ),
     NoticeKind.sharesNotSaved => strings.noticeSharesNotSaved,
     NoticeKind.shareAddNotSaved => strings.noticeShareAddNotSaved,
+    NoticeKind.peerNotesNotSaved => strings.noticePeerNotesNotSaved,
     NoticeKind.sharesReset => strings.noticeSharesReset,
     NoticeKind.sharesPartlyReset => strings.noticeSharesPartlyReset,
   };

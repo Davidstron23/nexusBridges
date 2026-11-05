@@ -29,6 +29,7 @@ import '../outbox/outbox.dart'
         ElementProbe,
         ElementSender,
         QueueItemState,
+        SelectionFinished,
         SelectionResult,
         SendQueues,
         SendQueuesView,
@@ -42,6 +43,14 @@ import '../pairing/pairing.dart'
         PairedLoadResult,
         PeerRelation;
 import '../pairing_flow/pairing_flow.dart';
+import '../peers/peers.dart'
+    show
+        FavoriteResult,
+        HistoryDirection,
+        HistoryEntry,
+        PeerNote,
+        PeerNotes,
+        SavedDestination;
 import '../protocol/protocol.dart';
 import '../server/server.dart' show ApiServer;
 import '../settings/settings.dart'
@@ -50,6 +59,7 @@ import '../storage/storage.dart' show JsonFileStore, defaultDataDir;
 import '../transfer/transfer.dart'
     show
         AbortSignal,
+        DestinationLabel,
         ExclusionSource,
         FilePicker,
         FileSystemPlatform,
@@ -66,14 +76,17 @@ import '../transfer/transfer.dart'
         RevealResult,
         SendDestination,
         SendTarget,
+        SharedFolderDestination,
         TempJournal,
         TransferCoordinator,
+        TransferDirection,
         TransferEvent,
         TransferOutcome,
         TransferResultView,
         WindowsFileSystemPlatform,
         WindowsFilePicker,
         defaultExclusions,
+        isValidFolderName,
         measureFolderSize,
         writeAllBytes;
 import 'entries.dart' hide namesakeOf;
@@ -82,6 +95,22 @@ import 'node_state.dart';
 import 'reconcile.dart';
 import 'settings_rules.dart';
 
+export '../browse/browse.dart'
+    show
+        BrowseFailure,
+        DriveKind,
+        RemoteFolders,
+        RemoteListing,
+        RemoteListingFailed,
+        RemoteRoot,
+        RemoteRoots,
+        ShareAddOutcome,
+        ShareAdded,
+        ShareNeedsConfirmation,
+        SharePickCancelled,
+        ShareRefusal,
+        ShareRefused,
+        ShareView;
 export '../discovery/discovery.dart' show DiscoveredDevice;
 export '../identity/identity.dart' show SecretProtector;
 export '../network/network.dart' show NetworkDecision, AdapterInfo, Ipv4Subnet;
@@ -89,8 +118,15 @@ export '../outbox/outbox.dart'
     show QueueItemState, QueueItemView, SendQueuesView, TrayItemView;
 export '../pairing_flow/pairing_flow.dart'
     show PairingView, PairingRole, PairingPhase, PairingOutcome, ReceiverAnswer;
+export '../peers/peers.dart'
+    show FavoriteResult, HistoryDirection, SavedDestination;
 export '../protocol/protocol.dart'
-    show DeviceInfo, DeviceNameProblem, DeviceType, deviceNameProblem;
+    show
+        DeviceInfo,
+        DeviceNameProblem,
+        DeviceType,
+        deviceNameProblem,
+        folderKey;
 export '../settings/settings.dart' show ThemeChoice;
 export '../transfer/transfer.dart'
     show
@@ -114,7 +150,10 @@ export '../transfer/transfer.dart'
         TransferDirection,
         TransferOutcome,
         TransferResultKind,
-        RevealResult;
+        RevealResult,
+        DestinationLabel,
+        SharedFolderDestination,
+        isValidFolderName;
 export 'node_state.dart';
 export 'settings_rules.dart'
     show ExclusionProblem, exclusionProblem, isDefaultExclusionList;
@@ -422,6 +461,8 @@ final class NexusNode {
   SendQueues? _queues;
   SendTray? _tray;
   ShareService? _shares;
+  PeerNotes? _notes;
+  bool _notesFailureNoticed = false;
   BrowseServer? _browseServer;
   BrowseClient? _browseClient;
   PeerCheckScheduler? _scheduler;
@@ -445,6 +486,10 @@ final class NexusNode {
   StreamSubscription<void>? _ignoredSaveSubscription;
   StreamSubscription<void>? _sharesChangesSubscription;
   StreamSubscription<void>? _sharesSaveSubscription;
+  StreamSubscription<void>? _notesChangesSubscription;
+  StreamSubscription<void>? _notesFailuresSubscription;
+  StreamSubscription<TransferResultView>? _finishedSubscription;
+  StreamSubscription<SelectionFinished>? _selectionsSubscription;
   Timer? _suggestTimer;
 
   String get _effectiveName => _customName ?? _windowsName;
@@ -614,6 +659,32 @@ final class NexusNode {
     );
   }
 
+  Future<List<String>> pickFilesFor(String fingerprint) =>
+      _pickFor(fingerprint, (transfers) => transfers.pickFilesToSend());
+
+  Future<List<String>> pickFoldersFor(String fingerprint) =>
+      _pickFor(fingerprint, (transfers) => transfers.pickFoldersToSend());
+
+  Future<List<String>> _pickFor(
+    String fingerprint,
+    Future<List<String>> Function(TransferCoordinator) pick,
+  ) async {
+    TransferCoordinator? transfers;
+    await _run('pick for', () async {
+      final current = _transfers;
+      if (current == null || _sendBlock(fingerprint) != null) return;
+      transfers = current;
+    });
+    final active = transfers;
+    if (active == null) return const [];
+    try {
+      return await pick(active);
+    } catch (e) {
+      _log('pick for failed: ${e.runtimeType}');
+      return const [];
+    }
+  }
+
   Future<SendResult> sendFiles(String fingerprint) =>
       _sendPicked(fingerprint, (transfers) => transfers.pickFilesToSend());
 
@@ -705,13 +776,20 @@ final class NexusNode {
     _tray?.clear();
   }
 
-  Future<SendResult> sendTray(String fingerprint) async {
+  Future<SendResult> sendTray(
+    String fingerprint, {
+    SendDestination destination = const ReceiveFolderDestination(),
+  }) async {
     final tray = _tray;
     if (_closing || tray == null) return SendResult.unavailable;
     final batch = tray.take();
     SendResult result;
     try {
-      result = await sendPaths(fingerprint, batch.paths);
+      result = await sendPaths(
+        fingerprint,
+        batch.paths,
+        destination: destination,
+      );
     } catch (_) {
       tray.restore(batch);
       rethrow;
@@ -1259,6 +1337,7 @@ final class NexusNode {
     _seenAt.clear();
     _longAbsent = const {};
     _displayNames = const {};
+    _notesFailureNoticed = false;
     _prompts = const [];
     _pausedNetworks = const [];
     _trustedInUse = const [];
@@ -1368,6 +1447,16 @@ final class NexusNode {
       clock: _clock,
       log: _log,
     );
+    final notes = PeerNotes(
+      JsonFileStore(_fileIn(dir, 'peers.json')),
+      ownerFingerprint: identity.fingerprint,
+      now: _now,
+    );
+    try {
+      await notes.load(isPaired: paired.isPaired);
+    } catch (e) {
+      _log('peer notes load failed: ${e.runtimeType}');
+    }
     final settings = SettingsStore(
       JsonFileStore(_fileIn(dir, 'settings.json')),
       now: _now,
@@ -1505,6 +1594,7 @@ final class NexusNode {
     _queues = queues;
     _tray = tray;
     _shares = shares;
+    _notes = notes;
     _browseServer = browseServer;
     _browseClient = BrowseClient(identity: identity);
     _channel = channel;
@@ -1555,6 +1645,22 @@ final class NexusNode {
     _ignoredSaveSubscription = ignored.saveStatusChanges.listen((_) => _emit());
     _sharesChangesSubscription = shares.changes.listen((_) => _emit());
     _sharesSaveSubscription = shares.saveStatusChanges.listen((_) => _emit());
+    _notesChangesSubscription = notes.changes.listen((_) => _refresh());
+    _notesFailuresSubscription = notes.saveFailures.listen(
+      (_) => _onNotesNotSaved(),
+    );
+    _finishedSubscription = transfers.finished.listen(
+      (result) => _enqueue(
+        'transfer finished',
+        () async => _onTransferFinished(result),
+      ),
+    );
+    _selectionsSubscription = queues.finishedSelections.listen(
+      (selection) => _enqueue(
+        'selection finished',
+        () async => _onSelectionFinished(selection),
+      ),
+    );
     _changesSubscription = monitor.changes.listen(
       (change) => _enqueue('network change', () async {
         _lastChange = change;
@@ -1633,6 +1739,17 @@ final class NexusNode {
     }
     final shares = _shares;
     final paired = _paired;
+    final notes = _notes;
+    if (notes != null) {
+      for (final fingerprint in departed) {
+        notes.forget(fingerprint);
+      }
+      if (paired != null) {
+        for (final fingerprint in notes.knownPeers) {
+          if (!paired.isPaired(fingerprint)) notes.forget(fingerprint);
+        }
+      }
+    }
     if (shares == null || paired == null) return;
     for (final fingerprint in shares.knownPeers) {
       if (paired.isPaired(fingerprint)) continue;
@@ -1833,6 +1950,11 @@ final class NexusNode {
     final queues = _queues;
     final tray = _tray;
     final shares = _shares;
+    final notes = _notes;
+    final notesChanges = _notesChangesSubscription;
+    final notesFailures = _notesFailuresSubscription;
+    final finishedResults = _finishedSubscription;
+    final finishedSelections = _selectionsSubscription;
     final queuesChanges = _queuesSubscription;
     final trayChanges = _traySubscription;
     final changes = _changesSubscription;
@@ -1855,6 +1977,11 @@ final class NexusNode {
     _queues = null;
     _tray = null;
     _shares = null;
+    _notes = null;
+    _notesChangesSubscription = null;
+    _notesFailuresSubscription = null;
+    _finishedSubscription = null;
+    _selectionsSubscription = null;
     _browseServer = null;
     _browseClient = null;
     _scheduler = null;
@@ -1900,6 +2027,13 @@ final class NexusNode {
     await _guard('ignored save status cancel', () => ignoredSave?.cancel());
     await _guard('shares changes cancel', () => sharesChanges?.cancel());
     await _guard('shares save status cancel', () => sharesSave?.cancel());
+    await _guard('notes changes cancel', () => notesChanges?.cancel());
+    await _guard('notes failures cancel', () => notesFailures?.cancel());
+    await _guard('finished results cancel', () => finishedResults?.cancel());
+    await _guard(
+      'finished selections cancel',
+      () => finishedSelections?.cancel(),
+    );
     await _guard('monitor stop', () => monitor?.stop());
     await _guard('queues close', () => queues?.close());
     await _guard('tray close', () => tray?.close());
@@ -1908,6 +2042,7 @@ final class NexusNode {
       'transfers close',
       () => transfers?.close().timeout(Limits.transferCloseBudget),
     );
+    await _guard('notes flush', () => notes?.flush());
     await _guard('pairing close', () => coordinator?.close());
     await _guard('server close', () => server?.close());
     await _guard('discovery stop', () {
@@ -1991,12 +2126,18 @@ final class NexusNode {
       _entries = const [];
       return;
     }
+    final notes = _notes;
     _entries = buildEntries(
       visible: _devices,
       paired: paired.devices,
       isIgnored: ignored.isIgnored,
       mismatched: _scheduler?.mismatched ?? const {},
       isReplaceable: _longAbsent.contains,
+      aliases: {
+        if (notes != null)
+          for (final device in paired.devices)
+            device.fingerprint: ?notes.noteOf(device.fingerprint).alias,
+      },
     );
   }
 
@@ -2042,7 +2183,7 @@ final class NexusNode {
 
   Future<RemoteListing> listRemoteRoots(
     String fingerprint, {
-    List<BrowseCheck> check = const [],
+    List<SavedDestination> check = const [],
   }) async {
     final client = _browseClient;
     final target = _browseTargetOf(fingerprint);
@@ -2050,7 +2191,13 @@ final class NexusNode {
       return const RemoteListingFailed(BrowseFailure.notVisible);
     }
     try {
-      return await client.roots(target, checks: check);
+      return await client.roots(
+        target,
+        checks: [
+          for (final item in check)
+            BrowseCheck(rootId: item.rootId, path: item.path),
+        ],
+      );
     } catch (e) {
       _log('list remote roots failed: ${e.runtimeType}');
       return const RemoteListingFailed(BrowseFailure.noAnswer);
@@ -2155,6 +2302,133 @@ final class NexusNode {
     }
     _addNotice(NoticeKind.sharesNotSaved);
   }
+
+  void setAlias(String fingerprint, String alias) {
+    final notes = _notes;
+    if (notes == null || !_isPaired(fingerprint)) return;
+    notes.setAlias(fingerprint, alias);
+    _refresh();
+  }
+
+  FavoriteResult addFavorite(String fingerprint, SavedDestination destination) {
+    final notes = _notes;
+    if (notes == null ||
+        !_isPaired(fingerprint) ||
+        !_isStorableDestination(destination)) {
+      return FavoriteResult.full;
+    }
+    final result = notes.addFavorite(fingerprint, destination);
+    _refresh();
+    return result;
+  }
+
+  void removeFavorite(String fingerprint, int index) {
+    final notes = _notes;
+    if (notes == null || !_isPaired(fingerprint)) return;
+    notes.removeFavorite(fingerprint, index);
+    _refresh();
+  }
+
+  bool _isPaired(String fingerprint) =>
+      !_closing && (_paired?.isPaired(fingerprint) ?? false);
+
+  void _onNotesNotSaved() {
+    if (_closing || _notesFailureNoticed) return;
+    _notesFailureNoticed = true;
+    _addNotice(NoticeKind.peerNotesNotSaved);
+    _emit();
+  }
+
+  void _onTransferFinished(TransferResultView result) {
+    final notes = _notes;
+    final fingerprint = result.peerFingerprint;
+    if (notes == null || !_isPaired(fingerprint)) return;
+    final destination = result.destination;
+    switch (result.direction) {
+      case TransferDirection.incoming:
+        notes.appendHistory(
+          fingerprint,
+          HistoryEntry(
+            at: _now(),
+            direction: HistoryDirection.received,
+            name: result.fileName,
+            isFolder: result.isFolder,
+            fileCount: result.fileCount,
+            itemCount: 1,
+            delivered: _wasSaved(result.outcome) ? 1 : 0,
+            size: result.size,
+            destinationRoot: destination?.rootName,
+            destinationHome: destination?.home ?? false,
+            destinationPath: destination?.path ?? const [],
+            outcome: result.outcome.name,
+          ),
+        );
+      case TransferDirection.outgoing:
+        final rootId = destination?.rootId;
+        if (destination == null ||
+            rootId == null ||
+            !_wasSaved(result.outcome)) {
+          return;
+        }
+        final recent = SavedDestination(
+          rootId: rootId,
+          rootName: destination.rootName,
+          home: destination.home,
+          path: destination.path,
+        );
+        if (_isStorableDestination(recent)) {
+          notes.addRecent(fingerprint, recent);
+        }
+    }
+  }
+
+  void _onSelectionFinished(SelectionFinished selection) {
+    final notes = _notes;
+    final fingerprint = selection.fingerprint;
+    if (notes == null ||
+        !_isPaired(fingerprint) ||
+        selection.results.isEmpty ||
+        selection.itemCount < 1) {
+      return;
+    }
+    final first = selection.results.first;
+    final single = selection.itemCount == 1;
+    final destination = selection.destination;
+    final label = destination is SharedFolderDestination
+        ? destination.label
+        : null;
+    var outcome = TransferOutcome.saved;
+    if (selection.delivered != selection.itemCount) {
+      outcome = first.outcome;
+      for (final result in selection.results) {
+        if (!_wasSaved(result.outcome)) {
+          outcome = result.outcome;
+          break;
+        }
+      }
+    }
+    notes.appendHistory(
+      fingerprint,
+      HistoryEntry(
+        at: _now(),
+        direction: HistoryDirection.sent,
+        name: first.fileName,
+        isFolder: single && first.isFolder,
+        fileCount: single ? first.fileCount : 0,
+        itemCount: selection.itemCount,
+        delivered: selection.delivered,
+        size: selection.bytes,
+        destinationRoot: label?.rootName,
+        destinationHome: label?.home ?? false,
+        destinationPath: label?.path ?? const [],
+        outcome: outcome.name,
+      ),
+    );
+  }
+
+  bool _wasSaved(TransferOutcome outcome) =>
+      outcome == TransferOutcome.saved ||
+      outcome == TransferOutcome.savedWithoutMark;
 
   bool _isMine(String fingerprint) {
     if (_closing) return false;
@@ -2640,19 +2914,64 @@ final class NexusNode {
   Map<String, PeerSettingsView> _peerViews() {
     final shares = _shares;
     if (shares == null) return const {};
+    final notes = _notes;
     final unsaved = shares.hasUnsavedRemoval;
     return {
       for (final entry in _entries)
         if (entry.paired)
-          entry.fingerprint: PeerSettingsView(
-            fingerprint: entry.fingerprint,
-            realName: entry.displayName,
-            mine: entry.mine,
-            visible: entry.visible,
-            shares: shares.viewsFor(entry.fingerprint),
-            sharesUnsaved: unsaved,
+          entry.fingerprint: _peerViewOf(
+            entry,
+            shares,
+            notes?.noteOf(entry.fingerprint) ?? const PeerNote(),
+            unsaved,
           ),
     };
+  }
+
+  PeerSettingsView _peerViewOf(
+    DeviceEntry entry,
+    ShareService shares,
+    PeerNote note,
+    bool unsaved,
+  ) {
+    return PeerSettingsView(
+      fingerprint: entry.fingerprint,
+      realName: entry.realName,
+      alias: note.alias,
+      mine: entry.mine,
+      visible: entry.visible,
+      shares: shares.viewsFor(entry.fingerprint),
+      sharesUnsaved: unsaved,
+      favorites: note.favorites,
+      recent: note.recent,
+      history: [
+        for (final item in note.history)
+          if (TransferOutcome.values.asNameMap()[item.outcome]
+              case final outcome?)
+            HistoryEntryView(
+              at: item.at,
+              direction: item.direction,
+              name: item.name,
+              isFolder: item.isFolder,
+              fileCount: item.fileCount,
+              itemCount: item.itemCount,
+              delivered: item.delivered,
+              size: item.size,
+              destination: _historyDestination(item),
+              outcome: outcome,
+            ),
+      ],
+    );
+  }
+
+  DestinationLabel? _historyDestination(HistoryEntry item) {
+    final root = item.destinationRoot;
+    if (root == null && !item.destinationHome) return null;
+    return DestinationLabel(
+      rootName: root ?? '',
+      home: item.destinationHome,
+      path: item.destinationPath,
+    );
   }
 
   void _emit() {
@@ -2802,4 +3121,19 @@ bool _sameDevice(DiscoveredDevice a, DiscoveredDevice b) {
       a.info.name == b.info.name &&
       a.paired == b.paired &&
       a.interfaceId == b.interfaceId;
+}
+
+final RegExp _rootIdShape = RegExp(r'^[0-9a-f]{32}$');
+final RegExp _controlShape = RegExp(r'[\x00-\x1F]');
+
+bool _isStorableDestination(SavedDestination destination) {
+  if (!_rootIdShape.hasMatch(destination.rootId)) return false;
+  final name = destination.rootName;
+  if (name.length > 255 ||
+      _controlShape.hasMatch(name) ||
+      (!destination.home && name.isEmpty)) {
+    return false;
+  }
+  if (destination.path.length > Limits.maxRelativeDepth) return false;
+  return destination.path.every(isValidFolderName);
 }

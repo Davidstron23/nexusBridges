@@ -7,6 +7,7 @@ export 'selection.dart'
         ElementSender,
         QueueItemState,
         QueueItemView,
+        SelectionFinished,
         SelectionResult,
         SendQueuesView;
 export 'tray.dart' show SendTray, TrayAddResult, TrayBatch, TrayItemView;

@@ -793,6 +793,7 @@ void main() {
         NoticeKind.networkStopNotSaved,
         NoticeKind.sharesNotSaved,
         NoticeKind.shareAddNotSaved,
+        NoticeKind.peerNotesNotSaved,
         NoticeKind.sharesReset,
         NoticeKind.sharesPartlyReset,
       ]);

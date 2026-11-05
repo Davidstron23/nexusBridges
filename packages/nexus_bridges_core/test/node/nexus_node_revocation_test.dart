@@ -5,7 +5,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
-import 'package:nexus_bridges_core/src/browse/browse.dart';
 import 'package:nexus_bridges_core/src/node/node.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart'
     show tempFolderName;

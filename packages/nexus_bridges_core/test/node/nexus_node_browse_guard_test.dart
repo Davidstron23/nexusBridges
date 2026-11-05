@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:nexus_bridges_core/src/browse/browse.dart';
 import 'package:nexus_bridges_core/src/pairing/pairing.dart' show PeerRelation;
+import 'package:nexus_bridges_core/src/peers/peers.dart' show SavedDestination;
 import 'package:nexus_bridges_core/src/protocol/protocol.dart';
 import 'package:nexus_bridges_core/src/transfer/transfer.dart'
     show SharedFolderDestination, TransferOutcome, tempFolderName;
@@ -563,11 +564,23 @@ void main() {
       final zero = await g.a.node.listRemoteRoots(
         g.b.fingerprint,
         check: [
-          BrowseCheck(rootId: g.rootId, path: const ['sigue']),
-          BrowseCheck(rootId: g.rootId, path: const ['sub', 'borrada']),
-          BrowseCheck(rootId: extra, path: const []),
-          BrowseCheck(rootId: g.rootId, path: const ['..']),
-          BrowseCheck(rootId: g.rootId, path: const []),
+          SavedDestination(
+            rootId: g.rootId,
+            rootName: 'docs',
+            path: const ['sigue'],
+          ),
+          SavedDestination(
+            rootId: g.rootId,
+            rootName: 'docs',
+            path: const ['sub', 'borrada'],
+          ),
+          SavedDestination(rootId: extra, rootName: 'docs', path: const []),
+          SavedDestination(
+            rootId: g.rootId,
+            rootName: 'docs',
+            path: const ['..'],
+          ),
+          SavedDestination(rootId: g.rootId, rootName: 'docs', path: const []),
         ],
       );
       expect((zero as RemoteRoots).checks, [true, false, false, false, true]);
