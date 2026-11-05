@@ -229,6 +229,7 @@ Set<String> allowedTexts(
     s.mineNoButton,
     s.noticeChangeNotSaved,
     s.noticeSettingNotSaved,
+    s.noticePeerNotesNotSaved,
     s.noticePairingPaused,
     s.mineQuestion,
     s.mineYesDetail,
