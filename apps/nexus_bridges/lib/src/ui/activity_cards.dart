@@ -9,6 +9,7 @@ import 'icons/file_icon.dart';
 import 'icons/folder_icon.dart';
 import 'icons/glyphs.dart';
 import 'progress/selection_progress_painter.dart';
+import 'progress/time_left_scope.dart';
 import 'queue_card.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
@@ -21,6 +22,8 @@ const int _maxExtensionRunes = 16;
 const int _dotRune = 0x2E;
 
 const double _cardGap = 12;
+
+const double _cardBarHeight = 8;
 
 ChipTone outgoingTone(OutgoingPhase phase) => switch (phase) {
   OutgoingPhase.preparing ||
@@ -354,32 +357,53 @@ class ActivityCardHeader extends StatelessWidget {
 }
 
 class ActivityCardFooter extends StatelessWidget {
-  const ActivityCardFooter({this.note, this.action, super.key});
+  const ActivityCardFooter({
+    this.note,
+    this.leading,
+    this.action,
+    this.barBelow = false,
+    super.key,
+  });
 
   final String? note;
+  final Widget? leading;
   final Widget? action;
+  final bool barBelow;
 
   @override
   Widget build(BuildContext context) {
     final colors = NbColors.of(context);
     final note = this.note;
+    final leading = this.leading;
     final action = this.action;
+    Widget? noteText;
+    if (leading == null && note != null) {
+      noteText = Text(
+        note,
+        style: NbText.caption.copyWith(color: colors.textWeak),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      );
+      if (barBelow) {
+        noteText = Transform.translate(
+          offset: const Offset(0, timeLeftLowering),
+          child: noteText,
+        );
+      }
+    }
+    final start = leading ?? noteText;
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 28),
         child: Row(
+          crossAxisAlignment: barBelow
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.center,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            if (note != null)
-              Flexible(
-                child: Text(
-                  note,
-                  style: NbText.caption.copyWith(color: colors.textWeak),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              )
+            if (start != null)
+              Flexible(child: start)
             else
               const SizedBox.shrink(),
             if (action != null) ...[const SizedBox(width: 8), action],
@@ -567,19 +591,12 @@ class _OutgoingCard extends StatelessWidget {
               ),
               if (folder && summary != null)
                 FolderSummaryLines(summary: summary, topGap: 8),
-              if (transferring) ...[
-                const SizedBox(height: 12),
-                SelectionProgressBuilder(
-                  track: ProgressTrack.outgoing,
-                  enabled: tracked,
-                  fallback: phase == OutgoingPhase.verifying
-                      ? 1
-                      : percentOf(view.sentBytes, view.size) / 100,
-                  builder: (context, value, _) => NbProgressBar(value: value),
-                ),
-              ],
               ActivityCardFooter(
                 note: note,
+                barBelow: transferring,
+                leading: phase == OutgoingPhase.uploading
+                    ? const TimeLeftLabel(track: ProgressTrack.outgoing)
+                    : null,
                 action: view.cancelling
                     ? Flexible(
                         child: Text(
@@ -599,6 +616,18 @@ class _OutgoingCard extends StatelessWidget {
                         ),
                       ]),
               ),
+              if (transferring) ...[
+                const SizedBox(height: 10),
+                SelectionProgressBuilder(
+                  track: ProgressTrack.outgoing,
+                  enabled: tracked && phase != OutgoingPhase.verifying,
+                  fallback: phase == OutgoingPhase.verifying
+                      ? 1
+                      : percentOf(view.sentBytes, view.size) / 100,
+                  builder: (context, value, _) =>
+                      NbProgressBar(value: value, height: _cardBarHeight),
+                ),
+              ],
             ],
           ),
         );
@@ -673,18 +702,12 @@ class _IncomingCard extends StatelessWidget {
                 detail: detail,
                 extraDetails: extraDetails,
               ),
-              if (transferring) ...[
-                const SizedBox(height: 12),
-                SelectionProgressBuilder(
-                  track: ProgressTrack.incoming,
-                  fallback: stage == IncomingStage.verifying
-                      ? 1
-                      : percentOf(view.receivedBytes, view.size) / 100,
-                  builder: (context, value, _) => NbProgressBar(value: value),
-                ),
-              ],
               ActivityCardFooter(
                 note: note,
+                barBelow: transferring,
+                leading: stage == IncomingStage.receiving
+                    ? const TimeLeftLabel(track: ProgressTrack.incoming)
+                    : null,
                 action: !view.canCancel
                     ? null
                     : inlineButtonBar([
@@ -697,6 +720,18 @@ class _IncomingCard extends StatelessWidget {
                         ),
                       ]),
               ),
+              if (transferring) ...[
+                const SizedBox(height: 10),
+                SelectionProgressBuilder(
+                  track: ProgressTrack.incoming,
+                  enabled: stage != IncomingStage.verifying,
+                  fallback: stage == IncomingStage.verifying
+                      ? 1
+                      : percentOf(view.receivedBytes, view.size) / 100,
+                  builder: (context, value, _) =>
+                      NbProgressBar(value: value, height: _cardBarHeight),
+                ),
+              ],
             ],
           ),
         );

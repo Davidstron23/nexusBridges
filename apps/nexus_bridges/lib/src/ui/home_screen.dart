@@ -17,6 +17,7 @@ import 'incoming_cards.dart';
 import 'modal/timeline.dart';
 import 'network_strip.dart';
 import 'progress/selection_progress_painter.dart';
+import 'progress/time_left_scope.dart';
 import 'send_action.dart';
 import 'settings/settings_controller.dart';
 import 'settings/settings_layer.dart';
@@ -156,8 +157,15 @@ class _HomeScreenState extends State<HomeScreen> {
         controller: _drop,
         child: ListenableBuilder(
           listenable: controller,
-          builder: (context, child) =>
-              SelectionProgressScope(state: controller.state, child: child!),
+          builder: (context, child) => SelectionProgressScope(
+            state: controller.state,
+            child: TimeLeftScope(
+              state: controller.state,
+              source: controller,
+              read: () => controller.state,
+              child: child!,
+            ),
+          ),
           child: SettingsLayer(
             controller: controller,
             settings: _settings,

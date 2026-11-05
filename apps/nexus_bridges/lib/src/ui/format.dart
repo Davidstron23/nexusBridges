@@ -102,3 +102,25 @@ String formatShortDate(DateTime utc, String languageCode, AppStrings strings) {
   }
   return '${strings.monthShort(local.month)} ${local.day}, $year';
 }
+
+const double _fewSecondsLimit = 5;
+
+const double _secondsStep = 5;
+
+const double _minuteSeconds = 60;
+
+const int _hourMinutes = 60;
+
+String? formatTimeLeft(Duration remaining) {
+  final seconds = remaining.inMicroseconds / Duration.microsecondsPerSecond;
+  if (seconds <= _fewSecondsLimit) return null;
+  if (seconds < _minuteSeconds) {
+    final stepped = (seconds / _secondsStep).ceil() * _secondsStep.toInt();
+    return stepped >= _minuteSeconds ? '1 min' : '$stepped s';
+  }
+  final rounded = (seconds / _minuteSeconds).round();
+  if (rounded < _hourMinutes) return '$rounded min';
+  final hours = rounded ~/ _hourMinutes;
+  final minutes = rounded % _hourMinutes;
+  return minutes == 0 ? '$hours h' : '$hours h $minutes min';
+}

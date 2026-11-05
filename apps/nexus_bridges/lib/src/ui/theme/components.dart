@@ -109,17 +109,18 @@ class StatusChip extends StatelessWidget {
 }
 
 class NbProgressBar extends StatelessWidget {
-  const NbProgressBar({required this.value, super.key});
+  const NbProgressBar({required this.value, this.height = 6, super.key});
 
   final double value;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
     final colors = NbColors.of(context);
     final factor = value.isNaN ? 0.0 : value.clamp(0.0, 1.0);
-    final radius = BorderRadius.circular(3);
+    final radius = BorderRadius.circular(height / 2);
     return Container(
-      height: 6,
+      height: height,
       decoration: BoxDecoration(color: colors.track, borderRadius: radius),
       alignment: Alignment.centerLeft,
       child: FractionallySizedBox(
