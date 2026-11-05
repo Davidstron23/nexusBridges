@@ -154,11 +154,13 @@ void main() {
       });
     }
 
-    testWidgets('in resumed it does not', (tester) async {
+    testWidgets('in resumed it still asks: a hidden window can report it', (
+      tester,
+    ) async {
       final (controller, host) = await _mount(tester);
       controller.emit(_warning());
       await tester.pump();
-      expect(host.calls, isNot(contains('attention')));
+      expect(host.countOf('attention'), 1);
     });
 
     testWidgets('the same warning again does not call it twice', (
@@ -396,7 +398,7 @@ void main() {
       await tester.pump();
       controller.emit(_warning('new'));
       await tester.pump();
-      expect(host.calls, isNot(contains('attention')));
+      expect(host.countOf('attention'), 1);
       expect(_neutralHasFocus(), isTrue);
     }, variant: _windows);
 

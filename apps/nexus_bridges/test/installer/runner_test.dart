@@ -1096,7 +1096,8 @@ void main() {
           attention,
           contains('foreground = ::SetForegroundWindow(hwnd) != FALSE;'),
         );
-        expect(shell, isNot(contains('GetForegroundWindow')));
+        expect(_count(shell, 'GetForegroundWindow'), 1);
+        expect(attention, contains('::GetForegroundWindow() == hwnd) {'));
       });
 
       test('if refused, the taskbar button flashes until activated', () {

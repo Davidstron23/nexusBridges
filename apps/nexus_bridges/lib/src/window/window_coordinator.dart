@@ -171,8 +171,6 @@ final class WindowCoordinator {
     if (_disposed) return;
     if (!_modalOpen) _neutralFocus.requestFocus();
     if (_controller.state?.pickerOpen == true) return;
-    final lifecycle = WidgetsBinding.instance.lifecycleState;
-    if (lifecycle == AppLifecycleState.resumed) return;
     unawaited(_bringForward());
   }
 

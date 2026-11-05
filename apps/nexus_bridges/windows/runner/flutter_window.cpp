@@ -313,6 +313,10 @@ bool FlutterWindow::BringForAttention() {
   if (hwnd == nullptr) {
     return false;
   }
+  if (::IsWindowVisible(hwnd) && !::IsIconic(hwnd) &&
+      ::GetForegroundWindow() == hwnd) {
+    return true;
+  }
   if (!::IsWindowVisible(hwnd)) {
     ::ShowWindow(hwnd, SW_SHOWNA);
   }
