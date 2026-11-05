@@ -23,7 +23,7 @@ NodeState _state({
 }) {
   return NodeState(
     entries: [
-      entry(fingerprint: _fpA, name: 'PC principal', paired: true, mine: true),
+      entry(fingerprint: _fpA, name: 'PC principal', paired: true),
       entry(fingerprint: _fpB, name: 'Torre', paired: true),
       entry(
         fingerprint: _fpC,

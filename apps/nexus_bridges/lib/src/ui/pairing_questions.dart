@@ -9,6 +9,7 @@ import '../app_controller.dart';
 import '../l10n/app_strings.dart';
 import 'armed.dart';
 import 'format.dart';
+import 'shown_name.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
 import 'modal/modal_button.dart';
@@ -138,7 +139,12 @@ class _PairingQuestionViewState extends State<PairingQuestionView>
       layout: ModalViewLayout.titleFirst,
       title: strings.replaceTitle(
         glueFingerprint(
-          question.oldName,
+          shownPeerName(
+            strings,
+            widget.controller.state,
+            question.oldFingerprint,
+            question.oldName,
+          ),
           _shortFingerprint(question.oldFingerprint),
         ),
       ),

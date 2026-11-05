@@ -175,6 +175,7 @@ void main() {
           expect(panelRect.overlaps(tester.getRect(_row(_mineFp))), isTrue);
 
           for (final (label, glyph) in [
+            (strings.configureEllipsis, Glyphs.sliders),
             (strings.markAsForeign, Glyphs.someoneElse),
             (strings.unpairButton, Glyphs.unlink),
           ]) {
@@ -403,6 +404,14 @@ void main() {
           await tester.sendKeyEvent(LogicalKeyboardKey.enter);
           await tester.pumpAndSettle();
           expect(_panel, findsOneWidget);
+          expect(
+            _itemFill(tester, strings.configureEllipsis),
+            colors.controlHover,
+          );
+          expect(_itemFill(tester, strings.markAsForeign)?.a, 0);
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+          await tester.pumpAndSettle();
           expect(_itemFill(tester, strings.markAsForeign), colors.controlHover);
 
           await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);

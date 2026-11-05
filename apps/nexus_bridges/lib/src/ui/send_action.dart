@@ -4,13 +4,23 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../app_controller.dart';
 import '../drop/drop_controller.dart';
 import '../l10n/app_strings.dart';
+import 'destination/destination_controller.dart' show MenuOrigin;
+import 'destination/destination_menu.dart';
 import 'send_menu.dart';
 
 Future<void> startSendFiles(
   BuildContext context,
   AppController controller,
   String fingerprint,
-) {
+) async {
+  final open = DestinationScope.maybeOpen(context);
+  if (open != null && isMineEntry(controller, fingerprint)) {
+    final paths = await controller.pickFilesFor(fingerprint);
+    if (paths.isEmpty || !context.mounted) return;
+    open(fingerprint, paths, MenuOrigin.picker);
+    return;
+  }
+  if (!context.mounted) return;
   return _report(context, controller, controller.sendFiles(fingerprint));
 }
 
@@ -18,7 +28,15 @@ Future<void> startSendFolders(
   BuildContext context,
   AppController controller,
   String fingerprint,
-) {
+) async {
+  final open = DestinationScope.maybeOpen(context);
+  if (open != null && isMineEntry(controller, fingerprint)) {
+    final paths = await controller.pickFoldersFor(fingerprint);
+    if (paths.isEmpty || !context.mounted) return;
+    open(fingerprint, paths, MenuOrigin.picker);
+    return;
+  }
+  if (!context.mounted) return;
   return _report(context, controller, controller.sendFolders(fingerprint));
 }
 
@@ -35,18 +53,39 @@ Future<void> startSendTray(
   BuildContext context,
   AppController controller,
   String fingerprint,
-) {
+) async {
+  final open = DestinationScope.maybeOpen(context);
+  if (open != null && isMineEntry(controller, fingerprint)) {
+    open(fingerprint, const [], MenuOrigin.tray);
+    return;
+  }
   return _report(context, controller, controller.sendTray(fingerprint));
 }
 
 Future<void> applyDropOutcome(
   BuildContext context,
   AppController controller,
-  DropOutcome outcome,
-) async {
+  DropOutcome outcome, {
+  Offset? anchor,
+}) async {
   switch (outcome) {
     case DropSend(:final fingerprint, :final paths):
+      if (isMineEntry(controller, fingerprint)) {
+        final open = DestinationScope.maybeOpen(context);
+        if (open == null) {
+          _announce(context, AppStringsDelegate.of(context).sendUnavailable);
+          return;
+        }
+        open(fingerprint, paths, MenuOrigin.drop, anchor: anchor);
+        return;
+      }
       await startSendPaths(context, controller, fingerprint, paths);
+    case DropSendTo(:final fingerprint, :final paths, :final destination):
+      await _report(
+        context,
+        controller,
+        controller.sendPaths(fingerprint, paths, destination: destination),
+      );
     case DropTooMany():
       _announce(context, AppStringsDelegate.of(context).tooManySelected);
     case DropToTray(:final paths, :final count, :final blockedFingerprint):

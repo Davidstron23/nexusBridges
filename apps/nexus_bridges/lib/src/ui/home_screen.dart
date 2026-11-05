@@ -10,12 +10,17 @@ import '../drop/drop_zone.dart';
 import '../l10n/app_strings.dart';
 import 'activity_cards.dart';
 import 'attention.dart';
+import 'configure/configure_controller.dart';
+import 'configure/configure_panel.dart';
 import 'diagram/flow_diagram.dart';
 import 'home_layout.dart';
+import 'destination/destination_menu.dart';
 import 'device_list.dart';
 import 'incoming_cards.dart';
 import 'modal/timeline.dart';
 import 'network_strip.dart';
+import 'portal/portal_controller.dart';
+import 'portal/portal_panel.dart';
 import 'progress/selection_progress_painter.dart';
 import 'progress/time_left_scope.dart';
 import 'send_action.dart';
@@ -51,23 +56,45 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ValueNotifier<ColumnTab> _tab = ValueNotifier(ColumnTab.devices);
   final ValueNotifier<String?> _hovered = ValueNotifier(null);
+  late final PortalController _portal = PortalController(
+    app: widget.controller,
+    homeName: () =>
+        mounted ? AppStringsDelegate.of(context).homeFolder : 'Home',
+    anchorOf: (fingerprint) => _drop.zoneRect(fingerprint),
+  );
   late final DropController _drop = DropController(
     canSendTo: (fingerprint) =>
         widget.controller.state?.canSendTo(fingerprint) ?? false,
     isMine: _isMine,
     isBlocked: () => mounted && ModalRoute.of(context)?.isCurrent == false,
-    blocked: () => _settings.isOpen || _settings.closing,
+    blocked: () =>
+        _settings.isOpen ||
+        _settings.closing ||
+        _configure.isOpen ||
+        _configure.closing,
+    portal: _portal,
+    onPrefetch: (fingerprint) => widget.controller.prefetchPortal(fingerprint),
     onPortal: (fingerprint) =>
         unawaited(widget.controller.requestPortal(fingerprint)),
     onOutcome: (outcome) {
-      if (!mounted) return;
-      unawaited(applyDropOutcome(context, widget.controller, outcome));
+      final scoped = _scopeContext;
+      if (!mounted || scoped == null || !scoped.mounted) return;
+      unawaited(
+        applyDropOutcome(
+          scoped,
+          widget.controller,
+          outcome,
+          anchor: _drop.position,
+        ),
+      );
     },
   );
   StreamSubscription<DropEvent>? _dropSubscription;
   late final SettingsController _settings =
       widget.settings ?? SettingsController();
+  final ConfigureController _configure = ConfigureController();
   AttentionWatcher? _ownAttention;
+  BuildContext? _scopeContext;
 
   AttentionWatcher get _attention =>
       widget.attention ??
@@ -83,6 +110,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     widget.controller.addListener(_syncTab);
+    widget.controller.portalPrefetch = _portal.prefetch;
+    widget.controller.portalRequest = (fingerprint) =>
+        unawaited(_portal.request(fingerprint));
     _syncTab();
     _drop.addListener(_syncDropHover);
     _dropSubscription = (widget.dropEvents ?? MethodChannelDropEvents()).events
@@ -126,10 +156,14 @@ class _HomeScreenState extends State<HomeScreen> {
     unawaited(_dropSubscription?.cancel());
     _drop.removeListener(_syncDropHover);
     _drop.dispose();
+    widget.controller.portalPrefetch = null;
+    widget.controller.portalRequest = null;
+    _portal.dispose();
     widget.controller.removeListener(_syncTab);
     _tab.dispose();
     _hovered.dispose();
     if (widget.settings == null) _settings.dispose();
+    _configure.dispose();
     _ownAttention?.dispose();
     if (widget.neutralFocus == null) _neutral.dispose();
     super.dispose();
@@ -172,43 +206,84 @@ class _HomeScreenState extends State<HomeScreen> {
               controller: controller,
               settings: _settings,
               attention: _attention,
-              child: Scaffold(
-                body: Column(
-                  children: [
-                    ListenableBuilder(
-                      listenable: controller,
-                      builder: (context, _) {
-                        final strings = AppStringsDelegate.of(context);
-                        return _Header(
-                          controller: controller,
-                          onSettings: _settings.open,
-                          state: _failureMessage(controller, strings) == null
-                              ? controller.state
-                              : null,
-                        );
-                      },
-                    ),
-                    Expanded(
-                      child: ListenableBuilder(
-                        listenable: controller,
-                        builder: (context, body) {
-                          final strings = AppStringsDelegate.of(context);
-                          final failure = _failureMessage(controller, strings);
-                          if (failure == null) return body!;
-                          return _MessageWithRetry(
-                            message: failure,
-                            retryLabel: strings.retryButton,
-                            onRetry: controller.retry,
+              child: ConfigureScope(
+                controller: _configure,
+                child: Scaffold(
+                  body: ConfigureLayer(
+                    controller: controller,
+                    configure: _configure,
+                    child: DestinationLayer(
+                      controller: controller,
+                      cachedRoots: _portal.cachedRoots,
+                      child: Builder(
+                        builder: (layerContext) {
+                          _scopeContext = layerContext;
+                          return Stack(
+                            children: [
+                              Positioned.fill(
+                                child: Column(
+                                  children: [
+                                    ListenableBuilder(
+                                      listenable: controller,
+                                      builder: (context, _) {
+                                        final strings = AppStringsDelegate.of(
+                                          context,
+                                        );
+                                        return _Header(
+                                          controller: controller,
+                                          onSettings: () {
+                                            _configure.close(instant: true);
+                                            _settings.open();
+                                          },
+                                          state:
+                                              _failureMessage(
+                                                    controller,
+                                                    strings,
+                                                  ) ==
+                                                  null
+                                              ? controller.state
+                                              : null,
+                                        );
+                                      },
+                                    ),
+                                    Expanded(
+                                      child: ListenableBuilder(
+                                        listenable: controller,
+                                        builder: (context, body) {
+                                          final strings = AppStringsDelegate.of(
+                                            context,
+                                          );
+                                          final failure = _failureMessage(
+                                            controller,
+                                            strings,
+                                          );
+                                          if (failure == null) return body!;
+                                          return _MessageWithRetry(
+                                            message: failure,
+                                            retryLabel: strings.retryButton,
+                                            onRetry: controller.retry,
+                                          );
+                                        },
+                                        child: _Body(
+                                          controller: controller,
+                                          tab: _tab,
+                                          hovered: _hovered,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PortalHost(
+                                portal: _portal,
+                                controller: controller,
+                              ),
+                            ],
                           );
                         },
-                        child: _Body(
-                          controller: controller,
-                          tab: _tab,
-                          hovered: _hovered,
-                        ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),

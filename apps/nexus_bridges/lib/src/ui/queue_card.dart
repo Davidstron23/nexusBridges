@@ -12,6 +12,7 @@ import 'icons/glyphs.dart';
 import 'modal/timeline.dart';
 import 'progress/selection_progress_painter.dart';
 import 'progress/time_left_scope.dart';
+import 'shown_name.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -120,7 +121,12 @@ class _QueueCardState extends State<QueueCard> {
     final colors = NbColors.of(context);
     final queues = widget.queues;
     final controller = widget.controller;
-    final name = peerLabel(queues.peerName, queues.peerFingerprint);
+    final name = shownPeerName(
+      strings,
+      controller.state,
+      queues.peerFingerprint,
+      peerLabel(queues.peerName, queues.peerFingerprint),
+    );
     final all = _all;
     final pending = all
         .where((item) => item.state == QueueItemState.pending)
@@ -702,6 +708,17 @@ class _ItemRow extends StatelessWidget {
               for (final line in extra)
                 Text(
                   line,
+                  style: captionStyle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              if (item.destination != null &&
+                  (item.state == QueueItemState.done ||
+                      item.state == QueueItemState.notSent))
+                Text(
+                  strings.resultIn(
+                    item.destination!.display(homeName: strings.homeFolder),
+                  ),
                   style: captionStyle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

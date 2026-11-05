@@ -230,10 +230,27 @@ class AppController extends ChangeNotifier {
     return node.sendFolders(fingerprint);
   }
 
-  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+  Future<List<String>> pickFilesFor(String fingerprint) async {
+    final node = _node;
+    if (node == null) return const [];
+    return node.pickFilesFor(fingerprint);
+  }
+
+  Future<List<String>> pickFoldersFor(String fingerprint) async {
+    final node = _node;
+    if (node == null) return const [];
+    return node.pickFoldersFor(fingerprint);
+  }
+
+  Future<SendResult> sendPaths(
+    String fingerprint,
+    List<String> paths, {
+    SharedFolderDestination? destination,
+  }) async {
     final node = _node;
     if (node == null) return SendResult.unavailable;
-    return node.sendPaths(fingerprint, paths);
+    if (destination == null) return node.sendPaths(fingerprint, paths);
+    return node.sendPaths(fingerprint, paths, destination: destination);
   }
 
   void cancelQueueItem(String itemId) {
@@ -262,13 +279,86 @@ class AppController extends ChangeNotifier {
     _node?.clearTray();
   }
 
-  Future<SendResult> sendTray(String fingerprint) async {
+  Future<SendResult> sendTray(
+    String fingerprint, {
+    SharedFolderDestination? destination,
+  }) async {
     final node = _node;
     if (node == null) return SendResult.unavailable;
-    return node.sendTray(fingerprint);
+    if (destination == null) return node.sendTray(fingerprint);
+    return node.sendTray(fingerprint, destination: destination);
   }
 
-  Future<void> requestPortal(String fingerprint) async {}
+  Future<RemoteListing> listRemoteRoots(
+    String fingerprint, {
+    List<SavedDestination> check = const [],
+  }) async {
+    final node = _node;
+    if (node == null) {
+      return const RemoteListingFailed(BrowseFailure.notVisible);
+    }
+    return node.listRemoteRoots(fingerprint, check: check);
+  }
+
+  Future<RemoteListing> listRemoteFolders(
+    String fingerprint,
+    String rootId,
+    List<String> path,
+  ) async {
+    final node = _node;
+    if (node == null) {
+      return const RemoteListingFailed(BrowseFailure.notVisible);
+    }
+    return node.listRemoteFolders(fingerprint, rootId, path);
+  }
+
+  Future<ShareAddOutcome> addShare(String fingerprint) async {
+    final node = _node;
+    if (node == null) return const ShareRefused(ShareRefusal.missing);
+    return node.addShare(fingerprint);
+  }
+
+  Future<ShareAddOutcome> confirmShare(
+    String fingerprint,
+    String pendingId,
+  ) async {
+    final node = _node;
+    if (node == null) return const ShareRefused(ShareRefusal.missing);
+    return node.confirmShare(fingerprint, pendingId);
+  }
+
+  void cancelPendingShare(String pendingId) {
+    _node?.cancelPendingShare(pendingId);
+  }
+
+  Future<void> removeShare(String fingerprint, String rootId) {
+    return _node?.removeShare(fingerprint, rootId) ?? Future<void>.value();
+  }
+
+  Future<void> refreshShares(String fingerprint) {
+    return _node?.refreshShares(fingerprint) ?? Future<void>.value();
+  }
+
+  void setAlias(String fingerprint, String alias) {
+    _node?.setAlias(fingerprint, alias);
+  }
+
+  FavoriteResult addFavorite(String fingerprint, SavedDestination destination) {
+    return _node?.addFavorite(fingerprint, destination) ?? FavoriteResult.full;
+  }
+
+  void removeFavorite(String fingerprint, int index) {
+    _node?.removeFavorite(fingerprint, index);
+  }
+
+  void Function(String fingerprint)? portalPrefetch;
+  void Function(String fingerprint)? portalRequest;
+
+  void prefetchPortal(String fingerprint) => portalPrefetch?.call(fingerprint);
+
+  Future<void> requestPortal(String fingerprint) async {
+    portalRequest?.call(fingerprint);
+  }
 
   void cancelSending() {
     _node?.cancelSending();

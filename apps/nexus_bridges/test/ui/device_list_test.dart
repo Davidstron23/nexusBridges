@@ -662,31 +662,31 @@ void main() {
         'visible and paired: Send is active and its menu calls sendFiles or '
         'sendFolders',
         (tester) async {
-          final controller = await _pumpList(tester, code, [_mine]);
+          final controller = await _pumpList(tester, code, [_foreign]);
 
           expect(
             tester
-                .widget<ButtonStyleButton>(_sendFinder(strings, _mineFp))
+                .widget<ButtonStyleButton>(_sendFinder(strings, _foreignFp))
                 .onPressed,
             isNotNull,
           );
           expect(find.text(strings.sendNeedsVisible), findsNothing);
           expect(find.text(strings.sendNeedsPairAgain), findsNothing);
 
-          await tester.tap(_sendFinder(strings, _mineFp));
+          await tester.tap(_sendFinder(strings, _foreignFp));
           await tester.pumpAndSettle();
           expect(controller.calls, isEmpty);
           await tester.tap(find.text(strings.sendFilesOption));
           await tester.pumpAndSettle();
-          expect(controller.calls, ['sendFiles $_mineFp']);
+          expect(controller.calls, ['sendFiles $_foreignFp']);
 
-          await tester.tap(_sendFinder(strings, _mineFp));
+          await tester.tap(_sendFinder(strings, _foreignFp));
           await tester.pumpAndSettle();
           await tester.tap(find.text(strings.sendFoldersOption));
           await tester.pumpAndSettle();
           expect(controller.calls, [
-            'sendFiles $_mineFp',
-            'sendFolders $_mineFp',
+            'sendFiles $_foreignFp',
+            'sendFolders $_foreignFp',
           ]);
         },
       );

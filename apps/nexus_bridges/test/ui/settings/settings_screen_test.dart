@@ -554,7 +554,7 @@ void main() {
           tester,
         ) async {
           final (controller, settings, events) = await pump(tester);
-          final row = tester.getCenter(find.byKey(ValueKey(_fpA)));
+          final row = tester.getCenter(find.byKey(ValueKey(_fpB)));
           await openSettings(tester, strings);
 
           settings.close();

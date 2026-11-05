@@ -4,6 +4,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../app_controller.dart';
 import '../drop/drop_zone.dart';
 import '../l10n/app_strings.dart';
+import 'configure/configure_controller.dart';
 import 'icons/device_disc.dart';
 import 'icons/glyphs.dart';
 import 'row_menu.dart';
@@ -166,6 +167,9 @@ class _DeviceRowState extends State<DeviceRow> {
     final caption = NbText.caption.copyWith(color: colors.textWeak);
     final bodySm = NbText.bodySm.copyWith(color: colors.text);
     final possiblyReplaces = entry.possiblyReplaces;
+    final configure = ConfigureScope.read(context);
+    final configured =
+        ConfigureScope.shownFingerprint(context) == entry.fingerprint;
     final explanation = sendExplanation(strings, widget.state, entry);
     final (String chipLabel, ChipTone chipTone) = entry.paired
         ? (
@@ -222,7 +226,7 @@ class _DeviceRowState extends State<DeviceRow> {
           valueListenable: hovered,
           builder: (context, current, child) => TweenAnimationBuilder<Color?>(
             tween: ColorTween(
-              end: current == entry.fingerprint || _menuOpen
+              end: current == entry.fingerprint || _menuOpen || configured
                   ? colors.surfaceWeak
                   : colors.surfaceWeak.withValues(alpha: 0),
             ),
@@ -264,6 +268,13 @@ class _DeviceRowState extends State<DeviceRow> {
                               onOpenChanged: (open) =>
                                   setState(() => _menuOpen = open),
                               entries: [
+                                if (configure != null)
+                                  RowMenuEntry(
+                                    label: strings.configureEllipsis,
+                                    glyph: Glyphs.sliders,
+                                    onSelected: () =>
+                                        configure.open(entry.fingerprint),
+                                  ),
                                 RowMenuEntry(
                                   label: entry.mine
                                       ? strings.markAsForeign

@@ -742,11 +742,11 @@ void main() {
 
         Navigator.of(tester.element(find.text('modal'))).pop();
         await tester.pumpAndSettle();
-        events.add(DropEnter(_row(tester, _fpA)));
+        events.add(DropEnter(_row(tester, _fpB)));
         await tester.pump();
         await tester.pump(_fade);
         expect(find.text(strings.dragHint), findsOneWidget);
-        events.add(DropDone(_row(tester, _fpA), _paths, 2));
+        events.add(DropDone(_row(tester, _fpB), _paths, 2));
         await _frames(tester);
         expect(controller.sendPathsCalls, [_paths]);
       });

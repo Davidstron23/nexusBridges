@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/drop/drop_events.dart';
 import 'package:nexus_bridges/src/drop/drop_zone.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/destination/destination_menu.dart';
 import 'package:nexus_bridges/src/ui/diagram/flow_painter.dart';
 import 'package:nexus_bridges/src/ui/tray_panel.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
@@ -189,7 +190,7 @@ void main() {
         await pumpHome(tester, controller, code, dropEvents: events);
 
         expect(find.byType(DragTip), findsNothing);
-        events.add(DropEnter(_row(tester, _fpA)));
+        events.add(DropEnter(_row(tester, _fpB)));
         await tester.pump();
         await tester.pump(_fade);
 
@@ -197,13 +198,13 @@ void main() {
         expect(_rowOpacity(tester, _fpC), 1);
         expect(_rowOpacity(tester, _fpD), lessThan(1));
 
-        events.add(DropDone(_row(tester, _fpA), _paths, 2));
+        events.add(DropDone(_row(tester, _fpB), _paths, 2));
         await tester.pump();
         await tester.pump(_fade);
         await tester.pump(_fade);
 
         expect(find.text(strings.dragHint), findsNothing);
-        expect(controller.calls.last, startsWith('sendPaths $_fpA'));
+        expect(controller.calls.last, startsWith('sendPaths $_fpB'));
       });
 
       testWidgets('reduced motion shows the hint at once', (tester) async {
@@ -247,31 +248,31 @@ void main() {
       testWidgets('on its row in the list it sends the paths', (tester) async {
         final (controller, events) = await _pump(tester, code, _state());
 
-        events.add(DropEnter(_row(tester, _fpA)));
+        events.add(DropEnter(_row(tester, _fpB)));
         await tester.pump(_fade);
-        events.add(DropDone(_row(tester, _fpA), _paths, 2));
+        events.add(DropDone(_row(tester, _fpB), _paths, 2));
         await _settleFrames(tester);
 
-        expect(controller.calls, ['sendPaths $_fpA ${_paths.join('|')}']);
+        expect(controller.calls, ['sendPaths $_fpB ${_paths.join('|')}']);
         expect(controller.addToTrayCalls, isEmpty);
       });
 
-      testWidgets('with queues to A, dropping on A sends and on B does not', (
+      testWidgets('with queues to B, dropping on B sends and on A does not', (
         tester,
       ) async {
         final (controller, events) = await _pump(
           tester,
           code,
-          _state(sendingTo: _fpA),
+          _state(sendingTo: _fpB),
         );
 
-        events.add(DropDone(_row(tester, _fpA), _paths, 2));
-        await _settleFrames(tester);
         events.add(DropDone(_row(tester, _fpB), _paths, 2));
+        await _settleFrames(tester);
+        events.add(DropDone(_row(tester, _fpA), _paths, 2));
         await _settleFrames(tester);
 
         expect(controller.sendPathsCalls, hasLength(1));
-        expect(controller.calls.first, startsWith('sendPaths $_fpA'));
+        expect(controller.calls.first, startsWith('sendPaths $_fpB'));
         expect(controller.addToTrayCalls, hasLength(1));
       });
 
@@ -279,7 +280,7 @@ void main() {
         final (controller, events) = await _pump(tester, code, _state());
         controller.sendPathsResult = SendResult.started;
 
-        events.add(DropDone(_row(tester, _fpA), _paths, 2));
+        events.add(DropDone(_row(tester, _fpB), _paths, 2));
         await _settleFrames(tester);
 
         expect(find.byType(SnackBar), findsNothing);
@@ -289,7 +290,7 @@ void main() {
         final (controller, events) = await _pump(tester, code, _state());
         controller.sendPathsResult = SendResult.unavailable;
 
-        events.add(DropDone(_row(tester, _fpA), _paths, 2));
+        events.add(DropDone(_row(tester, _fpB), _paths, 2));
         await _settleFrames(tester);
 
         expect(find.text(strings.sendUnavailable), findsOneWidget);
@@ -470,7 +471,7 @@ void main() {
         final (controller, events) = await _pump(tester, code, _state());
         final thousand = many.take(1000).toList();
 
-        events.add(DropDone(_row(tester, _fpA), thousand, 1000));
+        events.add(DropDone(_row(tester, _fpB), thousand, 1000));
         await _settleFrames(tester);
 
         expect(controller.sendPathsCalls, [thousand]);
@@ -509,10 +510,13 @@ void main() {
 
         events.add(DropDone(_disc(tester, _fpA), _paths, 2));
         await _settleFrames(tester);
-        expect(controller.calls, [
-          'requestPortal $_fpA',
-          'sendPaths $_fpA ${_paths.join('|')}',
-        ]);
+        expect(controller.calls.first, 'requestPortal $_fpA');
+        expect(
+          controller.calls.where((call) => call.startsWith('requestPortal')),
+          hasLength(1),
+        );
+        expect(controller.sendPathsCalls, isEmpty);
+        expect(find.byType(DestinationMenu), findsOneWidget);
       });
 
       testWidgets('leaving at 0.3 s cancels it', (tester) async {

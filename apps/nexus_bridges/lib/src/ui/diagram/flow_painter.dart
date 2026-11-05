@@ -161,6 +161,7 @@ class FlowPainter extends CustomPainter {
     this.dragSpin,
     this.lit = const {},
     this.hot,
+    this.configured,
   }) : super(
          repaint: Listenable.merge([
            clock,
@@ -185,6 +186,7 @@ class FlowPainter extends CustomPainter {
   final Animation<double>? dragSpin;
   final Set<String> lit;
   final String? hot;
+  final String? configured;
 
   final Map<_TextKey, TextPainter> _texts = {};
 
@@ -589,7 +591,10 @@ class FlowPainter extends CustomPainter {
       Color ink,
       Color? halo,
     ) = switch (state) {
-      LinkState.idle => (colors.border, 1.0, colors.text, null),
+      LinkState.idle =>
+        peer.fingerprint == configured
+            ? (colors.primary, 2.0, colors.primaryInk, colors.primaryWeak)
+            : (colors.border, 1.0, colors.text, null),
       LinkState.waiting => (colors.primary, 1.5, colors.primaryInk, null),
       LinkState.asking => (
         colors.warningRing,
@@ -887,5 +892,6 @@ class FlowPainter extends CustomPainter {
       !identical(oldDelegate.dragFade, dragFade) ||
       !identical(oldDelegate.dragSpin, dragSpin) ||
       !setEquals(oldDelegate.lit, lit) ||
-      oldDelegate.hot != hot;
+      oldDelegate.hot != hot ||
+      oldDelegate.configured != configured;
 }
