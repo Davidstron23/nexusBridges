@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'attention.dart';
 import 'icons/glyphs.dart';
 import 'modal/timeline.dart';
 import 'theme/app_theme.dart';
@@ -54,7 +55,8 @@ class RowMenu extends StatefulWidget {
   State<RowMenu> createState() => _RowMenuState();
 }
 
-class _RowMenuState extends State<RowMenu> with SingleTickerProviderStateMixin {
+class _RowMenuState extends State<RowMenu>
+    with SingleTickerProviderStateMixin, CloseOnAttention<RowMenu> {
   final MenuController _menu = MenuController();
   final FocusNode _triggerFocus = FocusNode(debugLabel: 'RowMenu trigger');
   final FocusScopeNode _scope = FocusScopeNode(debugLabel: 'RowMenu');
@@ -87,6 +89,11 @@ class _RowMenuState extends State<RowMenu> with SingleTickerProviderStateMixin {
 
   void _onStatus(AnimationStatus status) {
     if (mounted) setState(() {});
+  }
+
+  @override
+  void closeForAttention() {
+    if (_open) _menu.close();
   }
 
   void _toggle({required bool keyboard}) {

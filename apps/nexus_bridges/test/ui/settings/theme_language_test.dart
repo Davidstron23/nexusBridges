@@ -27,12 +27,14 @@ Future<(FakeAppController, FakeWindowHost)> _pumpApp(
   String code = 'es',
   ThemeChoice theme = ThemeChoice.dark,
   NodeState? state,
+  bool closeToTray = true,
 }) async {
   setSize(tester, const Size(1200, 800));
   final controller = FakeAppController(
     state: state ?? settingsState(),
     languageCode: code,
     theme: theme,
+    closeToTray: closeToTray,
   );
   final host = FakeWindowHost();
   await tester.pumpWidget(NexusBridgesApp(controller, windowHost: host));
@@ -306,6 +308,7 @@ void main() {
       final en = stringsFor('en');
       final (controller, _) = await _pumpApp(
         tester,
+        closeToTray: false,
         state: NodeState(
           transferInProgress: true,
           outgoing: outgoingView(),

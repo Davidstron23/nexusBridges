@@ -143,18 +143,28 @@ class _CardHeader extends StatelessWidget {
 }
 
 class _Buttons extends StatelessWidget {
-  const _Buttons({required this.children});
+  const _Buttons({required this.children, this.order});
 
   final List<Widget> children;
+  final List<int>? order;
 
   @override
   Widget build(BuildContext context) {
-    return OverflowBar(
-      spacing: 8,
-      overflowSpacing: 8,
-      alignment: MainAxisAlignment.end,
-      overflowAlignment: OverflowBarAlignment.end,
-      children: children,
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: OverflowBar(
+        spacing: 8,
+        overflowSpacing: 8,
+        alignment: MainAxisAlignment.end,
+        overflowAlignment: OverflowBarAlignment.end,
+        children: [
+          for (var i = 0; i < children.length; i++)
+            FocusTraversalOrder(
+              order: NumericFocusOrder((order?[i] ?? i + 1).toDouble()),
+              child: children[i],
+            ),
+        ],
+      ),
     );
   }
 }
@@ -494,6 +504,7 @@ class _FolderQuestionCard extends StatelessWidget {
           ],
           const SizedBox(height: 12),
           _Buttons(
+            order: withCaution ? const [2, 1] : null,
             children: withCaution
                 ? [
                     OutlinedButton(

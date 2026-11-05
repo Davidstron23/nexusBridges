@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 const String _mainPath = 'windows/runner/main.cpp';
 const String _windowPath = 'windows/runner/win32_window.cpp';
 const String _flutterWindowPath = 'windows/runner/flutter_window.cpp';
+const String _trayIconPath = 'windows/runner/tray_icon.cpp';
+const String _trayIconHeaderPath = 'windows/runner/tray_icon.h';
 const String _dropTargetPath = 'windows/runner/drop_target.cpp';
 const String _dropTargetHeaderPath = 'windows/runner/drop_target.h';
 const String _cmakePath = 'windows/runner/CMakeLists.txt';
@@ -58,6 +60,22 @@ String _caseBlock(String source, String message) {
   final end = source.indexOf(_nextCase, start + 1);
   expect(end, isNonNegative, reason: 'no case after $message');
   return source.substring(start, end);
+}
+
+String _functionBody(String source, String signature) {
+  final open = _indexOf(source, '{', _indexOf(source, signature));
+  var depth = 0;
+  for (var i = open; i < source.length; i++) {
+    if (source[i] == '{') depth++;
+    if (source[i] == '}') depth--;
+    if (depth == 0) return source.substring(open + 1, i);
+  }
+  fail('unbalanced braces after $signature');
+}
+
+String _taskbarBlock(String source) {
+  final start = _indexOf(source, 'message == taskbar_created_');
+  return source.substring(start, _indexOf(source, 'switch (message)', start));
 }
 
 void main() {
@@ -154,12 +172,13 @@ void main() {
       final restoreEnd = iconic + _restoreIfMinimized.length;
       final front = _indexOf(block, '::SetForegroundWindow(w);', restoreEnd);
       expect(block.substring(restoreEnd, front).trim(), isEmpty);
-      expect(_count(source, 'ShowWindow('), 1);
+      expect(_count(source, 'ShowWindow('), 2);
       expect(_count(source, 'IsIconic('), 1);
       expect(_count(source, 'SetForegroundWindow('), 1);
       expect(_count(source, 'SW_RESTORE'), 1);
+      expect(_count(source, 'SW_SHOW'), 1);
       expect(
-        source.contains(RegExp(r'SW_(SHOW|SHOWNORMAL|NORMAL|MAXIMIZE)\b')),
+        source.contains(RegExp(r'SW_(SHOWNORMAL|NORMAL|MAXIMIZE)\b')),
         isFalse,
       );
     });
@@ -761,6 +780,368 @@ void main() {
           expect(text, isNot(contains(banned)), reason: '${file.path} $banned');
         }
       }
+    });
+  });
+
+  group('T8 and T9: the system tray in the runner', () {
+    late String shell;
+    late String shellRaw;
+    late String tray;
+    late String trayRaw;
+    late String trayHeaderRaw;
+
+    setUpAll(() {
+      shellRaw = File(_flutterWindowPath).readAsStringSync();
+      shell = _withoutLineComments(shellRaw);
+      trayRaw = File(_trayIconPath).readAsStringSync();
+      tray = _withoutLineComments(trayRaw);
+      trayHeaderRaw = File(_trayIconHeaderPath).readAsStringSync();
+    });
+
+    group('E885 the window channel and the icon (RF-521 to RF-527)', () {
+      test('the channel is nexus_bridges/window', () {
+        expect(shell, contains('"nexus_bridges/window"'));
+      });
+
+      test('WM_CLOSE is handled before Flutter and only when attached', () {
+        final close = _indexOf(shell, 'case WM_CLOSE:');
+        expect(close, lessThan(_indexOf(shell, 'HandleTopLevelWindowProc(')));
+        final block = _caseBlock(shell, 'WM_CLOSE');
+        expect(block, contains('attached_'));
+        expect(block, contains('SendEvent("closeRequested")'));
+        expect(block, contains('return 0;'));
+        expect(block, isNot(contains('DestroyWindow')));
+        expect(block, isNot(contains('SW_HIDE')));
+        expect(
+          block.indexOf('attached_'),
+          lessThan(block.indexOf('SendEvent')),
+        );
+      });
+
+      test('TaskbarCreated is registered and handled with its own if', () {
+        expect(
+          shell,
+          contains(
+            'taskbar_created_ = ::RegisterWindowMessageW('
+            'L"TaskbarCreated");',
+          ),
+        );
+        final block = _taskbarBlock(shell);
+        expect(block, contains('AddTrayIcon()'));
+        expect(block, contains('StartTrayRetry()'));
+        expect(block, contains('ReportTrayVisibility()'));
+        expect(block, contains('tray_enabled_'));
+        expect(
+          block.indexOf('tray_enabled_'),
+          lessThan(block.indexOf('AddTrayIcon()')),
+        );
+        expect(
+          _indexOf(shell, 'message == taskbar_created_'),
+          lessThan(_indexOf(shell, 'case WM_CLOSE:')),
+        );
+      });
+
+      test('the icon is added, versioned and deleted', () {
+        expect(tray, contains('NIM_ADD'));
+        expect(tray, contains('NIM_SETVERSION'));
+        expect(tray, contains('NOTIFYICON_VERSION_4'));
+        expect(tray, contains('NIM_DELETE'));
+        expect(
+          _indexOf(tray, 'NIM_ADD'),
+          lessThan(_indexOf(tray, 'NIM_SETVERSION')),
+        );
+      });
+
+      test('the icon carries the tooltip and follows the system scale', () {
+        final add = _functionBody(tray, 'bool TrayIcon::Add(');
+        expect(add, contains('NIF_TIP'));
+        expect(add, contains('NIF_SHOWTIP'));
+        expect(add, contains('NIF_MESSAGE'));
+        expect(tray, contains('GetDpiForSystem()'));
+        expect(_caseBlock(shell, 'WM_SETTINGCHANGE'), contains('RefreshIcon'));
+        expect(shell, contains('case WM_DPICHANGED:'));
+      });
+
+      test('a click, a double click and the keyboard open the window and '
+          'that path never hides it', () {
+        final block = _caseBlock(shell, 'WM_LBUTTONDBLCLK');
+        expect(shell, contains('case NIN_SELECT:'));
+        expect(shell, contains('case NIN_KEYSELECT:'));
+        expect(block, contains('ShowAndActivate();'));
+        final fallThrough = shell.substring(
+          _indexOf(shell, 'case NIN_SELECT:'),
+          _indexOf(shell, 'case WM_LBUTTONDBLCLK:'),
+        );
+        expect(fallThrough, isNot(contains('break')));
+        final body = _functionBody(
+          shell,
+          'void FlutterWindow::ShowAndActivate(',
+        );
+        expect(body, isNot(contains('SW_HIDE')));
+        expect(body, contains('IsWindowVisible'));
+        expect(body, contains('SW_SHOW'));
+        expect(body, contains('SW_RESTORE'));
+        expect(_count(body, 'SetForegroundWindow('), 1);
+        expect(block, isNot(contains('SW_HIDE')));
+      });
+
+      test('SW_HIDE only exists in the hide method', () {
+        expect(_count(shell, 'SW_HIDE'), 1);
+        final hide = _indexOf(shell, 'method == "hide"');
+        final show = _indexOf(shell, 'method == "show"');
+        final at = _indexOf(shell, 'SW_HIDE');
+        expect(at, greaterThan(hide));
+        expect(at, lessThan(show));
+      });
+
+      test('the context menu goes to the foreground, tracks and posts '
+          'WM_NULL', () {
+        expect(_caseBlock(shell, 'WM_CONTEXTMENU'), contains('ShowTrayMenu('));
+        final body = _functionBody(shell, 'void FlutterWindow::ShowTrayMenu(');
+        final front = _indexOf(body, 'SetForegroundWindow(hwnd)');
+        final track = _indexOf(body, 'TrackPopupMenuEx(');
+        final post = _indexOf(body, 'PostMessage(hwnd, WM_NULL, 0, 0)');
+        expect(front, lessThan(track));
+        expect(track, lessThan(post));
+      });
+
+      test('a session end removes the icon', () {
+        expect(_caseBlock(shell, 'WM_ENDSESSION'), contains('tray_.Remove()'));
+      });
+
+      test('main.cpp shows a hidden window before bringing it forward', () {
+        final block = _earlyExit(source);
+        final visible = _indexOf(block, 'if (!::IsWindowVisible(w))');
+        final show = _indexOf(block, '::ShowWindow(w, SW_SHOW);', visible);
+        final front = _indexOf(block, '::SetForegroundWindow(w);', show);
+        expect(front, greaterThan(show));
+      });
+
+      test('the new C++ has no comments', () {
+        expect(trayRaw, isNot(contains('//')));
+        expect(trayRaw, isNot(contains('/*')));
+        expect(trayHeaderRaw, isNot(contains('//')));
+        expect(trayHeaderRaw, isNot(contains('/*')));
+        for (final name in const [
+          'void FlutterWindow::ShowTrayMenu(',
+          'void FlutterWindow::ShowAndActivate(',
+          'bool FlutterWindow::BringForAttention(',
+          'bool FlutterWindow::HandleShellCall(',
+          'void FlutterWindow::ReportTrayVisibility(',
+        ]) {
+          expect(_functionBody(shellRaw, name), isNot(contains('//')));
+        }
+      });
+
+      test('the C++ has no texts of its own', () {
+        final wide = RegExp(r'L"[^"]*"');
+        expect(wide.hasMatch(tray), isFalse);
+        expect(wide.hasMatch(trayHeaderRaw), isFalse);
+        expect(wide.allMatches(shell).map((match) => match.group(0)), [
+          'L"TaskbarCreated"',
+        ]);
+      });
+
+      test('the build knows the new file and its library', () {
+        final cmake = File(_cmakePath).readAsStringSync();
+        expect(cmake, contains('"tray_icon.cpp"'));
+        expect(cmake, contains('"shell32.lib"'));
+      });
+    });
+
+    group('E887 the retries of the icon (RF-522)', () {
+      test('every 2 s up to 5 times', () {
+        expect(shell, contains('kTrayRetryInterval = 2000;'));
+        expect(shell, contains('kTrayMaxRetries = 5;'));
+        final start = _functionBody(
+          shell,
+          'void FlutterWindow::StartTrayRetry(',
+        );
+        expect(start, contains('tray_retries_ = 0;'));
+        expect(start, contains('SetTimer('));
+        expect(start, contains('kTrayRetryInterval'));
+      });
+
+      test('the timer retries, stops and reports the change', () {
+        final block = _caseBlock(shell, 'WM_TIMER');
+        expect(block, contains('kTrayRetryTimer'));
+        expect(block, contains('++tray_retries_'));
+        expect(block, contains('AddTrayIcon()'));
+        expect(block, contains('tray_retries_ >= kTrayMaxRetries'));
+        expect(block, contains('StopTrayRetry()'));
+        expect(block, contains('ReportTrayVisibility()'));
+      });
+
+      test('setTray starts them when the icon does not go in, and answers '
+          'with what is visible', () {
+        final call = shell.substring(
+          _indexOf(shell, 'method == "setTray"'),
+          _indexOf(shell, 'method == "showTrayHint"'),
+        );
+        expect(call, contains('if (!AddTrayIcon())'));
+        expect(call, contains('StartTrayRetry();'));
+        expect(call, contains('tray_.Remove();'));
+        expect(
+          call,
+          contains('result->Success(flutter::EncodableValue(tray_.visible()))'),
+        );
+      });
+
+      test('a failed NIM_ADD tries NIM_MODIFY before giving up', () {
+        final add = _functionBody(tray, 'bool TrayIcon::Add(');
+        expect(_indexOf(add, 'NIM_ADD'), lessThan(_indexOf(add, 'NIM_MODIFY')));
+      });
+
+      test('a change is reported once, with the event of the plan', () {
+        final body = _functionBody(
+          shell,
+          'void FlutterWindow::ReportTrayVisibility(',
+        );
+        expect(body, contains('visible == tray_visible_reported_'));
+        expect(body, contains('"trayVisibility"'));
+        expect(body, contains('"visible"'));
+      });
+
+      test('minimize minimizes', () {
+        final call = shell.substring(
+          _indexOf(shell, 'method == "minimize"'),
+          _indexOf(shell, 'method == "attention"'),
+        );
+        expect(call, contains('SW_MINIMIZE'));
+      });
+    });
+
+    group('E889 menu, session end, quit and second instance (RF-525 to '
+        'RF-527)', () {
+      test('the menu uses the texts of Dart', () {
+        final body = _functionBody(shell, 'void FlutterWindow::ShowTrayMenu(');
+        expect(body, contains('tray_open_.c_str()'));
+        expect(body, contains('tray_exit_.c_str()'));
+        expect(body, contains('ShowAndActivate();'));
+        expect(body, contains('SendEvent("exitRequested");'));
+        expect(body, contains('DestroyMenu(menu)'));
+      });
+
+      test('WM_QUERYENDSESSION accepts the Restart Manager', () {
+        final block = _caseBlock(shell, 'WM_QUERYENDSESSION');
+        expect(block, contains('ENDSESSION_CLOSEAPP'));
+        expect(block, contains('return TRUE;'));
+      });
+
+      test('WM_ENDSESSION from the Restart Manager goes through the ordered '
+          'exit and keeps the icon', () {
+        final block = _caseBlock(shell, 'WM_ENDSESSION');
+        final closeApp = _indexOf(block, 'ENDSESSION_CLOSEAPP');
+        final event = _indexOf(block, 'SendEvent("exitRequested");');
+        final leave = _indexOf(block, 'return 0;', event);
+        final remove = _indexOf(block, 'tray_.Remove()');
+        expect(closeApp, lessThan(event));
+        expect(leave, lessThan(remove));
+      });
+
+      test('WM_ENDSESSION looks at wparam first', () {
+        final block = _caseBlock(shell, 'WM_ENDSESSION');
+        expect(
+          _indexOf(block, 'wparam != 0'),
+          lessThan(_indexOf(block, 'ENDSESSION_CLOSEAPP')),
+        );
+      });
+
+      test('quit posts kQuitMessage, which removes the icon first', () {
+        final call = shell.substring(_indexOf(shell, 'method == "quit"'));
+        expect(call, contains('attached_ = false;'));
+        expect(call, contains('PostMessage(hwnd, kQuitMessage, 0, 0)'));
+        final block = _caseBlock(shell, 'kQuitMessage');
+        expect(
+          _indexOf(block, 'tray_.Remove()'),
+          lessThan(_indexOf(block, 'DestroyWindow(hwnd)')),
+        );
+      });
+
+      test('the window destruction removes the icon and stops the timer', () {
+        final body = _functionBody(shell, 'void FlutterWindow::OnDestroy(');
+        expect(body, contains('StopTrayRetry();'));
+        expect(body, contains('tray_.Remove();'));
+        expect(body, contains('attached_ = false;'));
+      });
+
+      test('main.cpp uses two ifs, no else if', () {
+        final block = _earlyExit(source);
+        final visible = _indexOf(block, 'IsWindowVisible');
+        final iconic = _indexOf(block, 'IsIconic', visible);
+        expect(block.substring(visible, iconic), isNot(contains('else')));
+      });
+    });
+
+    group('E892 attention respects the foreground lock (RF-529)', () {
+      late String attention;
+
+      setUpAll(() {
+        attention = _functionBody(
+          shell,
+          'bool FlutterWindow::BringForAttention(',
+        );
+      });
+
+      test('it shows without activating', () {
+        expect(attention, contains('::ShowWindow(hwnd, SW_SHOWNA);'));
+        expect(attention, contains('::ShowWindow(hwnd, SW_SHOWNOACTIVATE);'));
+        expect(attention, isNot(contains('SW_RESTORE')));
+        expect(attention, isNot(contains(RegExp(r'SW_SHOW\b'))));
+      });
+
+      test('it asks once and uses the answer of Windows', () {
+        expect(_count(attention, 'SetForegroundWindow('), 1);
+        expect(
+          attention,
+          contains('foreground = ::SetForegroundWindow(hwnd) != FALSE;'),
+        );
+        expect(shell, isNot(contains('GetForegroundWindow')));
+      });
+
+      test('if refused, the taskbar button flashes until activated', () {
+        expect(attention, contains('if (!foreground)'));
+        expect(attention, contains('FLASHW_TRAY | FLASHW_TIMERNOFG'));
+        expect(attention, contains('::FlashWindowEx(&flash);'));
+      });
+
+      test('the method answers with foreground', () {
+        final call = shell.substring(
+          _indexOf(shell, 'method == "attention"'),
+          _indexOf(shell, 'method == "quit"'),
+        );
+        expect(call, contains('"foreground"'));
+        expect(call, contains('BringForAttention()'));
+      });
+
+      test('only attention and the two user actions touch the foreground', () {
+        expect(_count(shell, 'SetForegroundWindow('), 3);
+      });
+
+      test('no runner file contains a trick against the lock', () {
+        const banned = [
+          'AttachThreadInput',
+          'keybd_event',
+          'SendInput',
+          'SwitchToThisWindow',
+          'LockSetForegroundWindow',
+          'AllowSetForegroundWindow',
+          'SPI_SETFOREGROUNDLOCKTIMEOUT',
+          'HWND_TOPMOST',
+          'BringWindowToTop',
+        ];
+        final files = Directory('windows/runner')
+            .listSync()
+            .whereType<File>()
+            .where((file) => RegExp(r'\.(cpp|h)$').hasMatch(file.path));
+        expect(files, isNotEmpty);
+        for (final file in files) {
+          final text = file.readAsStringSync();
+          for (final word in banned) {
+            expect(text, isNot(contains(word)), reason: file.path);
+          }
+        }
+      });
     });
   });
 }

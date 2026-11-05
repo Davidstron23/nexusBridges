@@ -1112,6 +1112,20 @@ final class AppStringsEn implements AppStrings {
       'The X will close the app. If a transfer is running, it will ask you.';
 
   @override
+  String get systemTrayOpen => 'Open NexusBridges';
+
+  @override
+  String get systemTrayExit => 'Quit';
+
+  @override
+  String get systemTrayHintTitle => 'NexusBridges is still running';
+
+  @override
+  String get systemTrayHintBody =>
+      'It keeps receiving files. To quit, right-click this icon and choose '
+      'Quit.';
+
+  @override
   String get sectionNetworks => 'Trusted networks';
 
   @override

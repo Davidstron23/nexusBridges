@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -7,7 +8,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import 'src/app_controller.dart';
 import 'src/l10n/app_strings.dart';
 import 'src/ui/attention.dart';
-import 'src/ui/exit_flow.dart';
+import 'src/ui/foreground_arming.dart';
 import 'src/ui/home_screen.dart';
 import 'src/ui/network_prompt_dialog.dart';
 import 'src/ui/pairing_dialogs.dart';
@@ -15,6 +16,7 @@ import 'src/ui/settings/settings_controller.dart';
 import 'src/ui/theme/app_theme.dart';
 import 'src/window/method_channel_window_host.dart';
 import 'src/window/title_bar_sync.dart';
+import 'src/window/window_coordinator.dart';
 import 'src/window/window_host.dart';
 
 const String windowClassName = 'FLUTTER_RUNNER_WIN32_WINDOW';
@@ -77,8 +79,9 @@ class _NexusBridgesAppState extends State<NexusBridgesApp>
   late ThemeChoice _theme = widget.controller.theme;
   late final WindowHost _host = widget.windowHost ?? MethodChannelWindowHost();
   bool _reduceMotion = false;
+  final ForegroundArming _foregroundArming = ForegroundArming();
   final _navigatorKey = GlobalKey<NavigatorState>();
-  Future<AppExitResponse>? _exiting;
+  late WindowCoordinator _coordinator;
 
   @override
   void initState() {
@@ -92,13 +95,20 @@ class _NexusBridgesAppState extends State<NexusBridgesApp>
     widget.controller.addListener(_onController);
     widget.controller.settingsOpen = _isSettingsOpen;
     _titleBar = _newTitleBar()..start();
+    _coordinator = _newCoordinator();
+    unawaited(_coordinator.start());
     _lifecycle = AppLifecycleListener(
-      onExitRequested: () => _exiting ??= handleExitRequest(
-        widget.controller,
-        context: () => _navigatorKey.currentContext,
-      ).whenComplete(() => _exiting = null),
+      onExitRequested: () => _coordinator.handleClose(),
     );
   }
+
+  WindowCoordinator _newCoordinator() => WindowCoordinator(
+    host: _host,
+    controller: widget.controller,
+    attention: _attention,
+    context: () => _navigatorKey.currentContext,
+    neutralFocus: _neutralFocus,
+  );
 
   bool _isSettingsOpen() => _settings.isOpen;
 
@@ -114,8 +124,11 @@ class _NexusBridgesAppState extends State<NexusBridgesApp>
     widget.controller.settingsOpen = _isSettingsOpen;
     _titleBar.dispose();
     _titleBar = _newTitleBar()..start();
+    _coordinator.dispose();
     _attention.dispose();
     _attention = AttentionWatcher(widget.controller);
+    _coordinator = _newCoordinator();
+    unawaited(_coordinator.start());
     _languageCode = widget.controller.languageCode;
     _theme = widget.controller.theme;
   }
@@ -146,7 +159,9 @@ class _NexusBridgesAppState extends State<NexusBridgesApp>
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onController);
     _titleBar.dispose();
+    _coordinator.dispose();
     _attention.dispose();
+    _foregroundArming.dispose();
     _neutralFocus.dispose();
     _settings.dispose();
     _lifecycle.dispose();
@@ -171,6 +186,10 @@ class _NexusBridgesAppState extends State<NexusBridgesApp>
       themeMode: themeModeOf(_theme),
       themeAnimationDuration: _reduceMotion ? Duration.zero : themeFade,
       themeAnimationCurve: Curves.easeInOut,
+      builder: (context, child) => ForegroundArmingScope(
+        arming: _foregroundArming,
+        child: child ?? const SizedBox.shrink(),
+      ),
       home: NetworkPromptHost(
         controller: widget.controller,
         child: PairingHost(

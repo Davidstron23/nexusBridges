@@ -7,6 +7,7 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../drop/drop_zone.dart';
 import '../../l10n/app_strings.dart';
+import '../attention.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
 import '../progress/selection_progress_painter.dart';
@@ -67,7 +68,7 @@ class FlowDiagram extends StatefulWidget {
 }
 
 class _FlowDiagramState extends State<FlowDiagram>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, CloseOnAttention<FlowDiagram> {
   late final AnimationController _clock;
   late final AnimationController _hover;
   late final CurvedAnimation _hoverCurve;
@@ -223,6 +224,9 @@ class _FlowDiagramState extends State<FlowDiagram>
   void _closePopover() {
     if (_popoverFor != null) setState(() => _popoverFor = null);
   }
+
+  @override
+  void closeForAttention() => _closePopover();
 
   void _syncClock(bool animates) {
     if (animates && !_reduceMotion) {
