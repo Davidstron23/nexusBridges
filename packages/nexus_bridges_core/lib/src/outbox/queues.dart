@@ -6,6 +6,7 @@ import '../transfer/transfer.dart'
         AbortSignal,
         ReceiveFolderDestination,
         SendDestination,
+        SharedFolderDestination,
         SendTarget,
         TransferOutcome,
         TransferResultView,
@@ -68,6 +69,10 @@ final class _Item {
     state: state,
     outcome: outcome,
     problemPath: problemPath,
+    destination: switch (destination) {
+      final SharedFolderDestination shared => shared.label,
+      _ => null,
+    },
   );
 
   void stopMeasuring() {

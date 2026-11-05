@@ -20,6 +20,8 @@ import 'transfer_nodes_harness.dart';
 const String _ownTemp =
     '~nexusbridges-0123456789abcdef0123456789abcdef.partial';
 
+const String _ownWitness = '~nexusbridges-0123456789abcdef.hold';
+
 const String _transferCode = 'src/transfer/';
 
 const Duration _lateEnd = Duration(seconds: 45);
@@ -204,6 +206,82 @@ void main() {
         reason: 'own temp removed',
       );
       expect(File('$old\\$tempFolderName\\keep.txt').readAsBytesSync(), [2]);
+    }, timeout: transferTimeout);
+  });
+
+  group('start after a crash with shared folders (T6 review) [SEG]', () {
+    test('B-1 a journal entry whose path became a junction is neither probed '
+        'nor swept, and the entry stays', () async {
+      late String link;
+      late String target;
+      final (a, b) = await transferNodes(
+        before: (a, b) async {
+          target = '${b.base}\\target';
+          Directory('$target\\$tempFolderName').createSync(recursive: true);
+          File('$target\\$tempFolderName\\$_ownTemp').writeAsBytesSync([1]);
+          Directory('${b.base}\\other').createSync();
+          link = '${b.base}\\link';
+          final made = Process.runSync('cmd', [
+            '/c',
+            'mklink',
+            '/J',
+            link,
+            target,
+          ]);
+          expect(made.exitCode, 0, reason: '${made.stdout}${made.stderr}');
+          final facts = await realFs.volumeFacts(target);
+          expect(facts, isNotNull);
+          await TempJournal(JsonFileStore(b.cleanupFile))
+              .add(ReceiveFolder(path: link, volumeId: facts!.volumeId));
+        },
+      );
+      final path = await a.sourceFile('later.txt', [6, 6]);
+      expect(await a.send(b, path), SendResult.started);
+      expect((await a.sentResult()).outcome, TransferOutcome.saved);
+
+      expect(File('$target\\$tempFolderName\\$_ownTemp').existsSync(), isTrue);
+      expect(await _journalPaths(b), [link]);
+    }, timeout: transferTimeout);
+
+    test('B-2 an own witness left by a power cut is swept with its temps: '
+        'the temp folder and the journal entry go', () async {
+      late String old;
+      await transferNodes(
+        before: (a, b) async {
+          old = await _journalFolder(b, 'old');
+          File('$old\\$tempFolderName\\$_ownWitness').writeAsBytesSync([]);
+          File('$old\\$tempFolderName\\$_ownTemp').writeAsBytesSync([1]);
+          File('$old\\$tempFolderName\\keep.txt').writeAsBytesSync([2]);
+        },
+      );
+
+      await eventually(
+        () =>
+            !File('$old\\$tempFolderName\\$_ownWitness').existsSync() &&
+            !File('$old\\$tempFolderName\\$_ownTemp').existsSync(),
+        reason: 'witness and temp removed',
+      );
+      expect(File('$old\\$tempFolderName\\keep.txt').readAsBytesSync(), [2]);
+    }, timeout: transferTimeout);
+
+    test('B-2 with only the witness left, the temp folder and the journal '
+        'entry disappear', () async {
+      late String old;
+      final (_, b) = await transferNodes(
+        before: (a, b) async {
+          old = await _journalFolder(b, 'old');
+          File('$old\\$tempFolderName\\$_ownWitness').writeAsBytesSync([]);
+        },
+      );
+
+      await eventually(
+        () => !Directory('$old\\$tempFolderName').existsSync(),
+        reason: 'temp folder removed',
+      );
+      await eventually(
+        () async => (await _journalPaths(b)).isEmpty,
+        reason: 'journal entry removed',
+      );
     }, timeout: transferTimeout);
   });
 

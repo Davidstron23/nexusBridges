@@ -3,6 +3,7 @@ import 'dart:math';
 
 import '../protocol/protocol.dart' show Limits;
 import '../transport/transport.dart' show AbortSignal;
+import '../winio/winio.dart' show extendedPath;
 import 'names.dart' show baseName, isValidFileName;
 import 'platform.dart';
 
@@ -67,6 +68,7 @@ final RegExp _badPathChars = RegExp(r'[*?"<>|:\u0000-\u001F]');
 final RegExp _uncServerOnly = RegExp(r'^\\\\[^\\]*$');
 final RegExp _ownTempName = RegExp(r'^~nexusbridges-[0-9a-f]{32}\.partial$');
 final RegExp _ownFolderTempName = RegExp(r'^~nexusbridges-[0-9a-f]{12}$');
+final RegExp _ownWitnessName = RegExp(r'^~nexusbridges-[0-9a-f]{16}\.hold$');
 final RegExp _deviceUncPrefix = RegExp(r'^\\\\\.\\UNC\\', caseSensitive: false);
 final RegExp _uncShare = RegExp(r'^\\\\([^\\]+)\\([^\\]+)(?:\\|$)');
 
@@ -200,6 +202,7 @@ Future<FolderInspection> inspectFolder(
   required ForbiddenFolders? forbidden,
   required bool mayCreate,
   String? expectedVolume,
+  bool requireExact = false,
   AbortSignal? abort,
 }) async {
   final created = <String>[];
@@ -210,6 +213,7 @@ Future<FolderInspection> inspectFolder(
       forbidden: forbidden,
       mayCreate: mayCreate,
       expectedVolume: expectedVolume,
+      requireExact: requireExact,
       abort: abort,
       created: created,
     );
@@ -227,6 +231,7 @@ Future<FolderInspection> _inspect(
   required ForbiddenFolders? forbidden,
   required bool mayCreate,
   required String? expectedVolume,
+  required bool requireExact,
   required AbortSignal? abort,
   required List<String> created,
 }) async {
@@ -254,6 +259,7 @@ Future<FolderInspection> _inspect(
   if (isAdminShare(candidate)) {
     return const FolderRefused(FolderRefusal.adminShare);
   }
+  if (requireExact && !samePath(candidate, p)) return cannotUse;
   if (isInsideTempFolder(candidate)) return cannotUse;
   if (candidate.length + 1 + tempFolderName.length > Limits.maxFinalPathChars) {
     return cannotUse;
@@ -382,38 +388,43 @@ Future<bool> sweepTemps(
     }
     final realSub = await fs.realPath(sub);
     if (realSub == null || !samePath(realSub, sub)) return false;
-    final entries = await Directory(sub).list(followLinks: false).toList();
-    for (final entry in entries) {
-      final name = baseName(entry.path);
-      final ownFile = isOwnTempName(name);
+    final entries = await Directory(extendedPath(sub))
+        .list(followLinks: false)
+        .toList();
+    for (final listed in entries) {
+      final name = baseName(listed.path);
+      final entryPath = _join(sub, name);
+      final ownFile = isOwnTempName(name) || _ownWitnessName.hasMatch(name);
       final ownFolder = isOwnFolderTempName(name);
       if (!ownFile && !ownFolder) continue;
-      if (keep.any((active) => samePath(active, entry.path))) continue;
+      if (keep.any((active) => samePath(active, entryPath))) continue;
       try {
         final kind = await FileSystemEntity.type(
-          entry.path,
+          extendedPath(entryPath),
           followLinks: false,
         );
         switch (kind) {
           case FileSystemEntityType.link:
-            await Link(entry.path).delete();
+            await Link(extendedPath(entryPath)).delete();
           case FileSystemEntityType.directory:
             if (ownFolder) {
               if (deferTree != null) {
-                deferTree(entry.path);
+                deferTree(entryPath);
               } else {
-                await fs.deleteTree(entry.path);
+                await fs.deleteTree(entryPath);
               }
             }
           case FileSystemEntityType.file:
-            if (ownFile) await File(entry.path).delete();
+            if (ownFile) await File(extendedPath(entryPath)).delete();
           default:
             break;
         }
       } catch (_) {}
     }
-    await _deleteIfEmpty(sub);
-    return await FileSystemEntity.type(sub, followLinks: false) ==
+    try {
+      await Directory(extendedPath(sub)).delete();
+    } catch (_) {}
+    return await FileSystemEntity.type(extendedPath(sub), followLinks: false) ==
         FileSystemEntityType.notFound;
   } catch (_) {
     return false;

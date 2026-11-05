@@ -20,6 +20,7 @@ import 'names.dart'
         isAppReservedName,
         isBlockedType,
         isProgram,
+        isRepositoryFolderName,
         isValidFileName,
         visibleFileName;
 import 'pickers.dart';
@@ -68,6 +69,8 @@ const ApiReply _defaultOnly = ApiReply(403, {'error': 'default_only'});
 const ApiReply _destinationUnavailable = ApiReply(403, {
   'error': 'destination_unavailable',
 });
+
+const String _destinationLostReason = 'destination_lost';
 
 const ApiReply _destinationMissing = ApiReply(404, {
   'error': 'destination_missing',
@@ -172,6 +175,10 @@ final class _InSession {
   ManifestRead? manifestRead;
 
   FolderWriterHost? folderWriter;
+
+  Future<void>? opening;
+
+  Future<void>? failedDiscard;
 
   int receivedFiles = 0;
 
@@ -628,7 +635,7 @@ final class TransferReceiver {
 
   bool _canCutFinishing(_InSession session) =>
       session.phase == _InPhase.finishing &&
-      session.folderOffer != null &&
+      (session.folderOffer != null || session.lease != null) &&
       !session.moving;
 
   bool _canCancelNow(_InSession session) =>
@@ -697,8 +704,39 @@ final class TransferReceiver {
     }
     final session = _active;
     if (session == null) return;
-    if (_paired.deviceOf(session.fingerprint) != null) return;
+    if (_paired.deviceOf(session.fingerprint) != null) {
+      _revokeIfLost(session);
+      return;
+    }
     _endUnpaired(session);
+  }
+
+  void sharesChanged() {
+    if (_closed) return;
+    final session = _active;
+    if (session == null) return;
+    _revokeIfLost(session);
+  }
+
+  void _revokeIfLost(_InSession session) {
+    final destination = session.destination;
+    if (destination == null ||
+        _shared.grantFor(session.fingerprint, destination.rootId) != null) {
+      return;
+    }
+    final outcome = _revokedOutcome(session);
+    switch (session.phase) {
+      case _InPhase.checking ||
+          _InPhase.awaitingManifest ||
+          _InPhase.readingManifest:
+        _end(session, outcome, register: false, cut: false);
+      case _InPhase.accepted || _InPhase.uploading:
+        _end(session, outcome);
+      case _InPhase.finishing:
+        _cutBeforeMove(session, outcome);
+      case _InPhase.warning || _InPhase.folderQuestion || _InPhase.ended:
+        break;
+    }
   }
 
   void peerUnpaired(String fingerprint) {
@@ -795,6 +833,7 @@ final class TransferReceiver {
           folder.path,
           expectedVolume: folder.volumeId,
           mayCreate: false,
+          requireExact: true,
           until: _clock() + Limits.transferCleanupCheckTimeout,
           afterUsable: (target) =>
               _sweepFolder(target.path, journalPath: folder.path),
@@ -1315,6 +1354,7 @@ final class TransferReceiver {
     String path, {
     String? expectedVolume,
     bool mayCreate = true,
+    bool requireExact = false,
     Duration? until,
     Future<void> Function(ReceiveTarget target)? afterUsable,
   }) async {
@@ -1329,6 +1369,7 @@ final class TransferReceiver {
       abort,
       expectedVolume,
       mayCreate,
+      requireExact,
       afterUsable,
     );
     unawaited(
@@ -1379,6 +1420,7 @@ final class TransferReceiver {
     AbortSignal abort,
     String? expectedVolume,
     bool mayCreate,
+    bool requireExact,
     Future<void> Function(ReceiveTarget target)? afterUsable,
   ) async {
     try {
@@ -1389,6 +1431,7 @@ final class TransferReceiver {
         forbidden: forbidden,
         mayCreate: mayCreate,
         expectedVolume: expectedVolume,
+        requireExact: requireExact,
         abort: abort,
       );
       if (afterUsable != null && result is FolderUsable && !abort.aborted) {
@@ -1549,7 +1592,6 @@ final class TransferReceiver {
       }
       final grant = _shared.grantFor(fingerprint, destination.rootId);
       if (grant == null ||
-          folderRequest != null ||
           checkRelativePath(
                 destination.path,
                 newFolder: destination.newFolder,
@@ -1560,7 +1602,8 @@ final class TransferReceiver {
       }
     }
     if (!isValidFileName(name) ||
-        (folderRequest != null && isAppReservedName(name))) {
+        (folderRequest != null && isAppReservedName(name)) ||
+        (destination != null && isRepositoryFolderName(name))) {
       return (refusal: _invalidName, session: null);
     }
     if (isBlockedType(name)) {
@@ -1699,24 +1742,43 @@ final class TransferReceiver {
         if (_gone(session)) return _destinationUnavailable;
         final refusal = _limitReply(session, session.target!);
         if (refusal != null) return refusal;
-        final prepared = await _race(
-          lease.prepare(),
-          _clock() + Limits.transferFolderCheckTimeout,
-        );
-        if (_gone(session)) return _destinationUnavailable;
-        if (prepared.expired || prepared.value != true) {
-          _end(session, TransferOutcome.cancelledByPeer, register: false);
-          return _destinationUnavailable;
-        }
-        session
-          ..destinationLabel = lease.label
-          ..target = _targetOf(lease);
-        if (_shared.grantFor(session.fingerprint, destination.rootId) == null) {
-          _end(session, _revokedOutcome(session), register: false);
-          return _destinationUnavailable;
-        }
-        return _decide(session);
+        if (session.folderOffer != null) return _askManifest(session);
+        final unavailable = await _prepareShared(session, lease);
+        if (unavailable != null) return unavailable;
+        return _decideShared(session, destination);
     }
+  }
+
+  ApiReply _decideShared(
+    _InSession session,
+    DestinationRequest destination, {
+    bool cut = true,
+  }) {
+    if (_gone(session)) return _destinationUnavailable;
+    if (_shared.grantFor(session.fingerprint, destination.rootId) == null) {
+      _end(session, _revokedOutcome(session), register: false, cut: cut);
+      return _destinationUnavailable;
+    }
+    return _decide(session, cut: cut);
+  }
+
+  Future<ApiReply?> _prepareShared(
+    _InSession session,
+    SharedLease lease,
+  ) async {
+    final prepared = await _race(
+      lease.prepare(),
+      _clock() + Limits.transferFolderCheckTimeout,
+    );
+    if (_gone(session)) return _destinationUnavailable;
+    if (prepared.expired || prepared.value != true) {
+      _end(session, TransferOutcome.cancelledByPeer, register: false);
+      return _destinationUnavailable;
+    }
+    session
+      ..destinationLabel = lease.label
+      ..target = _targetOf(lease);
+    return null;
   }
 
   ApiReply _askManifest(_InSession session) {
@@ -1923,7 +1985,7 @@ final class TransferReceiver {
     _InSession? session;
     try {
       session = _claimManifest(upload);
-      if (session == null) return _uploadForbidden;
+      if (session == null) return _manifestRefusal(upload);
       return await _runManifest(session, upload);
     } catch (e) {
       _log('transfer manifest failed: ${e.runtimeType}');
@@ -1932,6 +1994,19 @@ final class TransferReceiver {
       }
       return _internal;
     }
+  }
+
+  ApiReply _manifestRefusal(ApiUpload upload) {
+    final fingerprint = upload.clientFingerprint;
+    final id = upload.headers[TransferHeaders.transfer];
+    if (_closed || id == null || _paired.deviceOf(fingerprint) == null) {
+      return _uploadForbidden;
+    }
+    final state = _recordOf(fingerprint, id)?.state;
+    return state?.status == RemoteStatus.failed &&
+            state?.reason == _destinationLostReason
+        ? _destinationUnavailable
+        : _uploadForbidden;
   }
 
   _InSession? _claimManifest(ApiUpload upload) {
@@ -1980,7 +2055,9 @@ final class TransferReceiver {
     session.manifestRead = read;
     final result = await read.result;
     session.manifestRead = null;
-    if (session.phase != _InPhase.readingManifest) return _cancelled;
+    if (session.phase != _InPhase.readingManifest) {
+      return session.destination == null ? _cancelled : _destinationUnavailable;
+    }
     switch (result) {
       case ManifestRefused(:final refusal):
         final reply = manifestRefusalReply(refusal);
@@ -2006,11 +2083,22 @@ final class TransferReceiver {
             _paired.deviceOf(session.fingerprint)?.relation ==
                 PeerRelation.foreign;
         session.isProgram = await manifestHasPrograms(manifest, _fs);
-        if (_gone(session)) return _cancelled;
+        if (_gone(session)) {
+          return session.destination == null
+              ? _cancelled
+              : _destinationUnavailable;
+        }
         final target = session.target;
         if (target != null) {
           final refusal = _limitReply(session, target);
           if (refusal != null) return refusal;
+        }
+        final lease = session.lease;
+        final destination = session.destination;
+        if (lease != null && destination != null) {
+          final unavailable = await _prepareShared(session, lease);
+          if (unavailable != null) return unavailable;
+          return _decideShared(session, destination, cut: false);
         }
         return _decide(session, cut: false);
     }
@@ -2039,9 +2127,6 @@ final class TransferReceiver {
     }
     final writer = await _openWriter(session, target);
     if (writer == null) return _uploadReply(session);
-    session
-      ..writer = writer
-      ..tempPath = writer.tempPath;
     if (session.size > 0) {
       final ended = session.bodyEnded = Completer<void>();
       upload.body.listen(
@@ -2083,9 +2168,6 @@ final class TransferReceiver {
     }
     final host = await _openFolderWriter(session, target, manifest);
     if (host == null) return _uploadReply(session);
-    session
-      ..folderWriter = host
-      ..tempPath = host.tempRoot;
     if (expected > 0) {
       final ended = session.bodyEnded = Completer<void>();
       var paused = false;
@@ -2128,6 +2210,7 @@ final class TransferReceiver {
     FolderManifest manifest,
   ) async {
     final guard = Completer<void>();
+    session.opening = guard.future;
     _track(() => guard.future);
     try {
       try {
@@ -2163,9 +2246,12 @@ final class TransferReceiver {
         return null;
       }
       if (session.phase != _InPhase.uploading) {
-        _discardFolder(host, target);
+        await _discardFolder(host, target);
         return null;
       }
+      session
+        ..folderWriter = host
+        ..tempPath = host.tempRoot;
       return host;
     } finally {
       guard.complete();
@@ -2226,12 +2312,9 @@ final class TransferReceiver {
       if (session.phase != _InPhase.finishing) return _uploadReply(session);
       session.folderWriter = null;
       session.problemEntry = entry;
-      try {
-        await host.discard();
-      } catch (e) {
-        _log('incoming folder discard failed: ${e.runtimeType}');
-      }
-      await _releaseFolderTemp(target);
+      final discarding = _discardFailedFolder(host, target);
+      session.failedDiscard = discarding;
+      await discarding;
       _end(session, outcome, cut: false);
       return _uploadReply(session);
     }
@@ -2253,19 +2336,34 @@ final class TransferReceiver {
       return fail(TransferOutcome.invalidName);
     }
     if (isBlockedType(session.name)) return fail(TransferOutcome.blockedType);
+    final lease = session.lease;
+    final destination = session.destination;
+    if (lease != null &&
+        destination != null &&
+        _shared.grantFor(session.fingerprint, destination.rootId) == null) {
+      return fail(_revokedOutcome(session));
+    }
     session.moving = true;
     _onChanged();
     FreeNameMove moved;
     try {
-      moved = await _fs.moveFolderToFreeName(
-        host.tempRoot,
-        target.path,
-        session.name,
-        maxNameUnits: maxFolderNameUnits(
-          targetPath: target.path,
-          longest: declared.longest,
-        ),
+      final maxNameUnits = maxFolderNameUnits(
+        targetPath: target.path,
+        longest: declared.longest,
       );
+      moved = lease == null
+          ? await _fs.moveFolderToFreeName(
+              host.tempRoot,
+              target.path,
+              session.name,
+              maxNameUnits: maxNameUnits,
+            )
+          : await lease.recheckAndMove(
+              tempName: baseName(host.tempRoot),
+              isFolder: true,
+              name: session.name,
+              maxNameUnits: maxNameUnits,
+            );
     } catch (e) {
       _log('incoming folder move failed: ${e.runtimeType}');
       moved = const MoveFailed();
@@ -2296,6 +2394,18 @@ final class TransferReceiver {
     }
   }
 
+  Future<void> _discardFailedFolder(
+    FolderWriterHost host,
+    ReceiveTarget target,
+  ) async {
+    try {
+      await host.discard();
+    } catch (e) {
+      _log('incoming folder discard failed: ${e.runtimeType}');
+    }
+    await _releaseFolderTemp(target);
+  }
+
   Future<void> _releaseFolderTemp(ReceiveTarget target) async {
     await _removeIfEmpty(_joinPath(target.path, tempFolderName));
     await _forgetJournal(target);
@@ -2306,6 +2416,7 @@ final class TransferReceiver {
     ReceiveTarget target,
   ) async {
     final guard = Completer<void>();
+    session.opening = guard.future;
     _track(() => guard.future);
     try {
       try {
@@ -2340,6 +2451,9 @@ final class TransferReceiver {
         await _forgetJournal(target);
         return null;
       }
+      session
+        ..writer = writer
+        ..tempPath = writer.tempPath;
       return writer;
     } finally {
       guard.complete();
@@ -2792,6 +2906,8 @@ final class TransferReceiver {
       ..tempPath = null;
     if (identical(_active, session)) _active = null;
     final discarded = _releaseUpload(session, previous, cut: cut);
+    final opening = session.opening;
+    final failedDiscard = session.failedDiscard;
     final lease = session.lease;
     if (lease != null) {
       session.lease = null;
@@ -2801,6 +2917,8 @@ final class TransferReceiver {
           outcome == TransferOutcome.savedWithoutMark;
       _track(() async {
         await discarded;
+        await opening;
+        await failedDiscard;
         await lease.release(saved: saved);
         if (target != null) await _forgetJournal(target);
       });
@@ -2868,7 +2986,7 @@ final class TransferReceiver {
         (outcome == TransferOutcome.shareRemoved ||
             outcome == TransferOutcome.peerMarkedForeign ||
             outcome == TransferOutcome.unpaired)) {
-      return const RemoteState.failed(reason: 'destination_lost');
+      return const RemoteState.failed(reason: _destinationLostReason);
     }
     return remoteOf(outcome) ?? const RemoteState.cancelled();
   }

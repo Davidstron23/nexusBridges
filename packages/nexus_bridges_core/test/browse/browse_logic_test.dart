@@ -7,6 +7,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart'
         ForbiddenFolders,
         RelativePathProblem,
         checkRelativePath,
+        isRepositoryFolderName,
         isValidFolderName;
 import 'package:nexus_bridges_core/src/winio/winio.dart'
     show DirectoryBatches, RawEntry;
@@ -749,5 +750,83 @@ void main() {
         isA<FoldersRequest>(),
       );
     });
+  });
+
+  group('M-1 the .git folder by name [SEG]', () {
+    test('M-1 .git is a repository name in any case and with the Windows '
+        'tricks, other names are not', () {
+      for (final name in [
+        '.git',
+        '.GIT',
+        '.Git',
+        '.gIt',
+        '.git.',
+        '.git ',
+        '.git. .',
+        'git~1',
+        'GIT~1',
+        'Git~12',
+      ]) {
+        expect(isRepositoryFolderName(name), isTrue, reason: name);
+      }
+      for (final name in [
+        'git',
+        '.github',
+        '.gitignore',
+        '.git (1)',
+        'x.git',
+        'my.git',
+        'GIT~',
+        'GIT~a',
+        '..git',
+        'sub',
+      ]) {
+        expect(isRepositoryFolderName(name), isFalse, reason: name);
+      }
+    });
+
+    test('M-1 isValidFolderName keeps accepting .git: the manifest of a '
+        'repository must still travel', () {
+      expect(isValidFolderName('.git'), isTrue);
+      expect(isValidFolderName('.GIT'), isTrue);
+    });
+
+    test('M-1 checkRelativePath refuses .git in the path and as the new '
+        'folder, and only there', () {
+      for (final name in ['.git', '.GIT', '.Git', 'git~1']) {
+        expect(
+          checkRelativePath(['a', name, 'b'], rootPathUnits: 10),
+          RelativePathProblem.invalidName,
+          reason: name,
+        );
+        expect(
+          checkRelativePath(['a'], newFolder: name, rootPathUnits: 10),
+          RelativePathProblem.invalidName,
+          reason: name,
+        );
+      }
+      expect(
+        checkRelativePath(['a', '.github'], newFolder: 'x', rootPathUnits: 10),
+        isNull,
+      );
+    });
+
+    test(
+      'M-1 the collector skips a .git that is neither hidden nor system',
+      () {
+        final collector = FolderCollector(
+          max: 100,
+          parentFinalPath: r'C:\share',
+          forbidden: noForbidden,
+        );
+        collector.add([
+          folder('.git'),
+          folder('.GIT'),
+          folder('.github'),
+          folder('src'),
+        ]);
+        expect(collector.finish().names, ['.github', 'src']);
+      },
+    );
   });
 }

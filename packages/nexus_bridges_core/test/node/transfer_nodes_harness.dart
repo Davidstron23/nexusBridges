@@ -573,6 +573,7 @@ Future<bool> tcpPortFree(InternetAddress address, int port) async {
 Future<(TransferNode, TransferNode, TransferNode)> transferTrio({
   PeerRelation aAtB = PeerRelation.mine,
   PeerRelation cAtB = PeerRelation.foreign,
+  Future<void> Function(TransferNode a, TransferNode b, TransferNode c)? before,
 }) async {
   const hosts = ['127.0.0.1', '127.0.0.2', '127.0.0.3'];
   final port = await freeTcpPort(hosts: hosts);
@@ -601,6 +602,7 @@ Future<(TransferNode, TransferNode, TransferNode)> transferTrio({
   for (final node in trio) {
     await node.rememberFolder();
   }
+  if (before != null) await before(a, b, c);
   await onFreshPorts(
     () async {
       for (final node in trio) {
