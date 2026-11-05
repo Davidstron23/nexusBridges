@@ -371,4 +371,42 @@ void main() {
       expect(removed, added);
     });
   });
+
+  group('E888 the installer explains how to quit (D-b)', () {
+    test('it speaks English and Spanish', () {
+      final languages = _section(_readScript(), 'Languages');
+      expect(languages, hasLength(2));
+      expect(languages.first, contains('"en"'));
+      expect(languages.first, contains('compiler:Default.isl'));
+      expect(languages.last, contains('"es"'));
+      expect(languages.last, contains(r'compiler:Languages\Spanish.isl'));
+    });
+
+    for (final (key, word) in const [
+      ('en.SetupAppRunningError', 'Quit'),
+      ('es.SetupAppRunningError', 'Salir'),
+      ('en.UninstallAppRunningError', 'Quit'),
+      ('es.UninstallAppRunningError', 'Salir'),
+    ]) {
+      test('$key names the app and the word of the menu', () {
+        final messages = _directives(_section(_readScript(), 'Messages'));
+        final message = messages[key];
+        expect(message, isNotNull);
+        expect(message, contains('%1'));
+        expect(message, contains(word));
+      });
+    }
+
+    test('it does not close the app by itself and keeps the mutex', () {
+      final setup = _directives(_section(_readScript(), 'Setup'));
+      expect(setup['CloseApplications'], 'no');
+      expect(setup['AppMutex'], r'Local\NexusBridges.SingleInstance');
+    });
+
+    test('the script has a BOM, so the accents reach Inno Setup', () {
+      final bytes = File(_scriptPath).readAsBytesSync();
+      expect(bytes.sublist(0, 3), [0xEF, 0xBB, 0xBF]);
+      expect(_readScript(), contains('est\u{00E1}'));
+    });
+  });
 }

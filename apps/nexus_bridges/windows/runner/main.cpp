@@ -13,6 +13,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (mutex_error == ERROR_ALREADY_EXISTS || mutex_error == ERROR_ACCESS_DENIED) {
     HWND w = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"NexusBridges");
     if (w) {
+      if (!::IsWindowVisible(w)) ::ShowWindow(w, SW_SHOW);
       if (::IsIconic(w)) ::ShowWindow(w, SW_RESTORE);
       ::SetForegroundWindow(w);
     }

@@ -153,60 +153,63 @@ class _HomeScreenState extends State<HomeScreen> {
     return Focus(
       focusNode: _neutral,
       skipTraversal: true,
-      child: DropScope(
-        controller: _drop,
-        child: ListenableBuilder(
-          listenable: controller,
-          builder: (context, child) => SelectionProgressScope(
-            state: controller.state,
-            child: TimeLeftScope(
+      child: AttentionScope(
+        watcher: _attention,
+        child: DropScope(
+          controller: _drop,
+          child: ListenableBuilder(
+            listenable: controller,
+            builder: (context, child) => SelectionProgressScope(
               state: controller.state,
-              source: controller,
-              read: () => controller.state,
-              child: child!,
+              child: TimeLeftScope(
+                state: controller.state,
+                source: controller,
+                read: () => controller.state,
+                child: child!,
+              ),
             ),
-          ),
-          child: SettingsLayer(
-            controller: controller,
-            settings: _settings,
-            attention: _attention,
-            child: Scaffold(
-              body: Column(
-                children: [
-                  ListenableBuilder(
-                    listenable: controller,
-                    builder: (context, _) {
-                      final strings = AppStringsDelegate.of(context);
-                      return _Header(
-                        controller: controller,
-                        onSettings: _settings.open,
-                        state: _failureMessage(controller, strings) == null
-                            ? controller.state
-                            : null,
-                      );
-                    },
-                  ),
-                  Expanded(
-                    child: ListenableBuilder(
+            child: SettingsLayer(
+              controller: controller,
+              settings: _settings,
+              attention: _attention,
+              child: Scaffold(
+                body: Column(
+                  children: [
+                    ListenableBuilder(
                       listenable: controller,
-                      builder: (context, body) {
+                      builder: (context, _) {
                         final strings = AppStringsDelegate.of(context);
-                        final failure = _failureMessage(controller, strings);
-                        if (failure == null) return body!;
-                        return _MessageWithRetry(
-                          message: failure,
-                          retryLabel: strings.retryButton,
-                          onRetry: controller.retry,
+                        return _Header(
+                          controller: controller,
+                          onSettings: _settings.open,
+                          state: _failureMessage(controller, strings) == null
+                              ? controller.state
+                              : null,
                         );
                       },
-                      child: _Body(
-                        controller: controller,
-                        tab: _tab,
-                        hovered: _hovered,
+                    ),
+                    Expanded(
+                      child: ListenableBuilder(
+                        listenable: controller,
+                        builder: (context, body) {
+                          final strings = AppStringsDelegate.of(context);
+                          final failure = _failureMessage(controller, strings);
+                          if (failure == null) return body!;
+                          return _MessageWithRetry(
+                            message: failure,
+                            retryLabel: strings.retryButton,
+                            onRetry: controller.retry,
+                          );
+                        },
+                        child: _Body(
+                          controller: controller,
+                          tab: _tab,
+                          hovered: _hovered,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

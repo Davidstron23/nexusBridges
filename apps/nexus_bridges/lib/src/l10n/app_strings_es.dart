@@ -1134,6 +1134,20 @@ final class AppStringsEs implements AppStrings {
       'La X cerrará la app. Si hay un envío, te preguntará.';
 
   @override
+  String get systemTrayOpen => 'Abrir NexusBridges';
+
+  @override
+  String get systemTrayExit => 'Salir';
+
+  @override
+  String get systemTrayHintTitle => 'NexusBridges sigue funcionando';
+
+  @override
+  String get systemTrayHintBody =>
+      'Sigue recibiendo archivos. Para salir, haz clic derecho en este icono '
+      'y elige Salir.';
+
+  @override
   String get sectionNetworks => 'Redes de confianza';
 
   @override

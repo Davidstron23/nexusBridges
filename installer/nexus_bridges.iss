@@ -1,4 +1,4 @@
-; Inno Setup script for NexusBridges. Build it with tool/build-installer.ps1,
+﻿; Inno Setup script for NexusBridges. Build it with tool/build-installer.ps1,
 ; which passes the app version with /DAppVersion=x.y.z.
 
 #ifndef AppVersion
@@ -18,6 +18,7 @@
 ; The doubled opening brace is Inno Setup's escape for a literal brace.
 AppId={{7BF0D2F1-3A07-442B-AF98-6CDB86B44480}
 AppMutex=Local\NexusBridges.SingleInstance
+CloseApplications=no
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=David Ariza
@@ -33,6 +34,16 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExeName}
 PrivilegesRequired=admin
 WizardStyle=modern
+
+[Languages]
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
+
+[Messages]
+en.SetupAppRunningError=Setup has detected that %1 is running, maybe hidden in the system tray.%n%nRight-click its icon next to the clock and choose Quit. Then click OK to continue, or Cancel to exit.
+es.SetupAppRunningError=El instalador ha detectado que %1 está abierto, quizá escondido en la bandeja del sistema.%n%nHaz clic derecho en su icono junto al reloj y elige Salir. Después pulsa Aceptar para continuar o Cancelar para salir.
+en.UninstallAppRunningError=%1 is running, maybe hidden in the system tray.%n%nRight-click its icon next to the clock and choose Quit. Then click OK to continue, or Cancel to exit.
+es.UninstallAppRunningError=%1 está abierto, quizá escondido en la bandeja del sistema.%n%nHaz clic derecho en su icono junto al reloj y elige Salir. Después pulsa Aceptar para continuar o Cancelar para salir.
 
 [Files]
 Source: "{#ReleaseDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

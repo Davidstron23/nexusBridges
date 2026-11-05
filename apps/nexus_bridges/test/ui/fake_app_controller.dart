@@ -24,12 +24,14 @@ class FakeAppController extends AppController {
     ThemeChoice theme = ThemeChoice.dark,
     bool closeToTray = true,
     bool systemTray = true,
+    bool trayHintShown = false,
   }) : _fakeState = state,
        _fakeStartFailed = startFailed,
        _fakeLanguage = languageCode,
        _fakeTheme = theme,
        _fakeCloseToTray = closeToTray,
        _fakeSystemTray = systemTray,
+       _fakeTrayHintShown = trayHintShown,
        super(
          startNode: () async => throw StateError('not used by widget tests'),
          loadStartup: () async => const StartupSettings(language: 'en'),
@@ -41,6 +43,7 @@ class FakeAppController extends AppController {
   ThemeChoice _fakeTheme;
   bool _fakeCloseToTray;
   final bool _fakeSystemTray;
+  bool _fakeTrayHintShown;
   final List<String> calls = [];
 
   @override
@@ -54,6 +57,17 @@ class FakeAppController extends AppController {
 
   @override
   bool get systemTrayAvailable => _fakeSystemTray;
+
+  @override
+  bool get trayHintShown => _fakeTrayHintShown;
+
+  @override
+  Future<void> markTrayHintShown() async {
+    calls.add('markTrayHintShown');
+    if (_fakeTrayHintShown) return;
+    _fakeTrayHintShown = true;
+    notifyListeners();
+  }
 
   @override
   Future<void> setLanguage(String code) async {

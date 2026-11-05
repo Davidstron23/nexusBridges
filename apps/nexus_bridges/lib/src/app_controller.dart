@@ -36,7 +36,7 @@ class AppController extends ChangeNotifier {
 
   ThemeChoice get theme => _theme;
 
-  bool get systemTrayAvailable => false;
+  bool get systemTrayAvailable => true;
 
   bool get closeToTray => _closeToTray;
 
@@ -104,6 +104,13 @@ class AppController extends ChangeNotifier {
     _closeToTray = enabled;
     notifyListeners();
     return _node?.saveCloseToTray(enabled) ?? Future<void>.value();
+  }
+
+  Future<void> markTrayHintShown() {
+    if (_trayHintShown) return Future<void>.value();
+    _trayHintShown = true;
+    notifyListeners();
+    return _node?.saveTrayHintShown() ?? Future<void>.value();
   }
 
   Future<DeviceNameResult> setDeviceName(String? name) async {

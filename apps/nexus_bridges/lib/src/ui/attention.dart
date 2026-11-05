@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../app_controller.dart';
@@ -60,6 +60,51 @@ final class AttentionWatcher extends ChangeNotifier {
     if (_disposed) return;
     _disposed = true;
     _controller.removeListener(_onChanged);
+    super.dispose();
+  }
+}
+
+final class AttentionScope extends InheritedWidget {
+  const AttentionScope({
+    required this.watcher,
+    required super.child,
+    super.key,
+  });
+
+  final AttentionWatcher watcher;
+
+  static AttentionWatcher? maybeOf(BuildContext context) {
+    return context.getInheritedWidgetOfExactType<AttentionScope>()?.watcher;
+  }
+
+  @override
+  bool updateShouldNotify(AttentionScope oldWidget) =>
+      watcher != oldWidget.watcher;
+}
+
+mixin CloseOnAttention<T extends StatefulWidget> on State<T> {
+  AttentionWatcher? _attentionWatcher;
+
+  void closeForAttention();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = AttentionScope.maybeOf(context);
+    if (next == _attentionWatcher) return;
+    _attentionWatcher?.removeListener(_onAttentionTick);
+    _attentionWatcher = next;
+    _attentionWatcher?.addListener(_onAttentionTick);
+  }
+
+  void _onAttentionTick() {
+    if (mounted) closeForAttention();
+  }
+
+  @override
+  void dispose() {
+    _attentionWatcher?.removeListener(_onAttentionTick);
+    _attentionWatcher = null;
     super.dispose();
   }
 }

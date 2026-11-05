@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../foreground_arming.dart';
 import '../icons/glyphs.dart';
 import '../theme/app_theme.dart';
 import '../theme/tokens.dart';
@@ -151,6 +152,7 @@ class _ModalPageState extends State<_ModalPage> {
   }
 
   void _dismiss() {
+    if (!ForegroundArmingScope.armedOf(context)) return;
     widget.onDismiss?.call()?.call();
   }
 

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../l10n/app_strings.dart';
+import 'attention.dart';
 import 'icons/glyphs.dart';
 import 'modal/timeline.dart';
 import 'row_menu.dart';
@@ -62,7 +63,7 @@ class SendMenuButton extends StatefulWidget {
 }
 
 class _SendMenuButtonState extends State<SendMenuButton>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, CloseOnAttention<SendMenuButton> {
   final MenuController _menu = MenuController();
   final FocusScopeNode _scope = FocusScopeNode(debugLabel: 'SendMenu');
   late final AnimationController _motion = AnimationController(
@@ -98,6 +99,11 @@ class _SendMenuButtonState extends State<SendMenuButton>
 
   void _onStatus(AnimationStatus status) {
     if (mounted) setState(() {});
+  }
+
+  @override
+  void closeForAttention() {
+    if (_open) _menu.close();
   }
 
   void _toggle() {

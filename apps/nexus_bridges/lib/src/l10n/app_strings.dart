@@ -290,6 +290,10 @@ abstract class AppStrings {
   String get systemTraySwitch;
   String get systemTraySwitchHelp;
   String get systemTrayOffHelp;
+  String get systemTrayOpen;
+  String get systemTrayExit;
+  String get systemTrayHintTitle;
+  String get systemTrayHintBody;
   String get sectionNetworks;
   String get networksInfo;
   String get connectedNow;

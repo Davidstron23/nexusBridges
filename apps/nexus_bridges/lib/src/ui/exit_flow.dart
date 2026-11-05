@@ -454,26 +454,29 @@ class _ExitBarPainter extends CustomPainter {
       !identical(oldDelegate.colors, colors);
 }
 
+Future<void> waitForPickerToClose(AppController controller) async {
+  if (controller.state?.pickerOpen != true) return;
+  final closed = Completer<void>();
+  void onChange() {
+    if (controller.state?.pickerOpen != true && !closed.isCompleted) {
+      closed.complete();
+    }
+  }
+
+  controller.addListener(onChange);
+  try {
+    await closed.future;
+  } finally {
+    controller.removeListener(onChange);
+  }
+}
+
 Future<AppExitResponse> handleExitRequest(
   AppController controller, {
   required BuildContext? Function() context,
   Duration shutdownBudget = const Duration(seconds: 5),
 }) async {
-  if (controller.state?.pickerOpen == true) {
-    final closed = Completer<void>();
-    void onChange() {
-      if (controller.state?.pickerOpen != true && !closed.isCompleted) {
-        closed.complete();
-      }
-    }
-
-    controller.addListener(onChange);
-    try {
-      await closed.future;
-    } finally {
-      controller.removeListener(onChange);
-    }
-  }
+  await waitForPickerToClose(controller);
   if (controller.state?.transferInProgress == true) {
     final ctx = context();
     if (ctx != null && ctx.mounted) {

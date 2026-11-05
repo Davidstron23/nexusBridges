@@ -5,8 +5,14 @@ All notable changes to NexusBridges are listed here. The format follows [Keep a 
 ## [Unreleased]
 
 ### In progress
-- System tray: the app keeps running in the background when you close the window.
 - Choose the destination folder on the other device, with per-device shared folders.
+
+## [0.1.2] - 2026-11-05
+
+### Added
+- System tray: closing the window keeps the app running, so your devices can still send you files. Open it from the tray icon, and use Exit in its menu to close it for good. You can turn this off in Settings.
+- When something arrives with the window hidden, the app comes back to the front. Nothing is answered by accident: a keypress in another program does not accept anything.
+- The installer is available in English and Spanish, and explains what to do if the app is running in the tray.
 
 ## [0.1.1] - 2026-11-04
 
@@ -35,6 +41,7 @@ First public release, for Windows.
 - Dark interface with an animated network diagram, English and Spanish.
 - Windows installer with firewall rules limited to the local subnet.
 
-[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Davidstron23/nexusBridges/releases/tag/v0.1.0
