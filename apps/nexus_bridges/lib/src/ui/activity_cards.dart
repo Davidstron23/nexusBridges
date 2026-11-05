@@ -11,6 +11,7 @@ import 'icons/glyphs.dart';
 import 'progress/selection_progress_painter.dart';
 import 'progress/time_left_scope.dart';
 import 'queue_card.dart';
+import 'shown_name.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
 import 'theme/tokens.dart';
@@ -530,7 +531,12 @@ class _OutgoingCard extends StatelessWidget {
     final colors = NbColors.of(context);
     final strings = AppStringsDelegate.of(context);
     final language = Localizations.localeOf(context).languageCode;
-    final name = peerLabel(view.peerName, view.peerFingerprint);
+    final name = shownPeerName(
+      strings,
+      controller.state,
+      view.peerFingerprint,
+      peerLabel(view.peerName, view.peerFingerprint),
+    );
     final phase = view.phase;
     final transferring =
         phase == OutgoingPhase.uploading || phase == OutgoingPhase.verifying;
@@ -651,7 +657,12 @@ class _IncomingCard extends StatelessWidget {
     final strings = AppStringsDelegate.of(context);
     final language = Localizations.localeOf(context).languageCode;
     final id = view.sessionId;
-    final name = peerLabel(view.peerName, view.peerFingerprint);
+    final name = shownPeerName(
+      strings,
+      controller.state,
+      view.peerFingerprint,
+      peerLabel(view.peerName, view.peerFingerprint),
+    );
     final stage = view.stage;
     final transferring =
         stage == IncomingStage.receiving || stage == IncomingStage.verifying;
@@ -769,7 +780,12 @@ class ResultCard extends StatelessWidget {
     final colors = NbColors.of(context);
     final strings = AppStringsDelegate.of(context);
     final outgoing = result.direction == TransferDirection.outgoing;
-    final name = peerLabel(result.peerName, result.peerFingerprint);
+    final name = shownPeerName(
+      strings,
+      controller.state,
+      result.peerFingerprint,
+      peerLabel(result.peerName, result.peerFingerprint),
+    );
     final language = Localizations.localeOf(context).languageCode;
     final tone = resultTone(result.outcome.kind);
     final folder = result.isFolder;
@@ -816,6 +832,15 @@ class ResultCard extends StatelessWidget {
             ),
             style: NbText.bodySm.copyWith(color: colors.textWeak),
           ),
+          if (result.destination != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              strings.resultIn(
+                result.destination!.display(homeName: strings.homeFolder),
+              ),
+              style: NbText.caption.copyWith(color: colors.textWeak),
+            ),
+          ],
           if (result.canReveal) ...[
             const SizedBox(height: 8),
             buttonBar([

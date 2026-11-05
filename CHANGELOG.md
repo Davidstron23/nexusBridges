@@ -4,8 +4,12 @@ All notable changes to NexusBridges are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
-### In progress
-- Choose the destination folder on the other device, with per-device shared folders.
+## [0.1.3] - 2026-11-05
+
+### Added
+- Choose the destination folder on the other device: a menu on your own devices with its favourites, recent folders and the folders it shares with you.
+- Drag and drop into a specific folder: hold over a device and its folders open, so you can drop where you want.
+- Configure panel for each device: a local nickname, the folders it can use, favourites and history. The nickname stays on your computer.
 
 ## [0.1.2] - 2026-11-05
 
@@ -41,7 +45,8 @@ First public release, for Windows.
 - Dark interface with an animated network diagram, English and Spanish.
 - Windows installer with firewall rules limited to the local subnet.
 
-[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Davidstron23/nexusBridges/releases/tag/v0.1.0

@@ -32,7 +32,7 @@ DeviceEntry _entry(
   deviceType: visible ? DeviceType.desktop : null,
   visible: visible,
   paired: paired,
-  mine: true,
+  mine: false,
   ignored: false,
   mismatch: false,
   possiblyReplaces: null,

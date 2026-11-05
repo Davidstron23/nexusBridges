@@ -1224,4 +1224,355 @@ final class AppStringsEs implements AppStrings {
     'nov',
     'dic',
   ][month - 1];
+
+  @override
+  String get configure => 'Configurar';
+
+  @override
+  String get configureEllipsis => 'Configurar…';
+
+  @override
+  String get thisDeviceIs => 'Este equipo es';
+
+  @override
+  String get mineCard => 'Mío';
+
+  @override
+  String get mineCardHelp => 'Puede usar tus carpetas y enviarte sin preguntar';
+
+  @override
+  String get foreignCard => 'Ajeno';
+
+  @override
+  String get foreignCardHelp =>
+      'Te pide permiso cada vez y nunca ve tus carpetas';
+
+  @override
+  String get sharesTitle => 'Carpetas que puede usar';
+
+  @override
+  String sharesDesc(String name) => 'Dónde puede dejar cosas $name';
+
+  @override
+  String sharesInfo(String name) =>
+      'Son carpetas de este equipo. $name ve sus subcarpetas, nunca tus archivos. Valen unidades locales, USB y microSD; las de red, no.';
+
+  @override
+  String get sharesEmpty =>
+      'Ninguna. Lo que envíe irá a tu carpeta de recepción';
+
+  @override
+  String get sharesAdd => 'Añadir carpeta…';
+
+  @override
+  String get sharesPaused =>
+      'En pausa mientras sea ajeno. Vuelven si lo marcas como mío';
+
+  @override
+  String get sharesForeignOnly => 'Solo los equipos tuyos pueden usar carpetas';
+
+  @override
+  String get shareUnavailable => 'No disponible';
+
+  @override
+  String get chipRemovable => 'USB / microSD';
+
+  @override
+  String get shareRemoveTooltip => 'Dejar de usar esta carpeta';
+
+  @override
+  String get shareCloudConfirm =>
+      'Esta carpeta se sincroniza con la nube: lo que llegue puede subirse';
+
+  @override
+  String get shareNoMarkConfirm =>
+      'Esta unidad no puede marcar los archivos de internet';
+
+  @override
+  String get shareAddAnyway => 'Añadir igualmente';
+
+  @override
+  String get shareRefusedNetwork =>
+      'No se pueden usar unidades de red ni carpetas compartidas';
+
+  @override
+  String get shareRefusedAdminShare =>
+      'Los recursos administrativos nunca se admiten';
+
+  @override
+  String get shareRefusedUnknownDrive => 'Windows no identifica esta unidad';
+
+  @override
+  String get shareRefusedForbidden =>
+      'No se pueden compartir las carpetas de Windows y de programas, la de Inicio ni la raíz del disco del sistema';
+
+  @override
+  String get shareRefusedAppData => 'Son los datos de la propia app';
+
+  @override
+  String get shareRefusedTemp => 'Es una carpeta temporal de la app';
+
+  @override
+  String get shareRefusedTooLong =>
+      'La ruta es demasiado larga (más de 236 caracteres)';
+
+  @override
+  String get shareRefusedMissing => 'La carpeta ya no existe';
+
+  @override
+  String get shareRefusedAlready => 'Ya está en la lista';
+
+  @override
+  String get shareRefusedFull => 'Como mucho 16 carpetas por equipo';
+
+  @override
+  String get shareFailed => 'No se pudo añadir la carpeta';
+
+  @override
+  String get favoritesTitle => 'Destinos favoritos';
+
+  @override
+  String get favoritesDesc => 'Salen primero al enviar';
+
+  @override
+  String favoritesInfo(String name) =>
+      'Se eligen entre las carpetas que $name te comparte';
+
+  @override
+  String get favoritesEmpty => 'Sin favoritos todavía';
+
+  @override
+  String get favoritesAdd => 'Añadir…';
+
+  @override
+  String get favoritesNeedVisible => 'Tiene que estar a la vista';
+
+  @override
+  String get favoritesPaused =>
+      'Un ajeno no tiene favoritos. Vuelven si lo marcas como mío';
+
+  @override
+  String get favoritesFull => 'Como mucho 8 favoritos por equipo';
+
+  @override
+  String get favoriteRemoveTooltip => 'Quitar de favoritos';
+
+  @override
+  String get aliasTitle => 'Apodo local';
+
+  @override
+  String get aliasPlaceholder => 'Sin apodo';
+
+  @override
+  String aliasHelp(String real) => 'Solo lo ves tú. Los demás ven «$real»';
+
+  @override
+  String historyTitle(String name) => 'Historial con $name';
+
+  @override
+  String get historyEmpty => 'Todavía no os habéis enviado nada';
+
+  @override
+  String historySeeAll(int n) => 'Ver todo ($n)';
+
+  @override
+  String get historyLast3 => 'Últimos 3 · se guardan hasta 50';
+
+  @override
+  String get historyKept => 'Se guardan hasta 50';
+
+  @override
+  String get historyInfo =>
+      'Se guarda solo en este equipo: nombres, tamaños y destinos. Nunca el contenido';
+
+  @override
+  String get historyBack => 'Volver a Configurar';
+
+  @override
+  String get historyCancelled => 'Cancelado';
+
+  @override
+  String get historyFailed => 'Falló';
+
+  @override
+  String get historyDefaultFolder => 'Carpeta de recepción';
+
+  @override
+  String get historyDeliveredTip => 'Entregado';
+
+  @override
+  String get historySavedTip => 'Guardado';
+
+  @override
+  String get historySentLabel => 'Enviado';
+
+  @override
+  String get historyReceivedLabel => 'Recibido';
+
+  @override
+  String get historyToday => 'Hoy';
+
+  @override
+  String get historyYesterday => 'Ayer';
+
+  @override
+  String historySummary(int sent, int received) =>
+      '$sent enviados y $received recibidos · se guardan hasta 50';
+
+  @override
+  String filesCount(int n) => '$n archivos';
+
+  @override
+  String historyItems(int n) => '$n elementos';
+
+  @override
+  String historyFirstAndMore(String name, int n) => '${n}ame y $n más';
+
+  @override
+  String historyDelivered(int d, int n) => 'entregados $d de $n';
+
+  @override
+  String get homeFolder => 'Carpeta personal';
+
+  @override
+  String get unpairSectionTitle => 'Desvincular';
+
+  @override
+  String get unpairSectionHelp =>
+      'Borra sus carpetas, favoritos, apodo e historial';
+
+  @override
+  String get unpairSectionInfo =>
+      'Para volver a enviaros archivos tendréis que vincularos otra vez';
+
+  @override
+  String destTitle(String name) => 'Enviar a $name';
+
+  @override
+  String get destQuestion => '¿Dónde lo dejo?';
+
+  @override
+  String get destFavorites => 'Favoritos';
+
+  @override
+  String destFoldersOf(String name) => 'Carpetas de $name';
+
+  @override
+  String get destShared => 'compartidas contigo';
+
+  @override
+  String get destDefaultFolder => 'Carpeta por defecto';
+
+  @override
+  String get destDefaultTag => 'la de recepción';
+
+  @override
+  String get destRecent => 'Últimas usadas';
+
+  @override
+  String get destExplore => 'Explorar…';
+
+  @override
+  String get destLoading => 'Pidiendo sus carpetas…';
+
+  @override
+  String destNoChoice(String name) =>
+      '$name no te deja elegir carpeta en este momento; irá a su carpeta por defecto';
+
+  @override
+  String destUnreadable(String name) =>
+      'No se pudo leer la lista de carpetas de $name';
+
+  @override
+  String get destNoLongerAvailable => 'Ya no está disponible';
+
+  @override
+  String get destKeys => '↑ ↓ elegir · Intro enviar · Esc cancelar';
+
+  @override
+  String get navSendHere => 'Enviar aquí';
+
+  @override
+  String get navSaveFavorite => 'Guardar como favorito';
+
+  @override
+  String get navNewFolder => 'Nueva carpeta';
+
+  @override
+  String get navNewFolderPlaceholder => 'Nombre de la carpeta nueva';
+
+  @override
+  String get navCreate => 'Crear';
+
+  @override
+  String get navWillBeCreated => 'Se creará al recibir';
+
+  @override
+  String navNewFolderEmpty(String name) =>
+      '$name la creará cuando llegue el envío. Si no llega, no queda nada';
+
+  @override
+  String get navNoSubfolders => 'Sin subcarpetas';
+
+  @override
+  String get navChoose => 'Elige una carpeta';
+
+  @override
+  String navIn(String name) => 'En $name';
+
+  @override
+  String get navMore => 'Se muestran las 1 000 primeras carpetas';
+
+  @override
+  String get navPartial =>
+      'La lista está incompleta: la carpeta tardó demasiado';
+
+  @override
+  String get navGone => 'Esa carpeta ya no está disponible';
+
+  @override
+  String navBusy(String name) => '$name está ocupado; prueba en unos segundos';
+
+  @override
+  String navUnreadable(String name) =>
+      'No se pudieron leer las carpetas de $name';
+
+  @override
+  String get navNameInvalid => 'Ese nombre no vale para una carpeta';
+
+  @override
+  String get navNameExists => 'Ya hay una carpeta con ese nombre';
+
+  @override
+  String get navBack => 'Atrás';
+
+  @override
+  String get portalDropIn => 'Suelta en una carpeta';
+
+  @override
+  String get portalHold =>
+      'Mantén sobre una carpeta para entrar. Suelta para enviar ahí';
+
+  @override
+  String portalBack(String name) => 'Volver a $name';
+
+  @override
+  String portalHereIn(String name) => 'Aquí, en $name';
+
+  @override
+  String dragHintMine(String name) =>
+      'Enviar a $name · mantén para ver sus carpetas';
+
+  @override
+  String outcomeShareRemoved(String name) =>
+      'Quitaste esa carpeta de las que puede usar $name';
+
+  @override
+  String outcomePeerMarkedForeign(String name) => 'Marcaste a $name como ajeno';
+
+  @override
+  String resultIn(String label) => 'en $label';
+
+  @override
+  String nameWithReal(String alias, String real) => '$alias ($real)';
 }

@@ -1764,14 +1764,7 @@ void main() {
         final other = fingerprintOf('EEEE5555');
         final controller = FakeAppController(
           state: NodeState(
-            entries: [
-              entry(
-                fingerprint: other,
-                name: 'Torre',
-                paired: true,
-                mine: true,
-              ),
-            ],
+            entries: [entry(fingerprint: other, name: 'Torre', paired: true)],
             incoming: incomingView(
               stage: IncomingStage.folderQuestion,
               folder: _firstTime,

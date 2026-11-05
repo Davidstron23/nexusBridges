@@ -37,7 +37,11 @@ class _PendingController extends FakeAppController {
   }
 
   @override
-  Future<SendResult> sendPaths(String fingerprint, List<String> paths) {
+  Future<SendResult> sendPaths(
+    String fingerprint,
+    List<String> paths, {
+    SharedFolderDestination? destination,
+  }) {
     calls.add('sendPaths $fingerprint ${paths.join('|')}');
     return pending.future;
   }
@@ -70,12 +74,7 @@ Future<FakeAppController> _pumpTwoPaired(
               state ??
               NodeState(
                 entries: [
-                  entry(
-                    fingerprint: _fp,
-                    name: _name,
-                    paired: true,
-                    mine: true,
-                  ),
+                  entry(fingerprint: _fp, name: _name, paired: true),
                   entry(fingerprint: _otherFp, name: 'Torre', paired: true),
                 ],
               ),

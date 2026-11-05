@@ -466,6 +466,69 @@ abstract final class Glyphs {
     parts: [GlyphPart(SvgShape('M8 3.5v9M3.5 8h9'))],
   );
 
+  static const Glyph star = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M8 2.4l1.7 3.5 3.8.5-2.8 2.7.7 3.8L8 11.1l-3.4 1.8.7-3.8L2.5 6.4'
+          'l3.8-.5z',
+        ),
+      ),
+    ],
+  );
+
+  static const Glyph edit = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M3 13l.6-2.6L10.4 3.6a1.3 1.3 0 0 1 1.9 0l.1.1a1.3 1.3 0 0 1 0 1.9'
+          'L5.6 12.4z',
+        ),
+      ),
+      GlyphPart(SvgShape('M9.4 4.6l2 2')),
+    ],
+  );
+
+  static const Glyph history = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(SvgShape('M2.8 8a5.2 5.2 0 1 0 1.6-3.8')),
+      GlyphPart(SvgShape('M2.6 2.8v2.6h2.6')),
+      GlyphPart(SvgShape('M8 5.4v2.9l1.9 1.2')),
+    ],
+  );
+
+  static const Glyph folderPlus = Glyph(
+    box: 16,
+    strokeWidth: 1.4,
+    parts: [
+      GlyphPart(
+        SvgShape(
+          'M2 4.5a1 1 0 0 1 1-1h3.2l1.5 1.6H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1'
+          'H3a1 1 0 0 1-1-1z',
+        ),
+      ),
+      GlyphPart(SvgShape('M8 7v4M6 9h4')),
+    ],
+  );
+
+  static const Glyph chevronRight = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M6 3.5L10.5 8 6 12.5'))],
+  );
+
+  static const Glyph arrowUp = Glyph(
+    box: 16,
+    strokeWidth: 1.5,
+    parts: [GlyphPart(SvgShape('M8 13V3.5M4.5 7L8 3.5 11.5 7'))],
+  );
+
   static const Glyph close = Glyph(
     box: 16,
     strokeWidth: 1.5,

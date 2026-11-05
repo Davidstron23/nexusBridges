@@ -17,6 +17,7 @@ class InlineConfirm extends StatefulWidget {
     required this.onConfirm,
     required this.onCancel,
     this.danger = false,
+    this.ice = false,
     this.margin = const EdgeInsets.only(top: 10),
     super.key,
   });
@@ -28,6 +29,7 @@ class InlineConfirm extends StatefulWidget {
   final VoidCallback onConfirm;
   final VoidCallback onCancel;
   final bool danger;
+  final bool ice;
   final EdgeInsets margin;
 
   @override
@@ -51,7 +53,9 @@ class _InlineConfirmState extends State<InlineConfirm> {
       padding: shown.margin,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: danger ? colors.dangerWeak : colors.segment,
+          color: danger
+              ? colors.dangerWeak
+              : (shown.ice ? colors.iceWeak : colors.segment),
           borderRadius: BorderRadius.circular(_boxRadius),
         ),
         child: Padding(
@@ -62,13 +66,13 @@ class _InlineConfirmState extends State<InlineConfirm> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (danger) ...[
+                  if (danger || shown.ice) ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 1),
                       child: GlyphIcon(
-                        Glyphs.warn,
+                        danger ? Glyphs.warn : Glyphs.info,
                         size: 16,
-                        color: colors.danger,
+                        color: danger ? colors.danger : colors.ice,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -76,7 +80,9 @@ class _InlineConfirmState extends State<InlineConfirm> {
                   Expanded(
                     child: DefaultTextStyle.merge(
                       style: NbText.caption.copyWith(
-                        color: danger ? colors.text : colors.textWeak,
+                        color: danger || shown.ice
+                            ? colors.text
+                            : colors.textWeak,
                         fontSize: 12.5,
                         height: 18 / 12.5,
                       ),

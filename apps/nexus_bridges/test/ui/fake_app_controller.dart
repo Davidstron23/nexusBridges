@@ -292,11 +292,110 @@ class FakeAppController extends AppController {
     return sendFoldersResult;
   }
 
+  final List<SharedFolderDestination?> sendDestinations = [];
+  List<String> pickedPaths = const [];
+
   @override
-  Future<SendResult> sendPaths(String fingerprint, List<String> paths) async {
+  Future<List<String>> pickFilesFor(String fingerprint) async {
+    calls.add('pickFilesFor $fingerprint');
+    return pickedPaths;
+  }
+
+  @override
+  Future<List<String>> pickFoldersFor(String fingerprint) async {
+    calls.add('pickFoldersFor $fingerprint');
+    return pickedPaths;
+  }
+
+  @override
+  Future<SendResult> sendPaths(
+    String fingerprint,
+    List<String> paths, {
+    SharedFolderDestination? destination,
+  }) async {
     calls.add('sendPaths $fingerprint ${paths.join('|')}');
     sendPathsCalls.add(List.of(paths));
+    sendDestinations.add(destination);
     return sendPathsResult;
+  }
+
+  Future<RemoteListing> Function(String fingerprint) rootsResult = (_) async =>
+      const RemoteRoots([]);
+  Future<RemoteListing> Function(
+    String fingerprint,
+    String rootId,
+    List<String> path,
+  )
+  foldersResult = (_, _, _) async =>
+      const RemoteFolders([], more: false, partial: false);
+  ShareAddOutcome shareResult = const SharePickCancelled();
+  FavoriteResult favoriteResult = FavoriteResult.added;
+  final List<List<SavedDestination>> rootChecks = [];
+
+  @override
+  Future<RemoteListing> listRemoteRoots(
+    String fingerprint, {
+    List<SavedDestination> check = const [],
+  }) {
+    calls.add('listRemoteRoots $fingerprint');
+    rootChecks.add(check);
+    return rootsResult(fingerprint);
+  }
+
+  @override
+  Future<RemoteListing> listRemoteFolders(
+    String fingerprint,
+    String rootId,
+    List<String> path,
+  ) {
+    calls.add('listRemoteFolders $fingerprint $rootId ${path.join('/')}');
+    return foldersResult(fingerprint, rootId, path);
+  }
+
+  @override
+  Future<ShareAddOutcome> addShare(String fingerprint) async {
+    calls.add('addShare $fingerprint');
+    return shareResult;
+  }
+
+  @override
+  Future<ShareAddOutcome> confirmShare(
+    String fingerprint,
+    String pendingId,
+  ) async {
+    calls.add('confirmShare $fingerprint $pendingId');
+    return const ShareAdded(saved: true);
+  }
+
+  @override
+  void cancelPendingShare(String pendingId) {
+    calls.add('cancelPendingShare $pendingId');
+  }
+
+  @override
+  Future<void> removeShare(String fingerprint, String rootId) async {
+    calls.add('removeShare $fingerprint $rootId');
+  }
+
+  @override
+  Future<void> refreshShares(String fingerprint) async {
+    calls.add('refreshShares $fingerprint');
+  }
+
+  @override
+  void setAlias(String fingerprint, String alias) {
+    calls.add('setAlias $fingerprint $alias');
+  }
+
+  @override
+  FavoriteResult addFavorite(String fingerprint, SavedDestination destination) {
+    calls.add('addFavorite $fingerprint ${destination.rootId}');
+    return favoriteResult;
+  }
+
+  @override
+  void removeFavorite(String fingerprint, int index) {
+    calls.add('removeFavorite $fingerprint $index');
   }
 
   @override
@@ -333,9 +432,20 @@ class FakeAppController extends AppController {
   }
 
   @override
-  Future<SendResult> sendTray(String fingerprint) async {
+  Future<SendResult> sendTray(
+    String fingerprint, {
+    SharedFolderDestination? destination,
+  }) async {
     calls.add('sendTray $fingerprint');
+    sendDestinations.add(destination);
     return sendTrayResult;
+  }
+
+  final List<String> prefetched = [];
+
+  @override
+  void prefetchPortal(String fingerprint) {
+    prefetched.add(fingerprint);
   }
 
   @override
@@ -412,7 +522,18 @@ Widget homeApp(
   SettingsController? settings,
   AttentionWatcher? attention,
   FocusNode? neutralFocus,
+  bool materialAround = false,
 }) {
+  Widget wrap(BuildContext context, Widget? child) {
+    final inner = reduceMotion
+        ? MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          )
+        : child!;
+    return materialAround ? Material(child: inner) : inner;
+  }
+
   return MaterialApp(
     locale: Locale(languageCode),
     supportedLocales: const [Locale('en'), Locale('es')],
@@ -426,12 +547,7 @@ Widget homeApp(
     darkTheme: buildTheme(Brightness.dark),
     themeMode: ThemeMode.system,
     themeAnimationDuration: Duration.zero,
-    builder: reduceMotion
-        ? (context, child) => MediaQuery(
-            data: MediaQuery.of(context).copyWith(disableAnimations: true),
-            child: child!,
-          )
-        : null,
+    builder: reduceMotion || materialAround ? wrap : null,
     home: NetworkPromptHost(
       controller: controller,
       child: PairingHost(
@@ -457,6 +573,7 @@ Future<void> pumpHome(
   DropEvents? dropEvents,
   SettingsController? settings,
   AttentionWatcher? attention,
+  bool materialAround = false,
 }) async {
   await tester.pumpWidget(
     homeApp(
@@ -466,6 +583,7 @@ Future<void> pumpHome(
       dropEvents: dropEvents,
       settings: settings,
       attention: attention,
+      materialAround: materialAround,
     ),
   );
   if (settle) {

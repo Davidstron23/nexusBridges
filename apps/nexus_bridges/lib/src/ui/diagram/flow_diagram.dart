@@ -8,8 +8,10 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../../drop/drop_zone.dart';
 import '../../l10n/app_strings.dart';
 import '../attention.dart';
+import '../configure/configure_controller.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
+import '../icons/glyphs.dart';
 import '../progress/selection_progress_painter.dart';
 import '../send_menu.dart';
 import '../theme/app_theme.dart';
@@ -244,6 +246,7 @@ class _FlowDiagramState extends State<FlowDiagram>
     _reduceMotion = MediaQuery.disableAnimationsOf(context);
     final drop = DropScope.maybeOf(context);
     final dragging = drop?.dragging ?? false;
+    final configured = ConfigureScope.shownFingerprint(context);
     _syncDrag(dragging);
 
     return LayoutBuilder(
@@ -354,6 +357,7 @@ class _FlowDiagramState extends State<FlowDiagram>
                     dragSpin: _spin,
                     lit: lit,
                     hot: hovering,
+                    configured: configured,
                   ),
                 ),
               ),
@@ -429,6 +433,12 @@ class _FlowDiagramState extends State<FlowDiagram>
                   _closePopover();
                   widget.onSendFolders(entry.fingerprint);
                 },
+                onConfigure: ConfigureScope.read(context) == null
+                    ? null
+                    : () {
+                        _closePopover();
+                        ConfigureScope.read(context)?.open(entry.fingerprint);
+                      },
               ),
             ),
           ),
@@ -560,6 +570,7 @@ class _FlowPopover extends StatelessWidget {
     required this.tone,
     required this.onFiles,
     required this.onFolders,
+    this.onConfigure,
   });
 
   final DeviceEntry entry;
@@ -567,6 +578,7 @@ class _FlowPopover extends StatelessWidget {
   final DiscTone tone;
   final VoidCallback onFiles;
   final VoidCallback onFolders;
+  final VoidCallback? onConfigure;
 
   @override
   Widget build(BuildContext context) {
@@ -681,6 +693,20 @@ class _FlowPopover extends StatelessWidget {
                     onFolders: onFolders,
                   ),
                 ),
+                if (onConfigure != null) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      style: smallButton.merge(
+                        TextButton.styleFrom(foregroundColor: colors.textWeak),
+                      ),
+                      onPressed: onConfigure,
+                      icon: const GlyphIcon(Glyphs.sliders, size: 14),
+                      label: Text(strings.configureEllipsis),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

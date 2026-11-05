@@ -6,6 +6,7 @@ import '../l10n/app_strings.dart';
 import 'armed.dart';
 import 'activity_cards.dart';
 import 'format.dart';
+import 'shown_name.dart';
 import 'icons/glyphs.dart';
 import 'theme/app_theme.dart';
 import 'theme/components.dart';
@@ -85,10 +86,14 @@ class IncomingCards extends StatelessWidget {
   }
 }
 
-String _senderName(IncomingTransferView view) {
+String _senderName(
+  IncomingTransferView view,
+  AppStrings strings,
+  NodeState? state,
+) {
   final name = view.peerName;
   if (name == null || name.isEmpty) return _shortFingerprint(view);
-  return name;
+  return shownPeerName(strings, state, view.peerFingerprint, name);
 }
 
 String _shortFingerprint(IncomingTransferView view) {
@@ -290,8 +295,12 @@ class _WarningCard extends StatelessWidget {
             children: [
               Text(
                 view.isFolder
-                    ? strings.incomingFolderRequestTitle(_senderName(view))
-                    : strings.incomingRequestTitle(_senderName(view)),
+                    ? strings.incomingFolderRequestTitle(
+                        _senderName(view, strings, controller.state),
+                      )
+                    : strings.incomingRequestTitle(
+                        _senderName(view, strings, controller.state),
+                      ),
                 style: NbText.title.copyWith(color: colors.text),
               ),
               const SizedBox(height: 3),
@@ -436,7 +445,9 @@ class _FolderQuestionCard extends StatelessWidget {
             ),
             children: [
               Text(
-                strings.folderQuestionTitle(_senderName(view)),
+                strings.folderQuestionTitle(
+                  _senderName(view, strings, controller.state),
+                ),
                 style: NbText.title.copyWith(color: colors.text),
               ),
               if (namesake != null) _Namesake(name: namesake),

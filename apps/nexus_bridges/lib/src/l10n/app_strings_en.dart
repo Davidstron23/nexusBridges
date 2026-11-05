@@ -1204,4 +1204,349 @@ final class AppStringsEn implements AppStrings {
     'Nov',
     'Dec',
   ][month - 1];
+
+  @override
+  String get configure => 'Configure';
+
+  @override
+  String get configureEllipsis => 'Configure…';
+
+  @override
+  String get thisDeviceIs => 'This device is';
+
+  @override
+  String get mineCard => 'Mine';
+
+  @override
+  String get mineCardHelp => 'Can use your folders and send without asking';
+
+  @override
+  String get foreignCard => "Someone else's";
+
+  @override
+  String get foreignCardHelp => 'Asks every time and never sees your folders';
+
+  @override
+  String get sharesTitle => 'Folders it can use';
+
+  @override
+  String sharesDesc(String name) => 'Where $name can leave things';
+
+  @override
+  String sharesInfo(String name) =>
+      "These are folders on this device. $name sees their subfolders, never your files. Local drives, USB and microSD work; network drives don't.";
+
+  @override
+  String get sharesEmpty => 'None. What it sends goes to your receive folder';
+
+  @override
+  String get sharesAdd => 'Add folder…';
+
+  @override
+  String get sharesPaused =>
+      "Paused while it's someone else's. They come back if you mark it as mine";
+
+  @override
+  String get sharesForeignOnly => 'Only your own devices can use folders';
+
+  @override
+  String get shareUnavailable => 'Not available';
+
+  @override
+  String get chipRemovable => 'USB / microSD';
+
+  @override
+  String get shareRemoveTooltip => 'Stop using this folder';
+
+  @override
+  String get shareCloudConfirm =>
+      'This folder syncs with the cloud: what arrives may be uploaded';
+
+  @override
+  String get shareNoMarkConfirm =>
+      "This drive can't mark files from the internet";
+
+  @override
+  String get shareAddAnyway => 'Add anyway';
+
+  @override
+  String get shareRefusedNetwork =>
+      "Network drives and shared folders can't be used";
+
+  @override
+  String get shareRefusedAdminShare =>
+      'Administrative shares are never allowed';
+
+  @override
+  String get shareRefusedUnknownDrive => "Windows can't identify this drive";
+
+  @override
+  String get shareRefusedForbidden =>
+      "Windows and program folders, the startup folder and the root of the system drive can't be shared";
+
+  @override
+  String get shareRefusedAppData => "This is NexusBridges' own data";
+
+  @override
+  String get shareRefusedTemp => 'This is a temporary folder of the app';
+
+  @override
+  String get shareRefusedTooLong =>
+      'The path is too long (more than 236 characters)';
+
+  @override
+  String get shareRefusedMissing => 'The folder no longer exists';
+
+  @override
+  String get shareRefusedAlready => "It's already in the list";
+
+  @override
+  String get shareRefusedFull => 'Up to 16 folders per device';
+
+  @override
+  String get shareFailed => "The folder couldn't be added";
+
+  @override
+  String get favoritesTitle => 'Favourite destinations';
+
+  @override
+  String get favoritesDesc => 'They come first when sending';
+
+  @override
+  String favoritesInfo(String name) =>
+      'Chosen among the folders $name shares with you';
+
+  @override
+  String get favoritesEmpty => 'No favourites yet';
+
+  @override
+  String get favoritesAdd => 'Add…';
+
+  @override
+  String get favoritesNeedVisible => 'It has to be visible';
+
+  @override
+  String get favoritesPaused =>
+      "Someone else's device has no favourites. They come back if you mark it as mine";
+
+  @override
+  String get favoritesFull => 'Up to 8 favourites per device';
+
+  @override
+  String get favoriteRemoveTooltip => 'Remove from favourites';
+
+  @override
+  String get aliasTitle => 'Local nickname';
+
+  @override
+  String get aliasPlaceholder => 'No nickname';
+
+  @override
+  String aliasHelp(String real) => 'Only you see it. Others see «$real»';
+
+  @override
+  String historyTitle(String name) => 'History with $name';
+
+  @override
+  String get historyEmpty => 'Nothing sent between you yet';
+
+  @override
+  String historySeeAll(int n) => 'See all ($n)';
+
+  @override
+  String get historyLast3 => 'Last 3 · up to 50 are kept';
+
+  @override
+  String get historyKept => 'Up to 50 are kept';
+
+  @override
+  String get historyInfo =>
+      'Kept only on this device: names, sizes and destinations. Never the content';
+
+  @override
+  String get historyBack => 'Back to Configure';
+
+  @override
+  String get historyCancelled => 'Cancelled';
+
+  @override
+  String get historyFailed => 'Failed';
+
+  @override
+  String get historyDefaultFolder => 'Receive folder';
+
+  @override
+  String get historyDeliveredTip => 'Delivered';
+
+  @override
+  String get historySavedTip => 'Saved';
+
+  @override
+  String get historySentLabel => 'Sent';
+
+  @override
+  String get historyReceivedLabel => 'Received';
+
+  @override
+  String get historyToday => 'Today';
+
+  @override
+  String get historyYesterday => 'Yesterday';
+
+  @override
+  String historySummary(int sent, int received) =>
+      '$sent sent and $received received · up to 50 are kept';
+
+  @override
+  String filesCount(int n) => '$n files';
+
+  @override
+  String historyItems(int n) => '$n items';
+
+  @override
+  String historyFirstAndMore(String name, int n) => '${n}ame and $n more';
+
+  @override
+  String historyDelivered(int d, int n) => '$d of $n delivered';
+
+  @override
+  String get homeFolder => 'Home';
+
+  @override
+  String get unpairSectionTitle => 'Unpair';
+
+  @override
+  String get unpairSectionHelp =>
+      'Removes its folders, favourites, nickname and history';
+
+  @override
+  String get unpairSectionInfo =>
+      'To send each other files again you will have to pair again';
+
+  @override
+  String destTitle(String name) => 'Send to $name';
+
+  @override
+  String get destQuestion => 'Where should it go?';
+
+  @override
+  String get destFavorites => 'Favourites';
+
+  @override
+  String destFoldersOf(String name) => "$name's folders";
+
+  @override
+  String get destShared => 'shared with you';
+
+  @override
+  String get destDefaultFolder => 'Default folder';
+
+  @override
+  String get destDefaultTag => 'the receive one';
+
+  @override
+  String get destRecent => 'Recently used';
+
+  @override
+  String get destExplore => 'Browse…';
+
+  @override
+  String get destLoading => 'Asking for its folders…';
+
+  @override
+  String destNoChoice(String name) =>
+      "$name doesn't let you choose a folder right now; it will go to its default folder";
+
+  @override
+  String destUnreadable(String name) => "Couldn't read $name's folder list";
+
+  @override
+  String get destNoLongerAvailable => 'No longer available';
+
+  @override
+  String get destKeys => '↑ ↓ choose · Enter send · Esc cancel';
+
+  @override
+  String get navSendHere => 'Send here';
+
+  @override
+  String get navSaveFavorite => 'Save as favourite';
+
+  @override
+  String get navNewFolder => 'New folder';
+
+  @override
+  String get navNewFolderPlaceholder => 'New folder name';
+
+  @override
+  String get navCreate => 'Create';
+
+  @override
+  String get navWillBeCreated => 'Will be created on arrival';
+
+  @override
+  String navNewFolderEmpty(String name) =>
+      "$name will create it when the transfer arrives. If it doesn't arrive, nothing is left";
+
+  @override
+  String get navNoSubfolders => 'No subfolders';
+
+  @override
+  String get navChoose => 'Choose a folder';
+
+  @override
+  String navIn(String name) => 'In $name';
+
+  @override
+  String get navMore => 'Showing the first 1,000 folders';
+
+  @override
+  String get navPartial => 'The list is incomplete: the folder took too long';
+
+  @override
+  String get navGone => 'That folder is no longer available';
+
+  @override
+  String navBusy(String name) => '$name is busy; try again in a few seconds';
+
+  @override
+  String navUnreadable(String name) => "Couldn't read the folders of $name";
+
+  @override
+  String get navNameInvalid => "That name can't be used for a folder";
+
+  @override
+  String get navNameExists => "There's already a folder with that name";
+
+  @override
+  String get navBack => 'Back';
+
+  @override
+  String get portalDropIn => 'Drop on a folder';
+
+  @override
+  String get portalHold => 'Hold on a folder to open it. Drop to send there';
+
+  @override
+  String portalBack(String name) => 'Back to $name';
+
+  @override
+  String portalHereIn(String name) => 'Here, in $name';
+
+  @override
+  String dragHintMine(String name) => 'Send to $name · hold to see its folders';
+
+  @override
+  String outcomeShareRemoved(String name) =>
+      'You removed that folder from the ones $name can use';
+
+  @override
+  String outcomePeerMarkedForeign(String name) =>
+      "You marked $name as someone else's";
+
+  @override
+  String resultIn(String label) => 'in $label';
+
+  @override
+  String nameWithReal(String alias, String real) => '$alias ($real)';
 }
