@@ -635,7 +635,7 @@ final class AppStringsEn implements AppStrings {
     TransferOutcome.destinationLost =>
       'That folder stopped being available on the other device.',
     TransferOutcome.shareRemoved =>
-      'You removed that folder from the ones the other device can use.',
+      'You removed that folder from the ones you share with the other device.',
     TransferOutcome.peerMarkedForeign =>
       "You marked the other device as someone else's.",
   };
@@ -719,7 +719,7 @@ final class AppStringsEn implements AppStrings {
     TransferOutcome.destinationLost =>
       'That folder stopped being available on the other device.',
     TransferOutcome.shareRemoved =>
-      'You removed that folder from the ones the other device can use.',
+      'You removed that folder from the ones you share with the other device.',
     TransferOutcome.peerMarkedForeign =>
       "You marked the other device as someone else's.",
   };
@@ -823,6 +823,9 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String get sendEllipsis => 'Send…';
+
+  @override
+  String get sendFilesEllipsis => 'Send files…';
 
   @override
   String get sendFilesOption => 'Files…';
@@ -1110,7 +1113,7 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String get systemTraySwitchHelp =>
-      'The X hides the window and keeps receiving.';
+      'Closing the window keeps receiving with the app in the background';
 
   @override
   String get systemTrayOffHelp =>
@@ -1218,7 +1221,8 @@ final class AppStringsEn implements AppStrings {
   String get mineCard => 'Mine';
 
   @override
-  String get mineCardHelp => 'Can use your folders and send without asking';
+  String get mineCardHelp =>
+      'You can share folders with it and it sends without asking';
 
   @override
   String get foreignCard => "Someone else's";
@@ -1227,10 +1231,10 @@ final class AppStringsEn implements AppStrings {
   String get foreignCardHelp => 'Asks every time and never sees your folders';
 
   @override
-  String get sharesTitle => 'Folders it can use';
+  String get sharesTitle => 'Folders you share with them';
 
   @override
-  String sharesDesc(String name) => 'Where $name can leave things';
+  String sharesDesc(String name) => 'On this device. $name can send to them.';
 
   @override
   String sharesInfo(String name) =>
@@ -1247,7 +1251,8 @@ final class AppStringsEn implements AppStrings {
       "Paused while it's someone else's. They come back if you mark it as mine";
 
   @override
-  String get sharesForeignOnly => 'Only your own devices can use folders';
+  String get sharesForeignOnly =>
+      'You can only share folders with your own devices';
 
   @override
   String get shareUnavailable => 'Not available';
@@ -1256,7 +1261,7 @@ final class AppStringsEn implements AppStrings {
   String get chipRemovable => 'USB / microSD';
 
   @override
-  String get shareRemoveTooltip => 'Stop using this folder';
+  String get shareRemoveTooltip => 'Stop sharing this folder';
 
   @override
   String get shareCloudConfirm =>
@@ -1538,7 +1543,7 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String outcomeShareRemoved(String name) =>
-      'You removed that folder from the ones $name can use';
+      'You removed that folder from the ones you share with $name';
 
   @override
   String outcomePeerMarkedForeign(String name) =>

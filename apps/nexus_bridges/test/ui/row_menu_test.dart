@@ -463,7 +463,7 @@ void main() {
             isTrue,
           );
 
-          final send = _inRow(_mineFp, find.text(strings.sendEllipsis));
+          final send = _inRow(_mineFp, find.text(strings.sendFilesEllipsis));
           await mouse.moveTo(tester.getCenter(send));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 60));
@@ -504,7 +504,7 @@ void main() {
             'not move', (tester) async {
           await _pump(tester, code, brightness, reduceMotion: true);
           final mouse = await _mouse(tester);
-          final send = _inRow(_mineFp, find.text(strings.sendEllipsis));
+          final send = _inRow(_mineFp, find.text(strings.sendFilesEllipsis));
           await mouse.moveTo(tester.getCenter(send));
           await tester.pump();
           await tester.pump();
@@ -523,7 +523,7 @@ void main() {
         testWidgets('a disabled Send file stays flat on hover', (tester) async {
           await _pump(tester, code, brightness);
           final mouse = await _mouse(tester);
-          final send = _inRow(_hiddenFp, find.text(strings.sendEllipsis));
+          final send = _inRow(_hiddenFp, find.text(strings.sendFilesEllipsis));
           await mouse.moveTo(tester.getCenter(send));
           await tester.pump();
           await tester.pump(softButtonDuration);

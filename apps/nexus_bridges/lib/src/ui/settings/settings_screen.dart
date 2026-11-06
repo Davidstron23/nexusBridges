@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,9 +42,7 @@ const double _navFootPadding = 32;
 const double _backSize = 34;
 const Duration _indicatorSlide = Duration(milliseconds: 450);
 const Duration _jumpDuration = Duration(milliseconds: 500);
-const Duration _sectionIn = Duration(milliseconds: 550);
-const Duration _sectionStagger = Duration(milliseconds: 45);
-const Duration _sectionDelay = Duration(milliseconds: 140);
+const int _sectionCount = 8;
 
 final class _Entry {
   const _Entry({required this.icon, required this.title, required this.build});
@@ -68,8 +67,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const int _sectionCount = 8;
-
   final ScrollController _scroll = ScrollController();
   final GlobalKey _contentKey = GlobalKey();
   final List<GlobalKey> _keys = List.generate(
@@ -78,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
   final ValueNotifier<int> _active = ValueNotifier(0);
   final ConfirmRegistry _cancelConfirm = ConfirmRegistry();
-  double _pad = 0;
+  final ValueNotifier<double> _pad = ValueNotifier(0);
   bool _jumping = false;
   bool _measureQueued = false;
 
@@ -94,6 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     _active.dispose();
+    _pad.dispose();
     super.dispose();
   }
 
@@ -139,12 +137,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _contentKey.currentContext!.findRenderObject()! as RenderBox;
     final natural = math.max(
       0.0,
-      content.size.height - _pad - _scroll.position.viewportDimension,
+      content.size.height - _pad.value - _scroll.position.viewportDimension,
     );
     final needed = tops.last - (_spyLine - 16);
     final pad = math.max(0.0, (needed - natural).ceilToDouble());
-    if ((pad - _pad).abs() <= 1) return false;
-    setState(() => _pad = pad);
+    if ((pad - _pad.value).abs() <= 1) return false;
+    _pad.value = pad;
     return true;
   }
 
@@ -286,67 +284,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _navWidth + _columnGap,
                           inner - _rightMargin - contentWidth,
                         );
-                        return _TopFade(
-                          child: Stack(
-                            children: [
-                              Positioned.fill(
-                                child: FocusTraversalOrder(
-                                  order: const NumericFocusOrder(2),
-                                  child: FocusTraversalGroup(
-                                    child: Scrollbar(
+                        return Stack(
+                          children: [
+                            Positioned.fill(
+                              child: FocusTraversalOrder(
+                                order: const NumericFocusOrder(2),
+                                child: FocusTraversalGroup(
+                                  child: Scrollbar(
+                                    controller: _scroll,
+                                    child: SingleChildScrollView(
                                       controller: _scroll,
-                                      child: SingleChildScrollView(
-                                        controller: _scroll,
-                                        child:
-                                            NotificationListener<
-                                              SizeChangedLayoutNotification
-                                            >(
-                                              onNotification: (_) {
-                                                _queueMeasure();
-                                                return false;
-                                              },
-                                              child: SizeChangedLayoutNotifier(
-                                                child: _Content(
-                                                  key: _contentKey,
-                                                  left:
-                                                      _sidePadding +
-                                                      contentLeft,
-                                                  width: contentWidth,
-                                                  pad: _pad,
-                                                  entries: entries,
-                                                  keys: _keys,
-                                                  footer:
-                                                      strings.settingsFooter,
-                                                ),
+                                      child:
+                                          NotificationListener<
+                                            SizeChangedLayoutNotification
+                                          >(
+                                            onNotification: (_) {
+                                              _queueMeasure();
+                                              return false;
+                                            },
+                                            child: SizeChangedLayoutNotifier(
+                                              child: _Content(
+                                                key: _contentKey,
+                                                left:
+                                                    _sidePadding + contentLeft,
+                                                width: contentWidth,
+                                                pad: _pad,
+                                                entries: entries,
+                                                keys: _keys,
+                                                footer: strings.settingsFooter,
                                               ),
                                             ),
-                                      ),
+                                          ),
                                     ),
                                   ),
                                 ),
                               ),
-                              Positioned(
-                                left: _sidePadding,
-                                top: 0,
-                                bottom: 0,
-                                width: _navWidth,
-                                child: FocusTraversalOrder(
-                                  order: const NumericFocusOrder(1),
-                                  child: FocusTraversalGroup(
-                                    child: Listener(
-                                      onPointerSignal: _wheel,
-                                      child: _Nav(
-                                        entries: entries,
-                                        active: _active,
-                                        foot: strings.settingsNavFoot,
-                                        onSelect: _jump,
-                                      ),
+                            ),
+                            Positioned(
+                              left: _sidePadding,
+                              top: 0,
+                              bottom: 0,
+                              width: _navWidth,
+                              child: FocusTraversalOrder(
+                                order: const NumericFocusOrder(1),
+                                child: FocusTraversalGroup(
+                                  child: Listener(
+                                    onPointerSignal: _wheel,
+                                    child: _Nav(
+                                      entries: entries,
+                                      active: _active,
+                                      foot: strings.settingsNavFoot,
+                                      onSelect: _jump,
                                     ),
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                            const _TopFade(),
+                          ],
                         );
                       },
                     ),
@@ -362,22 +357,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class _TopFade extends StatelessWidget {
-  const _TopFade({required this.child});
-
-  final Widget child;
+  const _TopFade();
 
   @override
   Widget build(BuildContext context) {
     final ground = NbColors.of(context).ground;
-    return ShaderMask(
-      blendMode: BlendMode.dstIn,
-      shaderCallback: (bounds) => LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Colors.transparent, ground],
-        stops: [0, math.min(1.0, _fadeHeight / math.max(1.0, bounds.height))],
-      ).createShader(bounds),
-      child: child,
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      height: _fadeHeight,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [ground, ground.withValues(alpha: 0)],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -395,7 +395,7 @@ class _Content extends StatelessWidget {
 
   final double left;
   final double width;
-  final double pad;
+  final ValueListenable<double> pad;
   final List<_Entry> entries;
   final List<GlobalKey> keys;
   final String footer;
@@ -413,78 +413,18 @@ class _Content extends StatelessWidget {
             children: [
               for (var i = 0; i < entries.length; i++) ...[
                 if (i > 0) const SizedBox(height: _cardGap),
-                _StaggerIn(
-                  key: keys[i],
-                  index: i + 1,
-                  child: entries[i].build(),
-                ),
+                RepaintBoundary(key: keys[i], child: entries[i].build()),
               ],
               const SizedBox(height: 22),
               _Footer(text: footer),
-              SizedBox(height: pad),
+              ValueListenableBuilder<double>(
+                valueListenable: pad,
+                builder: (context, height, _) => SizedBox(height: height),
+              ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _StaggerIn extends StatefulWidget {
-  const _StaggerIn({required this.index, required this.child, super.key});
-
-  final int index;
-  final Widget child;
-
-  @override
-  State<_StaggerIn> createState() => _StaggerInState();
-}
-
-class _StaggerInState extends State<_StaggerIn>
-    with SingleTickerProviderStateMixin {
-  AnimationController? _controller;
-  late Animation<double> _progress;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_controller != null) return;
-    if (MediaQuery.disableAnimationsOf(context)) return;
-    final delay = _sectionDelay + _sectionStagger * widget.index;
-    final total = delay + _sectionIn;
-    final controller = AnimationController(vsync: this, duration: total);
-    _controller = controller;
-    _progress = CurvedAnimation(
-      parent: controller,
-      curve: Interval(
-        delay.inMilliseconds / total.inMilliseconds,
-        1,
-        curve: labEaseOut,
-      ),
-    );
-    controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = _controller;
-    if (controller == null) return widget.child;
-    return AnimatedBuilder(
-      animation: _progress,
-      builder: (context, child) => Opacity(
-        opacity: _progress.value,
-        child: Transform.translate(
-          offset: Offset(0, 12 * (1 - _progress.value)),
-          child: child,
-        ),
-      ),
-      child: widget.child,
     );
   }
 }
@@ -515,8 +455,7 @@ class _Nav extends StatelessWidget {
         final lineHeight = MediaQuery.textScalerOf(context).scale(17);
         final room = constraints.maxHeight - listHeight - _navFootPadding;
         final lines = (room / lineHeight).floor();
-        return _StaggerIn(
-          index: 0,
+        return RepaintBoundary(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

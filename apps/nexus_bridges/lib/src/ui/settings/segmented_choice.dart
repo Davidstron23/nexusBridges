@@ -6,10 +6,10 @@ import '../theme/app_theme.dart';
 import '../theme/tokens.dart';
 import 'state_blend.dart';
 
+const double _trackHeight = 39;
 const double _trackRadius = 10;
-const double _thumbRadius = 7;
-const double _trackPadding = 3;
-const double _segmentHeight = 32;
+const double _trackPadding = 4;
+const double _thumbRadius = _trackRadius - _trackPadding;
 const Duration _slide = Duration(milliseconds: 420);
 const Duration _inkFade = Duration(milliseconds: 350);
 
@@ -40,7 +40,9 @@ class SegmentedChoice<T> extends StatelessWidget {
     final count = options.length;
     final found = options.indexWhere((option) => option.value == value);
     final index = found < 0 ? 0 : found;
-    final height = MediaQuery.textScalerOf(context).scale(_segmentHeight);
+    final height =
+        MediaQuery.textScalerOf(context).scale(_trackHeight) -
+        2 * _trackPadding;
     return Semantics(
       container: true,
       child: DecoratedBox(
@@ -70,11 +72,7 @@ class SegmentedChoice<T> extends StatelessWidget {
                         color: colors.card,
                         borderRadius: BorderRadius.circular(_thumbRadius),
                         boxShadow: [
-                          BoxShadow(
-                            color: colors.nodeShadow,
-                            offset: const Offset(0, 1),
-                            blurRadius: 2,
-                          ),
+                          BoxShadow(color: colors.nodeShadow, blurRadius: 2),
                         ],
                       ),
                     ),

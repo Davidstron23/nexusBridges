@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges_core/nexus_bridges_core.dart'
+    show TransferOutcome;
 
 typedef _Text = String Function(AppStrings strings);
 
@@ -150,6 +152,51 @@ void main() {
         expect(strings.navBusy('Torre'), contains('Torre'));
         expect(strings.historyDelivered(2, 5), contains('2'));
         expect(strings.historyDelivered(2, 5), contains('5'));
+      }
+    });
+
+    test('the folders you share have one name in every text', () {
+      final en = stringsFor('en');
+      final es = stringsFor('es');
+
+      expect(es.sharesTitle, 'Carpetas que le compartes');
+      expect(
+        es.sharesDesc('Torre'),
+        'De este equipo. Torre podrá enviarte aquí.',
+      );
+      expect(en.sharesTitle, 'Folders you share with them');
+      expect(en.sharesDesc('Torre'), 'On this device. Torre can send to them.');
+      expect(
+        es.sharesInfo('Torre'),
+        startsWith('Son carpetas de este equipo.'),
+      );
+      expect(
+        en.sharesInfo('Torre'),
+        startsWith('These are folders on this device.'),
+      );
+
+      for (final text in [
+        es.mineCardHelp,
+        es.sharesForeignOnly,
+        es.shareRemoveTooltip,
+        es.outcomeShareRemoved('Torre'),
+        es.sentOutcome(TransferOutcome.shareRemoved),
+        es.receivedOutcome(TransferOutcome.shareRemoved),
+      ]) {
+        expect(text, contains('compart'));
+        expect(text, isNot(contains('usar')));
+      }
+      for (final text in [
+        en.mineCardHelp,
+        en.sharesForeignOnly,
+        en.shareRemoveTooltip,
+        en.outcomeShareRemoved('Torre'),
+        en.sentOutcome(TransferOutcome.shareRemoved),
+        en.receivedOutcome(TransferOutcome.shareRemoved),
+      ]) {
+        expect(text.toLowerCase(), contains('shar'));
+        expect(text, isNot(contains(' use')));
+        expect(text, isNot(contains(' using')));
       }
     });
   });

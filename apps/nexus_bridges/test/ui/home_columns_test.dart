@@ -245,7 +245,7 @@ void main() {
           matching: find.text(strings.sendEllipsis),
         );
         expect(popoverSend, findsOneWidget);
-        expect(find.text(strings.sendEllipsis), findsNWidgets(3));
+        expect(find.text(strings.sendFilesEllipsis), findsNWidgets(2));
         await tester.tap(popoverSend);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 240));
@@ -983,7 +983,9 @@ void main() {
         });
 
         testWidgets('the track leaves 4 px of air around the thumb, with '
-            'concentric corners of 12 and 8', (tester) async {
+            'concentric corners of 10 and 6 and a shadow without offset', (
+          tester,
+        ) async {
           await mount(tester);
 
           final track = find.ancestor(
@@ -998,21 +1000,27 @@ void main() {
           final trackBox = tester.widget<DecoratedBox>(track);
           expect(
             (trackBox.decoration as BoxDecoration).borderRadius,
-            BorderRadius.circular(12),
+            BorderRadius.circular(10),
           );
           final thumbBox = tester.widget<DecoratedBox>(
             find.descendant(of: _thumb, matching: find.byType(DecoratedBox)),
           );
           expect(
             (thumbBox.decoration as BoxDecoration).borderRadius,
-            BorderRadius.circular(8),
+            BorderRadius.circular(6),
           );
+          final shadows = (thumbBox.decoration as BoxDecoration).boxShadow!;
+          expect(shadows, isNotEmpty);
+          for (final shadow in shadows) {
+            expect(shadow.offset, Offset.zero);
+          }
           final outer = tester.getRect(track);
           final thumb = thumbRect(tester);
+          expect(outer.height, 39);
           expect(thumb.top - outer.top, 4);
           expect(outer.bottom - thumb.bottom, 4);
           expect(outer.right - thumb.right, 4);
-          expect(thumb.height, 32);
+          expect(thumb.height, 31);
 
           await tester.tap(find.text(strings.activityTab));
           await tester.pumpAndSettle();

@@ -48,10 +48,12 @@ class SendMenuButton extends StatefulWidget {
     required this.onFiles,
     required this.onFolders,
     this.height = 28,
+    this.label,
     this.onOpenChanged,
     super.key,
   });
 
+  final String? label;
   final bool enabled;
   final VoidCallback onFiles;
   final VoidCallback onFolders;
@@ -247,7 +249,7 @@ class _SendMenuButtonState extends State<SendMenuButton>
         expanded: _open,
         child: SoftButton(
           glyph: Glyphs.send,
-          label: strings.sendEllipsis,
+          label: widget.label ?? strings.sendEllipsis,
           height: widget.height,
           onPressed: widget.enabled ? _toggle : null,
         ),

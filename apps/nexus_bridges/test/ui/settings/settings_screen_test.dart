@@ -10,6 +10,7 @@ import 'package:nexus_bridges/src/ui/diagram/flow_painter.dart';
 import 'package:nexus_bridges/src/ui/network_strip.dart';
 import 'package:nexus_bridges/src/ui/settings/segmented_choice.dart';
 import 'package:nexus_bridges/src/ui/settings/settings_controller.dart';
+import 'package:nexus_bridges/src/ui/settings/settings_layer.dart';
 import 'package:nexus_bridges/src/ui/settings/settings_section.dart';
 import 'package:nexus_bridges/src/ui/settings/system_tray_section.dart';
 import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
@@ -702,6 +703,168 @@ void main() {
         controller.emit(settingsState(incoming: incomingView()));
         await tester.pumpAndSettle();
         expect(settings.isOpen, isTrue);
+      });
+    });
+
+    group('[$code] the way in and out of Settings', () {
+      Finder mainScreen(WidgetTester tester) => find.byWidget(
+        tester.widget<SettingsLayer>(find.byType(SettingsLayer)).child,
+      );
+
+      T nearest<T extends Widget>(WidgetTester tester, Finder of) => tester
+          .widget<T>(find.ancestor(of: of, matching: find.byType(T)).first);
+
+      Future<void> startMotion(WidgetTester tester) async {
+        await tester.pump();
+        await tester.pump();
+        await tester.pump();
+      }
+
+      void expectFadeAndShift(WidgetTester tester) {
+        final main = mainScreen(tester);
+        final opacity = nearest<Opacity>(tester, main).opacity;
+        expect(opacity, greaterThan(0));
+        expect(opacity, lessThan(1));
+        final transform = nearest<Transform>(tester, main).transform;
+        expect(transform.getTranslation().x, lessThan(0));
+        expect(transform.getMaxScaleOnAxis(), closeTo(1, 0.0001));
+        expect(
+          find.ancestor(of: main, matching: find.byType(ImageFiltered)),
+          findsNothing,
+        );
+      }
+
+      testWidgets('the main screen fades and shifts, without blur or scale, '
+          'in both directions', (tester) async {
+        await pumpSettings(tester, code, open: false);
+
+        await tester.tap(find.byTooltip(strings.settingsButton));
+        await startMotion(tester);
+        await tester.pump(const Duration(milliseconds: 150));
+        expectFadeAndShift(tester);
+
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await startMotion(tester);
+        await tester.pump(const Duration(milliseconds: 150));
+        expectFadeAndShift(tester);
+        await tester.pumpAndSettle();
+      });
+
+      testWidgets('both screens move as a picture only during the '
+          'transition, already painted before anything moves', (tester) async {
+        await pumpSettings(tester, code, open: false);
+        final main = mainScreen(tester);
+        bool asPicture(Finder of) =>
+            nearest<SnapshotWidget>(tester, of).controller.allowSnapshotting;
+
+        expect(asPicture(main), isFalse);
+
+        await tester.tap(find.byTooltip(strings.settingsButton));
+        await tester.pump();
+        expect(asPicture(main), isTrue);
+        expect(asPicture(settingsScreen), isTrue);
+        final ready = nearest<Opacity>(tester, settingsScreen).opacity;
+        expect(ready, greaterThan(0), reason: 'zero would skip the paint');
+        expect(ready, lessThan(0.01));
+
+        await tester.pumpAndSettle();
+        expect(asPicture(settingsScreen), isFalse);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(asPicture(settingsScreen), isTrue);
+        expect(nearest<Opacity>(tester, main).opacity, greaterThan(0));
+
+        await tester.pumpAndSettle();
+        expect(asPicture(main), isFalse);
+      });
+
+      testWidgets('the tickers of the main screen stop during the whole '
+          'transition and come back at the end', (tester) async {
+        await pumpSettings(tester, code, open: false);
+        final main = tester.element(find.byTooltip(strings.settingsButton));
+        bool enabled() => TickerMode.valuesOf(main).enabled;
+
+        expect(enabled(), isTrue);
+
+        await tester.tap(find.byTooltip(strings.settingsButton));
+        await tester.pump();
+        expect(enabled(), isFalse);
+        await tester.pump(const Duration(milliseconds: 150));
+        expect(enabled(), isFalse);
+        await tester.pumpAndSettle();
+        expect(enabled(), isFalse);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        expect(enabled(), isFalse);
+        await tester.pump(const Duration(milliseconds: 150));
+        expect(enabled(), isFalse);
+        await tester.pumpAndSettle();
+        expect(enabled(), isTrue);
+      });
+
+      testWidgets('every section is built before anything moves and they all '
+          'arrive together', (tester) async {
+        await pumpSettings(tester, code, open: false);
+        final sections = find.descendant(
+          of: settingsScreen,
+          matching: find.byType(SettingsSection),
+        );
+        double screen() => nearest<Opacity>(tester, settingsScreen).opacity;
+        void expectTogether() {
+          for (final element in sections.evaluate()) {
+            expect(
+              element.findAncestorWidgetOfExactType<Opacity>()!.opacity,
+              screen(),
+            );
+          }
+        }
+
+        await tester.tap(find.byTooltip(strings.settingsButton));
+        await tester.pump();
+        expect(sections, findsNWidgets(_titles(strings).length));
+        expect(screen(), lessThan(0.01));
+
+        await startMotion(tester);
+        await tester.pump(const Duration(milliseconds: 150));
+        expect(screen(), inExclusiveRange(0, 1));
+        expectTogether();
+
+        await tester.pumpAndSettle();
+        expect(screen(), 1);
+        expectTogether();
+      });
+
+      testWidgets('opening and closing in the same frame does not leave '
+          'Settings closing forever', (tester) async {
+        final (_, settings) = await pumpSettings(tester, code, open: false);
+
+        settings.open();
+        settings.close();
+        await tester.pumpAndSettle();
+
+        expect(settings.isOpen, isFalse);
+        expect(settings.closing, isFalse);
+        expect(settingsScreen, findsNothing);
+      });
+
+      testWidgets('with less motion every section is there at once', (
+        tester,
+      ) async {
+        await pumpSettings(tester, code, open: false, reduceMotion: true);
+
+        await tester.tap(find.byTooltip(strings.settingsButton));
+        await tester.pump();
+
+        expect(
+          find.descendant(
+            of: settingsScreen,
+            matching: find.byType(SettingsSection),
+          ),
+          findsNWidgets(_titles(strings).length),
+        );
       });
     });
   }

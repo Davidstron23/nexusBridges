@@ -1,4 +1,4 @@
-import 'dart:ui' show ImageFilter;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -14,8 +14,7 @@ const double _enterMs = 620;
 const double _exitMs = 500;
 const double _screenShift = 44;
 const double _mainShift = 36;
-const double _mainScale = 0.015;
-const double _mainBlur = 2;
+const double _paintOpacity = 1 / 255;
 const Cubic _ease = labEaseOut;
 const Cubic _easeIn = Cubic(0.55, 0, 1, 0.45);
 
@@ -83,6 +82,8 @@ class _SettingsLayerState extends State<SettingsLayer>
     duration: _enterTotal,
     reverseDuration: _exitTotal,
   );
+  final SnapshotController _snapshots = SnapshotController();
+  int _preparing = 0;
   bool _wasOpen = false;
   bool _reduceMotion = false;
   bool _closedByAttention = false;
@@ -124,10 +125,28 @@ class _SettingsLayerState extends State<SettingsLayer>
     widget.settings.removeListener(_onSettings);
     widget.attention?.removeListener(_onAttention);
     _motion.dispose();
+    _snapshots.dispose();
     super.dispose();
   }
 
+  double _painted(double opacity) =>
+      _snapshots.allowSnapshotting ? math.max(opacity, _paintOpacity) : opacity;
+
+  void _startWhenPainted(void Function() start) {
+    final turn = ++_preparing;
+    final binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((_) {
+      if (!mounted || turn != _preparing) return;
+      binding.addPostFrameCallback((_) {
+        if (mounted && turn == _preparing) start();
+      });
+      binding.scheduleFrame();
+    });
+  }
+
   void _onStatus(AnimationStatus status) {
+    if (status.isAnimating) return;
+    _snapshots.allowSnapshotting = false;
     if (status != AnimationStatus.dismissed) return;
     widget.settings.exitFinished();
     _restoreFocus();
@@ -152,17 +171,29 @@ class _SettingsLayerState extends State<SettingsLayer>
         final focused = FocusManager.instance.primaryFocus;
         _returnFocus = focused is FocusScopeNode ? null : focused;
       }
+      _preparing++;
       if (_reduceMotion) {
         _motion.value = 1;
-      } else {
+      } else if (_motion.isCompleted) {
+        _snapshots.allowSnapshotting = false;
+      } else if (_motion.isAnimating) {
         _motion.forward();
+      } else {
+        _snapshots.allowSnapshotting = true;
+        _startWhenPainted(_motion.forward);
       }
     } else if (!settings.isOpen && _wasOpen) {
       _wasOpen = false;
-      if (settings.instant || _reduceMotion) {
+      _preparing++;
+      if (_motion.isDismissed) {
+        _onStatus(AnimationStatus.dismissed);
+      } else if (settings.instant || _reduceMotion) {
         _motion.value = 0;
-      } else {
+      } else if (_motion.isAnimating) {
         _motion.reverse();
+      } else {
+        _snapshots.allowSnapshotting = true;
+        _startWhenPainted(_motion.reverse);
       }
     }
   }
@@ -185,43 +216,33 @@ class _SettingsLayerState extends State<SettingsLayer>
       children: [
         Positioned.fill(
           child: ListenableBuilder(
-            listenable: Listenable.merge([settings, _motion]),
+            listenable: Listenable.merge([settings, _motion, _snapshots]),
             builder: (context, child) {
               final phase = _Phase.of(_motion);
-              final blur = _mainBlur * phase.away;
               return ExcludeFocus(
                 excluding: settings.isOpen,
                 child: IgnorePointer(
                   ignoring: settings.isOpen,
                   child: TickerMode(
-                    enabled: !(settings.isOpen && _motion.isCompleted),
+                    enabled: !settings.isOpen && _motion.isDismissed,
                     child: Opacity(
-                      opacity: phase.mainOpacity,
-                      child: Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()
-                          ..translateByDouble(-_mainShift * phase.away, 0, 0, 1)
-                          ..scaleByDouble(
-                            1 - _mainScale * phase.away,
-                            1 - _mainScale * phase.away,
-                            1,
-                            1,
-                          ),
-                        child: ImageFiltered(
-                          enabled: blur > 0.05,
-                          imageFilter: ImageFilter.blur(
-                            sigmaX: blur,
-                            sigmaY: blur,
-                          ),
-                          child: child,
-                        ),
+                      opacity: _painted(phase.mainOpacity),
+                      child: Transform.translate(
+                        offset: Offset(-_mainShift * phase.away, 0),
+                        child: child,
                       ),
                     ),
                   ),
                 ),
               );
             },
-            child: widget.child,
+            child: RepaintBoundary(
+              child: SnapshotWidget(
+                controller: _snapshots,
+                mode: SnapshotMode.permissive,
+                child: widget.child,
+              ),
+            ),
           ),
         ),
         ListenableBuilder(
@@ -232,20 +253,26 @@ class _SettingsLayerState extends State<SettingsLayer>
             }
             return Positioned.fill(
               child: AnimatedBuilder(
-                animation: _motion,
+                animation: Listenable.merge([_motion, _snapshots]),
                 builder: (context, child) {
                   final phase = _Phase.of(_motion);
                   return Opacity(
-                    opacity: phase.screenOpacity,
+                    opacity: _painted(phase.screenOpacity),
                     child: Transform.translate(
                       offset: Offset(phase.screenShift, 0),
                       child: child,
                     ),
                   );
                 },
-                child: SettingsScreen(
-                  controller: widget.controller,
-                  settings: settings,
+                child: RepaintBoundary(
+                  child: SnapshotWidget(
+                    controller: _snapshots,
+                    mode: SnapshotMode.permissive,
+                    child: SettingsScreen(
+                      controller: widget.controller,
+                      settings: settings,
+                    ),
+                  ),
                 ),
               ),
             );

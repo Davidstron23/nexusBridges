@@ -618,19 +618,50 @@ void main() {
     });
 
     group('[$code] Q-11 the content fades in under the header', () {
-      testWidgets('Q-11 the scrolling area is masked with a top gradient', (
-        tester,
-      ) async {
+      testWidgets('Q-11 a band of the ground colour fades the top of the '
+          'scrolling area without a shader mask', (tester) async {
         await pumpSettings(tester, code, size: _short);
-        final mask = find.descendant(
+        final ground = NbColors.of(tester.element(settingsScreen)).ground;
+        final fade = find.descendant(
           of: settingsScreen,
           matching: find.byWidgetPredicate(
             (widget) =>
-                widget is ShaderMask && widget.blendMode == BlendMode.dstIn,
+                widget is DecoratedBox &&
+                widget.decoration is BoxDecoration &&
+                (widget.decoration as BoxDecoration).gradient is LinearGradient,
           ),
         );
-        expect(mask, findsOneWidget);
-        expect(tester.getTopLeft(mask).dy, tester.getTopLeft(_scrollView()).dy);
+        expect(fade, findsOneWidget);
+        final gradient =
+            (tester.widget<DecoratedBox>(fade).decoration as BoxDecoration)
+                    .gradient!
+                as LinearGradient;
+        expect(gradient.colors, [ground, ground.withValues(alpha: 0)]);
+        expect(gradient.begin, Alignment.topCenter);
+        expect(gradient.end, Alignment.bottomCenter);
+        final band = tester.getRect(fade);
+        final scroll = tester.getRect(_scrollView());
+        expect(band.top, scroll.top);
+        expect(band.left, scroll.left);
+        expect(band.width, scroll.width);
+        expect(band.height, 14);
+        expect(
+          tester
+              .widget<IgnorePointer>(
+                find
+                    .ancestor(of: fade, matching: find.byType(IgnorePointer))
+                    .first,
+              )
+              .ignoring,
+          isTrue,
+        );
+        expect(
+          find.descendant(
+            of: settingsScreen,
+            matching: find.byType(ShaderMask),
+          ),
+          findsNothing,
+        );
       });
     });
   }

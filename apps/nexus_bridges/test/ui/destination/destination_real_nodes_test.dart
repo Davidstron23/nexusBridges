@@ -442,7 +442,7 @@ Future<void> _pairMine(_Side a, _Side b) async {
 
 Finder _rowSend(_Side peer, AppStrings strings) => find.descendant(
   of: find.byKey(ValueKey(peer.fingerprint)),
-  matching: find.text(strings.sendEllipsis),
+  matching: find.text(strings.sendFilesEllipsis),
 );
 
 final Finder _menu = find.byType(DestinationMenu);

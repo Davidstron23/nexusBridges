@@ -57,6 +57,7 @@ final Map<String, _Text> _texts = {
   'systemTrayInfo': (s) => s.systemTrayInfo,
   'systemTraySwitch': (s) => s.systemTraySwitch,
   'systemTraySwitchHelp': (s) => s.systemTraySwitchHelp,
+  'sendFilesEllipsis': (s) => s.sendFilesEllipsis,
   'systemTrayOffHelp': (s) => s.systemTrayOffHelp,
   'sectionNetworks': (s) => s.sectionNetworks,
   'networksInfo': (s) => s.networksInfo,
@@ -191,6 +192,22 @@ void main() {
         'networks)', () {
       expect(es.networksInfo.toLowerCase(), contains('pausa'));
       expect(en.networksInfo.toLowerCase(), contains('paused'));
+    });
+
+    test('the send button of a row says what it sends', () {
+      expect(stringsFor('es').sendFilesEllipsis, 'Enviar archivos…');
+      expect(stringsFor('en').sendFilesEllipsis, 'Send files…');
+    });
+
+    test('the tray switch explains closing the window', () {
+      expect(
+        stringsFor('es').systemTraySwitchHelp,
+        'Al cerrar la ventana se sigue recibiendo con la app en segundo plano',
+      );
+      expect(
+        stringsFor('en').systemTraySwitchHelp,
+        'Closing the window keeps receiving with the app in the background',
+      );
     });
 
     test('the arguments end up in the text', () {

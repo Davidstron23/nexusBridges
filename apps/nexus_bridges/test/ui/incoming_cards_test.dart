@@ -1783,7 +1783,7 @@ void main() {
 
         final send = inside(
           find.byKey(ValueKey(other)),
-          find.text(strings.sendEllipsis),
+          find.text(strings.sendFilesEllipsis),
         );
         await tester.ensureVisible(send);
         await tester.pump();
