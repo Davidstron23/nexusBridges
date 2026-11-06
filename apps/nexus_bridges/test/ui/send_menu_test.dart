@@ -61,7 +61,7 @@ Finder _tip(String text) => find.byWidgetPredicate(
 Finder _send(AppStrings strings, String fingerprint) => find.ancestor(
   of: find.descendant(
     of: _row(fingerprint),
-    matching: find.text(strings.sendFilesOrFolders),
+    matching: find.text(strings.sendFilesEllipsis),
   ),
   matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
 );
@@ -88,11 +88,11 @@ void main() {
       testWidgets('an unpaired device has no Send…', (tester) async {
         await _pump(tester, code, _state());
 
-        expect(find.text(strings.sendFilesOrFolders), findsNWidgets(3));
+        expect(find.text(strings.sendFilesEllipsis), findsNWidgets(3));
         expect(
           find.descendant(
             of: _row(fingerprintOf('DDDD4444')),
-            matching: find.text(strings.sendFilesOrFolders),
+            matching: find.text(strings.sendFilesEllipsis),
           ),
           findsNothing,
         );
@@ -230,7 +230,7 @@ void main() {
           tester.element(
             find.descendant(
               of: button,
-              matching: find.text(strings.sendFilesOrFolders),
+              matching: find.text(strings.sendFilesEllipsis),
             ),
           ),
         ).requestFocus();

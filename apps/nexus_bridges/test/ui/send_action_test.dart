@@ -87,7 +87,7 @@ Future<FakeAppController> _pumpTwoPaired(
 
 Finder _rowSend(AppStrings strings) => find.descendant(
   of: find.byKey(ValueKey(_fp)),
-  matching: find.text(strings.sendFilesOrFolders),
+  matching: find.text(strings.sendFilesEllipsis),
 );
 
 Finder _popoverSend(AppStrings strings) => find.descendant(

@@ -290,7 +290,7 @@ abstract class AppStrings {
   String get systemTrayInfo;
   String get systemTraySwitch;
   String get systemTraySwitchHelp;
-  String get sendFilesOrFolders;
+  String get sendFilesEllipsis;
   String get systemTrayOffHelp;
   String get systemTrayOpen;
   String get systemTrayExit;

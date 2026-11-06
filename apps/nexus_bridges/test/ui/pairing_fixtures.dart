@@ -181,7 +181,7 @@ Set<String> allowedTexts(
     s.chipForeign,
     s.visibleLabel,
     s.sendEllipsis,
-    s.sendFilesOrFolders,
+    s.sendFilesEllipsis,
     s.dragTipTitle,
     s.dragTipBody,
     s.sendNeedsVisible,

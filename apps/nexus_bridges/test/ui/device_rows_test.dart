@@ -87,7 +87,7 @@ ButtonStyleButton _sendButton(
   String name,
 ) => tester.widget<ButtonStyleButton>(
   find.ancestor(
-    of: _inCard(name, find.text(strings.sendFilesOrFolders)),
+    of: _inCard(name, find.text(strings.sendFilesEllipsis)),
     matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
   ),
 );
@@ -156,10 +156,10 @@ void main() {
             _mineName,
             strings.chipMine,
             strings.visibleLabel,
-            strings.sendFilesOrFolders,
+            strings.sendFilesEllipsis,
           ]),
         );
-        expect(rowButtons(tester, _mineName), [strings.sendFilesOrFolders]);
+        expect(rowButtons(tester, _mineName), [strings.sendFilesEllipsis]);
         expect(_sendButton(tester, strings, _mineName).onPressed, isNotNull);
         expect(_inCard(_mineName, _discWith(DeviceGlyph.pc)), findsOneWidget);
         expect(
@@ -200,10 +200,10 @@ void main() {
             _foreignName,
             strings.chipForeign,
             strings.visibleLabel,
-            strings.sendFilesOrFolders,
+            strings.sendFilesEllipsis,
           ]),
         );
-        expect(rowButtons(tester, _foreignName), [strings.sendFilesOrFolders]);
+        expect(rowButtons(tester, _foreignName), [strings.sendFilesEllipsis]);
 
         await _openMenu(tester, strings, _foreignName);
         expect(find.text(strings.markAsMine), findsOneWidget);
@@ -225,10 +225,10 @@ void main() {
             _hiddenName,
             strings.chipMine,
             strings.notVisibleLabel,
-            strings.sendFilesOrFolders,
+            strings.sendFilesEllipsis,
           ]),
         );
-        expect(rowButtons(tester, _hiddenName), [strings.sendFilesOrFolders]);
+        expect(rowButtons(tester, _hiddenName), [strings.sendFilesEllipsis]);
         expect(_sendButton(tester, strings, _hiddenName).onPressed, isNull);
         expect(_inCard(_hiddenName, _discWith(DeviceGlyph.pc)), findsOneWidget);
         expect(
@@ -304,7 +304,7 @@ void main() {
           findsOneWidget,
         );
         expect(rowButtons(tester, _mismatchName), [
-          strings.sendFilesOrFolders,
+          strings.sendFilesEllipsis,
           strings.removeButton,
           strings.pairAgainButton,
         ]);
@@ -315,7 +315,7 @@ void main() {
             strings.chipMine,
             strings.visibleLabel,
             strings.mismatchWarning,
-            strings.sendFilesOrFolders,
+            strings.sendFilesEllipsis,
             strings.removeButton,
             strings.pairAgainButton,
           ]),

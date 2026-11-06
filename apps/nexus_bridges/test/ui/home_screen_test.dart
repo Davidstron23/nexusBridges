@@ -67,7 +67,7 @@ Set<String> _allowedTexts(
     strings.sectionUnpaired,
     strings.chipMine,
     strings.visibleLabel,
-    strings.sendFilesOrFolders,
+    strings.sendFilesEllipsis,
     for (final network in networks) strings.trustNetworkButton(network),
     strings.networkPromptTitle,
     for (final network in networks) strings.networkPromptBody(network),
@@ -445,7 +445,7 @@ void main() {
             'PC principal',
             strings.chipMine,
             strings.visibleLabel,
-            strings.sendFilesOrFolders,
+            strings.sendFilesEllipsis,
           ]),
         );
         expect(

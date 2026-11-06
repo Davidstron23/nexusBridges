@@ -825,7 +825,7 @@ final class AppStringsEn implements AppStrings {
   String get sendEllipsis => 'Send…';
 
   @override
-  String get sendFilesOrFolders => 'Send files or folders…';
+  String get sendFilesEllipsis => 'Send files…';
 
   @override
   String get sendFilesOption => 'Files…';

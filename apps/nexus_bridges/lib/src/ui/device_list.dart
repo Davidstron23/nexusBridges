@@ -31,6 +31,11 @@ DiscTone discToneFor(NodeState state, DeviceEntry entry) {
 }
 
 const double _discSize = 43;
+const double _sendWidth = 135;
+const double _actionHeight = 30;
+final ButtonStyle _actionButton = smallButton.copyWith(
+  minimumSize: const WidgetStatePropertyAll(Size(0, _actionHeight)),
+);
 const double _chipShare = 0.7;
 const double _chipGap = 10;
 
@@ -189,37 +194,41 @@ class _DeviceRowState extends State<DeviceRow> {
           triggerMode: explanation == null
               ? TooltipTriggerMode.manual
               : TooltipTriggerMode.longPress,
-          child: SendMenuButton(
-            label: strings.sendFilesOrFolders,
-            enabled: widget.state.canSendTo(entry.fingerprint),
-            onOpenChanged: (open) => setState(() => _menuOpen = open),
-            onFiles: () =>
-                startSendFiles(context, controller, entry.fingerprint),
-            onFolders: () =>
-                startSendFolders(context, controller, entry.fingerprint),
+          child: SizedBox(
+            width: _sendWidth,
+            child: SendMenuButton(
+              label: strings.sendFilesEllipsis,
+              height: _actionHeight,
+              enabled: widget.state.canSendTo(entry.fingerprint),
+              onOpenChanged: (open) => setState(() => _menuOpen = open),
+              onFiles: () =>
+                  startSendFiles(context, controller, entry.fingerprint),
+              onFolders: () =>
+                  startSendFolders(context, controller, entry.fingerprint),
+            ),
           ),
         ),
       if (entry.paired && entry.mismatch) ...[
         OutlinedButton(
-          style: smallButton,
+          style: _actionButton,
           onPressed: () => _unpair(context),
           child: Text(strings.removeButton),
         ),
         FilledButton.tonal(
-          style: smallButton,
+          style: _actionButton,
           onPressed: () => _pair(context),
           child: Text(strings.pairAgainButton),
         ),
       ] else if (entry.canPair)
         OutlinedButton.icon(
-          style: smallButton,
+          style: _actionButton,
           icon: const GlyphIcon(Glyphs.link, size: 14),
           label: Text(strings.pairButton),
           onPressed: () => _pair(context),
         ),
       if (entry.ignored)
         TextButton(
-          style: smallButton,
+          style: _actionButton,
           onPressed: () => controller.unignore(entry.fingerprint),
           child: Text(strings.unignoreButton),
         ),
@@ -249,7 +258,7 @@ class _DeviceRowState extends State<DeviceRow> {
             child: child,
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
+            padding: const EdgeInsets.fromLTRB(14, 10, 12, 11),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -368,17 +377,16 @@ class _DeviceRowState extends State<DeviceRow> {
                           style: bodySm,
                         ),
                       ],
-                      if (actions.isNotEmpty) ...[
-                        const SizedBox(height: 9),
-                        Row(
-                          children: [
-                            for (var i = 0; i < actions.length; i++) ...[
-                              if (i > 0) const SizedBox(width: 8),
-                              Expanded(child: actions[i]),
-                            ],
-                          ],
+                      if (actions.isNotEmpty)
+                        Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: actions,
+                          ),
                         ),
-                      ],
                     ],
                   ),
                 ),

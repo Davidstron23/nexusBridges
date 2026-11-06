@@ -163,7 +163,7 @@ Color? _dotColor(WidgetTester tester, String fingerprint) {
 }
 
 Finder _sendFinder(AppStrings strings, String fingerprint) => find.ancestor(
-  of: _inRow(fingerprint, find.text(strings.sendFilesOrFolders)),
+  of: _inRow(fingerprint, find.text(strings.sendFilesEllipsis)),
   matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
 );
 

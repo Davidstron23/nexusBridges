@@ -33,7 +33,7 @@ Future<void> _openFromRow(
   await tester.tap(
     find.descendant(
       of: find.byKey(ValueKey(mineFp)),
-      matching: find.text(strings.sendFilesOrFolders),
+      matching: find.text(strings.sendFilesEllipsis),
     ),
   );
   await tester.pump();
@@ -359,7 +359,7 @@ void main() {
         await tester.tap(
           find.descendant(
             of: find.byKey(ValueKey(foreignFp)),
-            matching: find.text(strings.sendFilesOrFolders),
+            matching: find.text(strings.sendFilesEllipsis),
           ),
         );
         await tester.pump();

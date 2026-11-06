@@ -245,7 +245,7 @@ void main() {
           matching: find.text(strings.sendEllipsis),
         );
         expect(popoverSend, findsOneWidget);
-        expect(find.text(strings.sendFilesOrFolders), findsNWidgets(2));
+        expect(find.text(strings.sendFilesEllipsis), findsNWidgets(2));
         await tester.tap(popoverSend);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 240));
