@@ -318,7 +318,7 @@ class _DeviceRowState extends State<DeviceRow> {
                             ),
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 3),
                       Row(
                         children: [
                           Container(
@@ -345,7 +345,7 @@ class _DeviceRowState extends State<DeviceRow> {
                         ],
                       ),
                       if (explanation != null) ...[
-                        const SizedBox(height: 5),
+                        const SizedBox(height: 4),
                         Text(explanation, style: caption),
                       ],
                       if (entry.paired && entry.mismatch) ...[
@@ -360,7 +360,7 @@ class _DeviceRowState extends State<DeviceRow> {
                         ),
                       ],
                       if (actions.isNotEmpty) ...[
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 6),
                         Wrap(spacing: 8, runSpacing: 4, children: actions),
                       ],
                     ],
