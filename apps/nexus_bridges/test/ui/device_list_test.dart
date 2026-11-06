@@ -163,8 +163,15 @@ Color? _dotColor(WidgetTester tester, String fingerprint) {
 }
 
 Finder _sendFinder(AppStrings strings, String fingerprint) => find.ancestor(
-  of: _inRow(fingerprint, find.text(strings.sendEllipsis)),
+  of: _inRow(fingerprint, find.text(strings.sendFilesOrFolders)),
   matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
+);
+
+Finder _reasonOf(String fingerprint, String text) => _inRow(
+  fingerprint,
+  find.byWidgetPredicate(
+    (widget) => widget is Tooltip && widget.message == text,
+  ),
 );
 
 Color? _textColor(WidgetTester tester, Finder finder) =>
@@ -489,16 +496,11 @@ void main() {
             strings.sendNeedsVisible,
             strings.sendNeedsPairAgain,
           ]) {
+            expect(_inRow(fp, find.text(text)), findsNothing, reason: text);
             expect(
-              _inRow(fp, find.text(text)),
+              _reasonOf(fp, text),
               text == explanation ? findsOneWidget : findsNothing,
               reason: text,
-            );
-          }
-          if (explanation != null) {
-            expect(
-              _textColor(tester, _inRow(fp, find.text(explanation))),
-              colors.textWeak,
             );
           }
 
@@ -701,24 +703,17 @@ void main() {
       };
       for (final MapEntry(key: name, value: (row, reason))
           in disabled.entries) {
-        testWidgets('$name: Send file is disabled and the reason is in '
-            'textWeak', (tester) async {
+        testWidgets('$name: Send file is disabled and the reason is its '
+            'tooltip', (tester) async {
           final controller = await _pumpList(tester, code, [row]);
           final fp = row.fingerprint;
 
           final send = _sendFinder(strings, fp);
           expect(tester.widget<ButtonStyleButton>(send).onPressed, isNull);
-          final text = _inRow(fp, find.text(reason(strings)));
-          expect(text, findsOneWidget);
-          expect(_textColor(tester, text), colors.textWeak);
-          expect(
-            tester.getTopLeft(text).dy,
-            greaterThan(tester.getBottomLeft(_chipFinder(fp)).dy),
-          );
-          expect(
-            tester.getTopLeft(text).dy,
-            lessThan(tester.getTopLeft(send).dy),
-          );
+          expect(_inRow(fp, find.text(reason(strings))), findsNothing);
+          final tip = _reasonOf(fp, reason(strings));
+          expect(tip, findsOneWidget);
+          expect(find.descendant(of: tip, matching: send), findsOneWidget);
 
           await tester.tap(send, warnIfMissed: false);
           await tester.pumpAndSettle();
@@ -954,10 +949,7 @@ void main() {
           tester.getRect(_sendFinder(strings, _foreignFp)).right,
           lessThanOrEqualTo(rowRect.right),
         );
-        expect(
-          _inRow(_foreignFp, find.text(strings.sendNeedsVisible)),
-          findsOneWidget,
-        );
+        expect(_reasonOf(_foreignFp, strings.sendNeedsVisible), findsOneWidget);
       });
 
       testWidgets('every row type together fits the column of 280 px', (
@@ -976,6 +968,3 @@ void main() {
     });
   }
 }
-
-Finder _chipFinder(String fingerprint) =>
-    _inRow(fingerprint, find.byType(StatusChip));

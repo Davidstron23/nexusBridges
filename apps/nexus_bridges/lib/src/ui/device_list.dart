@@ -30,6 +30,7 @@ DiscTone discToneFor(NodeState state, DeviceEntry entry) {
   return DiscTone.idle;
 }
 
+const double _discSize = 43;
 const double _chipShare = 0.7;
 const double _chipGap = 10;
 
@@ -183,12 +184,20 @@ class _DeviceRowState extends State<DeviceRow> {
           );
     final actions = <Widget>[
       if (entry.paired)
-        SendMenuButton(
-          enabled: widget.state.canSendTo(entry.fingerprint),
-          onOpenChanged: (open) => setState(() => _menuOpen = open),
-          onFiles: () => startSendFiles(context, controller, entry.fingerprint),
-          onFolders: () =>
-              startSendFolders(context, controller, entry.fingerprint),
+        Tooltip(
+          message: explanation ?? '',
+          triggerMode: explanation == null
+              ? TooltipTriggerMode.manual
+              : TooltipTriggerMode.longPress,
+          child: SendMenuButton(
+            label: strings.sendFilesOrFolders,
+            enabled: widget.state.canSendTo(entry.fingerprint),
+            onOpenChanged: (open) => setState(() => _menuOpen = open),
+            onFiles: () =>
+                startSendFiles(context, controller, entry.fingerprint),
+            onFolders: () =>
+                startSendFolders(context, controller, entry.fingerprint),
+          ),
         ),
       if (entry.paired && entry.mismatch) ...[
         OutlinedButton(
@@ -244,7 +253,11 @@ class _DeviceRowState extends State<DeviceRow> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                DeviceDisc(type: entry.deviceType, tone: widget.tone),
+                DeviceDisc(
+                  type: entry.deviceType,
+                  tone: widget.tone,
+                  size: _discSize,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -262,7 +275,7 @@ class _DeviceRowState extends State<DeviceRow> {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: NbText.bodyStrong.copyWith(
-                                        fontSize: 13,
+                                        fontSize: 14,
                                         color: colors.text,
                                       ),
                                     ),
@@ -344,24 +357,27 @@ class _DeviceRowState extends State<DeviceRow> {
                           ),
                         ],
                       ),
-                      if (explanation != null) ...[
-                        const SizedBox(height: 4),
-                        Text(explanation, style: caption),
-                      ],
                       if (entry.paired && entry.mismatch) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 5),
                         Text(strings.mismatchWarning, style: bodySm),
                       ],
                       if (possiblyReplaces != null) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 5),
                         Text(
                           strings.possibleReinstall(possiblyReplaces),
                           style: bodySm,
                         ),
                       ],
                       if (actions.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Wrap(spacing: 8, runSpacing: 4, children: actions),
+                        const SizedBox(height: 9),
+                        Row(
+                          children: [
+                            for (var i = 0; i < actions.length; i++) ...[
+                              if (i > 0) const SizedBox(width: 8),
+                              Expanded(child: actions[i]),
+                            ],
+                          ],
+                        ),
                       ],
                     ],
                   ),

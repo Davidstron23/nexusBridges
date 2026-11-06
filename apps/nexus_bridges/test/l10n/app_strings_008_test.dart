@@ -57,6 +57,7 @@ final Map<String, _Text> _texts = {
   'systemTrayInfo': (s) => s.systemTrayInfo,
   'systemTraySwitch': (s) => s.systemTraySwitch,
   'systemTraySwitchHelp': (s) => s.systemTraySwitchHelp,
+  'sendFilesOrFolders': (s) => s.sendFilesOrFolders,
   'systemTrayOffHelp': (s) => s.systemTrayOffHelp,
   'sectionNetworks': (s) => s.sectionNetworks,
   'networksInfo': (s) => s.networksInfo,
@@ -191,6 +192,14 @@ void main() {
         'networks)', () {
       expect(es.networksInfo.toLowerCase(), contains('pausa'));
       expect(en.networksInfo.toLowerCase(), contains('paused'));
+    });
+
+    test('the send button of a row says what it sends', () {
+      expect(
+        stringsFor('es').sendFilesOrFolders,
+        'Enviar archivos o carpetas…',
+      );
+      expect(stringsFor('en').sendFilesOrFolders, 'Send files or folders…');
     });
 
     test('the tray switch explains closing the window', () {

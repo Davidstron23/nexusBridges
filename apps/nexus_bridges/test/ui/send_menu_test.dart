@@ -54,10 +54,14 @@ Future<FakeAppController> _pump(
 
 Finder _row(String fingerprint) => find.byKey(ValueKey(fingerprint));
 
+Finder _tip(String text) => find.byWidgetPredicate(
+  (widget) => widget is Tooltip && widget.message == text,
+);
+
 Finder _send(AppStrings strings, String fingerprint) => find.ancestor(
   of: find.descendant(
     of: _row(fingerprint),
-    matching: find.text(strings.sendEllipsis),
+    matching: find.text(strings.sendFilesOrFolders),
   ),
   matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
 );
@@ -84,11 +88,11 @@ void main() {
       testWidgets('an unpaired device has no Send…', (tester) async {
         await _pump(tester, code, _state());
 
-        expect(find.text(strings.sendEllipsis), findsNWidgets(3));
+        expect(find.text(strings.sendFilesOrFolders), findsNWidgets(3));
         expect(
           find.descendant(
             of: _row(fingerprintOf('DDDD4444')),
-            matching: find.text(strings.sendEllipsis),
+            matching: find.text(strings.sendFilesOrFolders),
           ),
           findsNothing,
         );
@@ -104,14 +108,14 @@ void main() {
         expect(
           find.descendant(
             of: _row(_fpB),
-            matching: find.text(strings.waitForQueues('PC principal')),
+            matching: _tip(strings.waitForQueues('PC principal')),
           ),
           findsOneWidget,
         );
         expect(
           find.descendant(
             of: _row(_fpA),
-            matching: find.text(strings.waitForQueues('PC principal')),
+            matching: _tip(strings.waitForQueues('PC principal')),
           ),
           findsNothing,
         );
@@ -124,7 +128,7 @@ void main() {
         expect(
           find.descendant(
             of: _row(_fpC),
-            matching: find.text(strings.sendNeedsVisible),
+            matching: _tip(strings.sendNeedsVisible),
           ),
           findsOneWidget,
         );
@@ -134,7 +138,7 @@ void main() {
         expect(
           find.descendant(
             of: _row(_fpC),
-            matching: find.text(strings.sendNeedsPairAgain),
+            matching: _tip(strings.sendNeedsPairAgain),
           ),
           findsOneWidget,
         );
@@ -226,7 +230,7 @@ void main() {
           tester.element(
             find.descendant(
               of: button,
-              matching: find.text(strings.sendEllipsis),
+              matching: find.text(strings.sendFilesOrFolders),
             ),
           ),
         ).requestFocus();
