@@ -1521,6 +1521,9 @@ final class AppStringsEn implements AppStrings {
   String get navNameInvalid => "That name can't be used for a folder";
 
   @override
+  String get navNameRepository => "For safety, a .git folder can't be created";
+
+  @override
   String get navNameExists => "There's already a folder with that name";
 
   @override

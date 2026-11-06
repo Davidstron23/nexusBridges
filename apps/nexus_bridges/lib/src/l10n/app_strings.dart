@@ -413,6 +413,7 @@ abstract class AppStrings {
   String navBusy(String name);
   String navUnreadable(String name);
   String get navNameInvalid;
+  String get navNameRepository;
   String get navNameExists;
   String get navBack;
   String get portalDropIn;

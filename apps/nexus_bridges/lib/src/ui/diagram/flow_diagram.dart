@@ -41,6 +41,12 @@ const int _shortLength = 8;
 String _shortOf(String fingerprint) =>
     fingerprint.substring(0, math.min(_shortLength, fingerprint.length));
 
+String _popoverName(AppStrings strings, DeviceEntry entry) {
+  final alias = entry.alias;
+  if (alias == null || alias.isEmpty) return entry.displayName;
+  return strings.nameWithReal(alias, entry.realName);
+}
+
 DeviceEntry? _pairedEntry(NodeState state, String? fingerprint) {
   if (fingerprint == null) return null;
   for (final entry in state.entries) {
@@ -615,8 +621,8 @@ class _FlowPopover extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            entry.displayName,
-                            maxLines: 1,
+                            _popoverName(strings, entry),
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: NbText.bodyStrong.copyWith(
                               color: colors.text,

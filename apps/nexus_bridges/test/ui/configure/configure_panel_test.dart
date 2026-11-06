@@ -4,9 +4,12 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
+import 'package:nexus_bridges/src/ui/activity_cards.dart';
 import 'package:nexus_bridges/src/ui/configure/configure_panel.dart';
 import 'package:nexus_bridges/src/ui/configure/configure_sections.dart';
+import 'package:nexus_bridges/src/ui/configure/share_rows.dart';
 import 'package:nexus_bridges/src/ui/destination/folder_navigator.dart';
+import 'package:nexus_bridges/src/ui/queue_card.dart';
 import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
@@ -512,6 +515,132 @@ void main() {
           expect(_inPanel(find.text('Trabajo')), findsOneWidget);
         });
 
+        testWidgets('someone else: the explanation that only own devices '
+            'can share, and Tab never reaches the paused folders (B4)', (
+          tester,
+        ) async {
+          await pump(tester, _state(mine: false, shares: const [_shareDocs]));
+          await _openFromRow(tester, strings);
+
+          expect(
+            _inPanel(find.text(strings.sharesForeignOnly)),
+            findsOneWidget,
+          );
+          final body = _inPanel(find.byType(SharesBody));
+          expect(body, findsOneWidget);
+          for (var i = 0; i < 40; i++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pump();
+            final focused = FocusManager.instance.primaryFocus?.context;
+            if (focused == null) continue;
+            final inside = find
+                .descendant(of: body, matching: find.byWidget(focused.widget))
+                .evaluate()
+                .isNotEmpty;
+            expect(inside, isFalse, reason: 'Tab number ${i + 1}');
+          }
+        });
+
+        testWidgets('mine: Tab does reach its folders', (tester) async {
+          await pump(tester, _state(shares: const [_shareDocs]));
+          await _openFromRow(tester, strings);
+
+          final body = _inPanel(find.byType(SharesBody));
+          var reached = false;
+          for (var i = 0; i < 40 && !reached; i++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.pump();
+            final focused = FocusManager.instance.primaryFocus?.context;
+            if (focused == null) continue;
+            reached = find
+                .descendant(of: body, matching: find.byWidget(focused.widget))
+                .evaluate()
+                .isNotEmpty;
+          }
+          expect(reached, isTrue);
+          expect(_inPanel(find.text(strings.sharesForeignOnly)), findsNothing);
+        });
+
+        testWidgets('the full path can be read in a tooltip (B5)', (
+          tester,
+        ) async {
+          const long = ShareView(
+            rootId: 'share-long',
+            label: 'Proyecto',
+            home: false,
+            path:
+                r'D:\una\ruta\muy\larga\que\no\cabe\en\la\fila\de\configurar'
+                r'\porque\sigue\y\sigue\Proyecto',
+            drive: DriveKind.fixed,
+            available: true,
+          );
+          await pump(tester, _state(shares: const [long]));
+          await _openFromRow(tester, strings);
+
+          expect(_inPanel(find.byTooltip(long.path)), findsOneWidget);
+        });
+
+        testWidgets('opening Configure of a device of mine checks its '
+            'folders, and one that went away reads as not available (M4)', (
+          tester,
+        ) async {
+          final controller = await pump(
+            tester,
+            _state(shares: const [_shareDocs]),
+          );
+          await _openFromRow(tester, strings);
+
+          expect(
+            controller.calls.where((c) => c == 'refreshShares $mineFp'),
+            hasLength(1),
+          );
+          expect(
+            _inPanel(find.byTooltip(strings.shareUnavailable)),
+            findsNothing,
+          );
+
+          controller.emit(
+            _state(
+              shares: const [
+                ShareView(
+                  rootId: 'share-docs',
+                  label: 'Trabajo',
+                  home: false,
+                  path: r'D:\datos\Trabajo',
+                  drive: DriveKind.fixed,
+                  available: false,
+                ),
+              ],
+            ),
+          );
+          await tester.pump();
+
+          expect(
+            _inPanel(find.byTooltip(strings.shareUnavailable)),
+            findsOneWidget,
+          );
+          expect(
+            controller.calls.where((c) => c == 'refreshShares $mineFp'),
+            hasLength(1),
+          );
+        });
+
+        testWidgets('someone else is not checked until it is marked as mine '
+            '(M4)', (tester) async {
+          final controller = await pump(tester, _state(mine: false));
+          await _openFromRow(tester, strings);
+
+          expect(
+            controller.calls.where((c) => c.startsWith('refreshShares')),
+            isEmpty,
+          );
+
+          controller.emit(_state());
+          await tester.pump();
+
+          expect(controller.calls, contains('refreshShares $mineFp'));
+        });
+
         testWidgets('someone else: the add button does not react', (
           tester,
         ) async {
@@ -793,11 +922,106 @@ void main() {
     });
 
     group('[$code] E774 the nickname on cards and notices (RF-429)', () {
-      testWidgets('a foreign card keeps nickname and real name together', (
-        tester,
-      ) async {
-        expect(strings.nameWithReal('Curro', mineName), contains('Curro'));
-        expect(strings.nameWithReal('Curro', mineName), contains(mineName));
+      Finder shownName(Finder scope, String name) => find.descendant(
+        of: scope,
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Text &&
+              (widget.data ?? widget.textSpan?.toPlainText() ?? '')
+                  .replaceAll('\u200B', '')
+                  .replaceAll('\u2060', '')
+                  .contains(name),
+          description: 'text with "$name"',
+        ),
+      );
+
+      testWidgets('the queue card and the result card show the nickname '
+          'with the real name, never twice the nickname', (tester) async {
+        final base = _state(alias: 'Curro');
+        await pump(
+          tester,
+          NodeState(
+            entries: base.entries,
+            peers: base.peers,
+            queues: SendQueuesView(
+              selectionId: 1,
+              peerFingerprint: mineFp,
+              peerName: mineName,
+              loose: const [
+                QueueItemView(
+                  id: 'q1',
+                  name: 'acta.pdf',
+                  isFolder: false,
+                  isArchive: false,
+                  state: QueueItemState.inProgress,
+                ),
+                QueueItemView(
+                  id: 'q2',
+                  name: 'zeta.txt',
+                  isFolder: false,
+                  isArchive: false,
+                  state: QueueItemState.pending,
+                ),
+              ],
+              bundles: const [],
+              finished: false,
+              delivered: 0,
+              total: 2,
+              completedBytes: 0,
+              pendingKnownBytes: 0,
+              currentProbeSize: null,
+            ),
+            lastReceived: TransferResultView(
+              direction: TransferDirection.incoming,
+              peerFingerprint: mineFp,
+              peerName: mineName,
+              fileName: 'foto.jpg',
+              isProgram: false,
+              outcome: TransferOutcome.saved,
+              canReveal: false,
+            ),
+            transferInProgress: true,
+          ),
+        );
+
+        final both = strings.nameWithReal('Curro', mineName);
+        final queue = find.byType(QueueCard);
+        final result = find.byType(ResultCard);
+        expect(queue, findsOneWidget);
+        expect(result, findsOneWidget);
+        expect(shownName(queue, both), findsWidgets);
+        expect(shownName(result, both), findsWidgets);
+        expect(shownName(queue, 'Curro (Curro)'), findsNothing);
+        expect(shownName(result, 'Curro (Curro)'), findsNothing);
+      });
+
+      testWidgets('a result of what was not sent shows the nickname with '
+          'the real name', (tester) async {
+        final base = _state(alias: 'Curro');
+        await pump(
+          tester,
+          NodeState(
+            entries: base.entries,
+            peers: base.peers,
+            lastSent: TransferResultView(
+              direction: TransferDirection.outgoing,
+              peerFingerprint: mineFp,
+              peerName: mineName,
+              fileName: 'zeta.txt',
+              isProgram: false,
+              outcome: TransferOutcome.noContact,
+              canReveal: false,
+            ),
+          ),
+        );
+
+        final result = find.byType(ResultCard);
+        expect(result, findsOneWidget);
+        expect(
+          shownName(result, strings.nameWithReal('Curro', mineName)),
+          findsWidgets,
+        );
+        expect(shownName(result, 'Curro (Curro)'), findsNothing);
       });
     });
 

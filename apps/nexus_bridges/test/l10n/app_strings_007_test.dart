@@ -102,6 +102,7 @@ final Map<String, _Text> _texts = {
   'navGone': (s) => s.navGone,
   'navBusy': (s) => s.navBusy('X'),
   'navNameInvalid': (s) => s.navNameInvalid,
+  'navNameRepository': (s) => s.navNameRepository,
   'navNameExists': (s) => s.navNameExists,
   'navBack': (s) => s.navBack,
   'portalDropIn': (s) => s.portalDropIn,
@@ -153,6 +154,17 @@ void main() {
         expect(strings.historyDelivered(2, 5), contains('2'));
         expect(strings.historyDelivered(2, 5), contains('5'));
       }
+    });
+
+    test('the new folder named .git has its own message', () {
+      expect(
+        stringsFor('es').navNameRepository,
+        'Por seguridad, no se puede crear una carpeta .git',
+      );
+      expect(
+        stringsFor('en').navNameRepository,
+        "For safety, a .git folder can't be created",
+      );
     });
 
     test('the folders you share have one name in every text', () {

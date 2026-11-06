@@ -262,10 +262,31 @@ class _ConfigurePanelState extends State<ConfigurePanel>
   String? _favoriteMessage;
   double _scrollMemory = 0;
 
+  bool _sharesRefreshed = false;
+
   AppController get _app => widget.controller;
 
   @override
+  void initState() {
+    super.initState();
+    _app.addListener(_refreshSharesIfMine);
+    _refreshSharesIfMine();
+  }
+
+  void _refreshSharesIfMine() {
+    final mine = _entryOf(_app.state, widget.fingerprint)?.mine ?? false;
+    if (!mine) {
+      _sharesRefreshed = false;
+      return;
+    }
+    if (_sharesRefreshed) return;
+    _sharesRefreshed = true;
+    unawaited(_app.refreshShares(widget.fingerprint));
+  }
+
+  @override
   void dispose() {
+    _app.removeListener(_refreshSharesIfMine);
     final pending = _aliasTimer;
     if (pending != null && pending.isActive) {
       pending.cancel();
@@ -702,6 +723,7 @@ class _ConfigurePanelState extends State<ConfigurePanel>
           description: strings.sharesDesc(name),
           info: strings.sharesInfo(name),
           paused: !mine,
+          pauseTitle: strings.sharesForeignOnly,
           pauseNote: strings.sharesPaused,
           child: SharesBody(
             controller: _app,

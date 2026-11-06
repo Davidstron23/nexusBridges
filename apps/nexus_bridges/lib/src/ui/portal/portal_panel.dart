@@ -289,7 +289,7 @@ class _PortalPanelState extends State<PortalPanel> {
         const SizedBox(width: 4),
         Flexible(
           child: Text(
-            nav.stack[i].name ?? '',
+            visibleFileName(nav.stack[i].name ?? ''),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: NbText.caption.copyWith(
@@ -325,7 +325,7 @@ class _PortalPanelState extends State<PortalPanel> {
     if (notice != null) children.add(NavNotice(text: notice));
     if (!nav.atRoots) {
       final parent = nav.stack.length > 2
-          ? nav.stack[nav.stack.length - 2].name ?? name
+          ? visibleFileName(nav.stack[nav.stack.length - 2].name ?? name)
           : name;
       children.add(
         _PortalRow(
@@ -341,7 +341,7 @@ class _PortalPanelState extends State<PortalPanel> {
           portal: widget.portal,
           hit: const PortalHereHit(),
           glyph: Glyphs.drop,
-          label: strings.portalHereIn(level.name ?? ''),
+          label: strings.portalHereIn(visibleFileName(level.name ?? '')),
         ),
       );
     }
@@ -350,6 +350,7 @@ class _PortalPanelState extends State<PortalPanel> {
         _FolderList(
           portal: widget.portal,
           folders: level.folders,
+          rootIds: level.rootIds,
           maxHeight: maxList,
         ),
       );
@@ -383,11 +384,13 @@ class _FolderList extends StatefulWidget {
   const _FolderList({
     required this.portal,
     required this.folders,
+    required this.rootIds,
     required this.maxHeight,
   });
 
   final PortalController portal;
   final List<String> folders;
+  final List<String>? rootIds;
   final double maxHeight;
 
   @override
@@ -414,6 +417,7 @@ class _FolderListState extends State<_FolderList> {
   @override
   Widget build(BuildContext context) {
     final folders = widget.folders;
+    final rootIds = widget.rootIds;
     final height = (folders.length * _rowHeight).clamp(0, widget.maxHeight);
     return SizedBox(
       key: _viewport,
@@ -427,9 +431,12 @@ class _FolderListState extends State<_FolderList> {
         itemBuilder: (context, index) => _PortalRow(
           key: ValueKey('portal-row-$index-${folders[index]}'),
           portal: widget.portal,
-          hit: PortalFolderHit(folders[index]),
+          hit: PortalFolderHit(
+            folders[index],
+            rootId: rootIds == null ? null : rootIds[index],
+          ),
           glyph: Glyphs.folder,
-          label: folders[index],
+          label: visibleFileName(folders[index]),
           chevron: true,
         ),
       ),

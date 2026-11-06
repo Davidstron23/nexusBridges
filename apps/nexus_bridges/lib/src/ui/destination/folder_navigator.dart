@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../l10n/app_strings.dart';
 import '../icons/folder_icon.dart';
@@ -476,7 +477,7 @@ class _FolderNavigatorState extends State<FolderNavigator> {
       for (var i = 1; i < nav.stack.length; i++) ...[
         GlyphIcon(Glyphs.chevronRight, size: 12, color: colors.hint),
         _Crumb(
-          label: nav.stack[i].name ?? '',
+          label: visibleFileName(nav.stack[i].name ?? ''),
           last: i == nav.stack.length - 1,
           onTap: i == nav.stack.length - 1 ? null : () => nav.backTo(i),
         ),
@@ -569,7 +570,7 @@ class _FolderNavigatorState extends State<FolderNavigator> {
           Padding(
             padding: const EdgeInsets.fromLTRB(6, 6, 6, 0),
             child: _VirtualRow(
-              name: level.name ?? '',
+              name: visibleFileName(level.name ?? ''),
               note: strings.navWillBeCreated,
             ),
           ),
@@ -601,12 +602,14 @@ class _FolderNavigatorState extends State<FolderNavigator> {
         ],
       );
     }
+    final rootIds = level.rootIds;
     for (var i = 0; i < level.folders.length; i++) {
       final name = level.folders[i];
+      final rootId = rootIds == null ? null : rootIds[i];
       rows.add(
         NavRow(
           key: ValueKey('nav-row-$i-$name'),
-          label: name,
+          label: visibleFileName(name),
           autofocus: i == 0 && notice == null,
           leading: const FolderIcon(height: 18),
           trailing: GlyphIcon(
@@ -614,7 +617,11 @@ class _FolderNavigatorState extends State<FolderNavigator> {
             size: 14,
             color: colors.hint,
           ),
-          onTap: status == NavStatus.loading ? null : () => _nav.enter(name),
+          onTap: status == NavStatus.loading
+              ? null
+              : rootId != null
+              ? () => _nav.enterRoot(rootId)
+              : () => _nav.enter(name),
         ),
       );
     }
@@ -628,6 +635,7 @@ class _FolderNavigatorState extends State<FolderNavigator> {
     final problem = _problem;
     final message = switch (problem) {
       NewFolderProblem.invalid => strings.navNameInvalid,
+      NewFolderProblem.repository => strings.navNameRepository,
       NewFolderProblem.exists => strings.navNameExists,
       null => null,
     };
@@ -720,7 +728,7 @@ class _FolderNavigatorState extends State<FolderNavigator> {
               child: Text(
                 nav.atRoots
                     ? strings.navChoose
-                    : strings.navIn(level.name ?? ''),
+                    : strings.navIn(visibleFileName(level.name ?? '')),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: NbText.caption.copyWith(color: colors.textWeak),

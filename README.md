@@ -7,7 +7,7 @@ Move a file from one of your computers to another without a USB stick, a cloud d
 [![CI](https://github.com/Davidstron23/nexusBridges/actions/workflows/ci.yml/badge.svg)](https://github.com/Davidstron23/nexusBridges/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/Davidstron23/nexusBridges)](https://github.com/Davidstron23/nexusBridges/releases/latest)
 
-**Status:** early but usable. Version 0.1.3 sends files and whole folders between Windows PCs, with queues, drag and drop, a system tray and the choice of the destination folder on the other PC. Licensed under Apache-2.0.
+**Status:** early but usable. Version 0.1.4 sends files and whole folders between Windows PCs, with queues, drag and drop, a system tray and the choice of the destination folder on the other PC. Licensed under Apache-2.0.
 
 [Leer en castellano](README.es.md)
 
@@ -32,7 +32,7 @@ You need Windows 10 or 11 (64-bit) on both computers, connected to the same netw
 1. Download `NexusBridges-Setup-<version>.exe` from the [latest release](https://github.com/Davidstron23/nexusBridges/releases/latest). To check it, compare its hash with `SHA256SUMS.txt` from the same release:
 
    ```powershell
-   Get-FileHash .\NexusBridges-Setup-0.1.3.exe -Algorithm SHA256
+   Get-FileHash .\NexusBridges-Setup-0.1.4.exe -Algorithm SHA256
    ```
 
 2. Run it. It asks for administrator rights once, to install into `C:\Program Files\NexusBridges` and to add two Windows Firewall rules (TCP and UDP port 53530, only from your local subnet). Uninstalling removes them.

@@ -92,12 +92,43 @@ bool containsBytes(List<int> haystack, List<int> needle) {
   return false;
 }
 
+Uint8List? bytesWhenFree(File file) {
+  for (var attempt = 0; ; attempt++) {
+    try {
+      return file.readAsBytesSync();
+    } on PathNotFoundException {
+      return null;
+    } on FileSystemException {
+      if (attempt == 200) rethrow;
+      sleep(const Duration(milliseconds: 5));
+    }
+  }
+}
+
+List<FileSystemEntity> _listWhenFree(Directory folder) {
+  for (var attempt = 0; ; attempt++) {
+    try {
+      return folder.listSync(recursive: true);
+    } on FileSystemException {
+      if (attempt == 200) rethrow;
+      sleep(const Duration(milliseconds: 5));
+    }
+  }
+}
+
+String textWhenFree(File file) {
+  final bytes = bytesWhenFree(file);
+  return bytes == null ? '' : utf8.decode(bytes);
+}
+
 void expectNoAliasOnDisk(Directory folder, String alias) {
   final raw = utf8.encode(alias);
-  for (final entity in folder.listSync(recursive: true)) {
+  for (final entity in _listWhenFree(folder)) {
     if (entity is! File) continue;
+    final bytes = bytesWhenFree(entity);
+    if (bytes == null) continue;
     expect(
-      containsBytes(entity.readAsBytesSync(), raw),
+      containsBytes(bytes, raw),
       isFalse,
       reason: '${entity.path} holds the alias',
     );

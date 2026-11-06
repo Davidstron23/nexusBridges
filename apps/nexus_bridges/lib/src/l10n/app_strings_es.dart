@@ -1547,6 +1547,10 @@ final class AppStringsEs implements AppStrings {
   String get navNameInvalid => 'Ese nombre no vale para una carpeta';
 
   @override
+  String get navNameRepository =>
+      'Por seguridad, no se puede crear una carpeta .git';
+
+  @override
   String get navNameExists => 'Ya hay una carpeta con ese nombre';
 
   @override

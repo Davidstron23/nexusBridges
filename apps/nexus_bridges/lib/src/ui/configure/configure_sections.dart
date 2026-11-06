@@ -55,6 +55,7 @@ class ConfigureSection extends StatelessWidget {
     this.action,
     this.paused = false,
     this.pauseNote,
+    this.pauseTitle,
     super.key,
   });
 
@@ -68,6 +69,7 @@ class ConfigureSection extends StatelessWidget {
   final Widget? action;
   final bool paused;
   final String? pauseNote;
+  final String? pauseTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -148,14 +150,17 @@ class ConfigureSection extends StatelessWidget {
               ],
               if (pauseNote != null) ...[
                 const SizedBox(height: 12),
-                _GrowNote(open: paused, text: pauseNote),
+                _GrowNote(open: paused, title: pauseTitle, text: pauseNote),
               ] else
                 const SizedBox(height: 12),
               AnimatedOpacity(
                 opacity: paused ? 0.42 : 1,
                 duration: animate ? _pauseFade : Duration.zero,
                 curve: labEaseOut,
-                child: IgnorePointer(ignoring: paused, child: child),
+                child: ExcludeFocus(
+                  excluding: paused,
+                  child: IgnorePointer(ignoring: paused, child: child),
+                ),
               ),
               const SizedBox(height: 14),
             ],
@@ -167,10 +172,11 @@ class ConfigureSection extends StatelessWidget {
 }
 
 class _GrowNote extends StatelessWidget {
-  const _GrowNote({required this.open, required this.text});
+  const _GrowNote({required this.open, required this.text, this.title});
 
   final bool open;
   final String text;
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
@@ -212,13 +218,28 @@ class _GrowNote extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    text,
-                    style: NbText.caption.copyWith(
-                      color: colors.textWeak,
-                      fontSize: 12.5,
-                      height: 18 / 12.5,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (title case final title?)
+                        Text(
+                          title,
+                          style: NbText.caption.copyWith(
+                            color: colors.text,
+                            fontSize: 12.5,
+                            height: 18 / 12.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      Text(
+                        text,
+                        style: NbText.caption.copyWith(
+                          color: colors.textWeak,
+                          fontSize: 12.5,
+                          height: 18 / 12.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

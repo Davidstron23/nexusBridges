@@ -196,12 +196,15 @@ class ShareRow extends StatelessWidget {
                       ),
                       Padding(
                         padding: const EdgeInsets.only(top: 1),
-                        child: Text(
-                          share.path,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: NbText.caption.copyWith(
-                            color: colors.textWeak,
+                        child: Tooltip(
+                          message: share.path,
+                          child: Text(
+                            share.path,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: NbText.caption.copyWith(
+                              color: colors.textWeak,
+                            ),
                           ),
                         ),
                       ),
