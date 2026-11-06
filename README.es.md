@@ -7,7 +7,7 @@ Pasa un archivo de uno de tus ordenadores a otro sin pendrive, sin nube y sin cu
 [![CI](https://github.com/Davidstron23/nexusBridges/actions/workflows/ci.yml/badge.svg)](https://github.com/Davidstron23/nexusBridges/actions/workflows/ci.yml)
 [![Última versión](https://img.shields.io/github/v/release/Davidstron23/nexusBridges)](https://github.com/Davidstron23/nexusBridges/releases/latest)
 
-**Estado:** temprano pero usable. La versión 0.1.3 envía archivos y carpetas enteras entre PC con Windows, con colas, arrastrar y soltar, bandeja del sistema y la elección de la carpeta de destino en el otro PC. Licencia Apache-2.0.
+**Estado:** temprano pero usable. La versión 0.1.4 envía archivos y carpetas enteras entre PC con Windows, con colas, arrastrar y soltar, bandeja del sistema y la elección de la carpeta de destino en el otro PC. Licencia Apache-2.0.
 
 [Read in English](README.md)
 
@@ -32,7 +32,7 @@ Necesitas Windows 10 u 11 (64 bits) en los dos ordenadores, conectados a la mism
 1. Descarga `NexusBridges-Setup-<versión>.exe` de la [última versión](https://github.com/Davidstron23/nexusBridges/releases/latest). Para comprobarlo, compara su huella con `SHA256SUMS.txt` de esa misma versión:
 
    ```powershell
-   Get-FileHash .\NexusBridges-Setup-0.1.3.exe -Algorithm SHA256
+   Get-FileHash .\NexusBridges-Setup-0.1.4.exe -Algorithm SHA256
    ```
 
 2. Ejecútalo. Pide permisos de administrador una vez, para instalarse en `C:\Program Files\NexusBridges` y añadir dos reglas al Firewall de Windows (puerto 53530 TCP y UDP, solo desde tu subred local). Al desinstalarlo se borran.

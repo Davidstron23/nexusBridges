@@ -327,7 +327,7 @@ void main() {
       expect(a.entryOf(b.fingerprint)!.realName, 'Laptop');
     }, timeout: transferTimeout);
 
-    test('the queue card shows the alias', () async {
+    test('the queues keep the real name so the card can show both', () async {
       final (a, b) = await transferNodes();
       a.node.setAlias(b.fingerprint, 'Portátil');
       await a.until((s) => a.entryOf(b.fingerprint)?.alias != null);
@@ -338,7 +338,8 @@ void main() {
       ]);
       await a.until((s) => s.queues != null, reason: 'the queues');
 
-      expect(a.state.queues!.peerName, 'Portátil');
+      expect(a.state.queues!.peerName, 'Laptop');
+      expect(a.entryOf(b.fingerprint)!.displayName, 'Portátil');
     }, timeout: transferTimeout);
 
     test('no request and no announcement that leaves the node holds the '
@@ -419,7 +420,7 @@ void main() {
       expectNoAliasOnDisk(b.dataDir, secretAlias);
       expect(b.logs.join('\n'), isNot(contains(secretAlias)));
       expect(a.logs.join('\n'), isNot(contains(secretAlias)));
-      expect(a.pairedFile.readAsStringSync(), isNot(contains(secretAlias)));
+      expect(textWhenFree(a.pairedFile), isNot(contains(secretAlias)));
       expect(peersText(a), contains(secretAlias));
       expect(b.entryOf(a.fingerprint)!.displayName, 'Desk PC');
       expect(b.state.lastReceived!.peerName, isNot(contains(secretAlias)));

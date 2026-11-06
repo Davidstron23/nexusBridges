@@ -153,7 +153,9 @@ export '../transfer/transfer.dart'
         RevealResult,
         DestinationLabel,
         SharedFolderDestination,
-        isValidFolderName;
+        isRepositoryFolderName,
+        isValidFolderName,
+        visibleFileName;
 export 'node_state.dart';
 export 'settings_rules.dart'
     show ExclusionProblem, exclusionProblem, isDefaultExclusionList;
@@ -708,7 +710,7 @@ final class NexusNode {
         return;
       }
       for (final entry in _entries) {
-        if (entry.fingerprint == fingerprint) peerName = entry.displayName;
+        if (entry.fingerprint == fingerprint) peerName = entry.realName;
       }
       queues = current;
     });

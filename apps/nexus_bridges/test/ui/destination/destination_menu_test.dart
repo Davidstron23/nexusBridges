@@ -8,6 +8,8 @@ import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/destination/destination_menu.dart';
 import 'package:nexus_bridges/src/ui/destination/folder_navigator.dart';
 import 'package:nexus_bridges/src/ui/destination/navigator_controller.dart';
+import 'package:nexus_bridges/src/ui/icons/file_icon.dart';
+import 'package:nexus_bridges/src/ui/icons/folder_icon.dart';
 import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
 import 'package:nexus_bridges/src/ui/tray_panel.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
@@ -71,6 +73,48 @@ void main() {
   for (final code in languageCodes) {
     final strings = stringsFor(code);
     final home = strings.homeFolder;
+
+    group('[$code] the header icon is found off the build (B6)', () {
+      testWidgets('one check per menu, outside build, and the folder icon '
+          'comes when the answer does', (tester) async {
+        final original = destinationPathIsDirectory;
+        addTearDown(() => destinationPathIsDirectory = original);
+        final answer = Completer<bool>();
+        final asked = <String>[];
+        destinationPathIsDirectory = (path) {
+          asked.add(path);
+          return answer.future;
+        };
+        final (controller, events) = await pumpDestinationHome(
+          tester,
+          code,
+          destinationState(),
+        );
+        controller.rootsResult = (_) async => const RemoteRoots([rootDocs]);
+
+        await dropOn(tester, events, rowOf(tester, mineFp));
+        await settleMenu(tester);
+
+        expect(_menu, findsOneWidget);
+        expect(asked, [sentPaths.first]);
+        expect(_inMenu(find.byType(FileIcon)), findsOneWidget);
+        expect(_inMenu(find.byType(FolderIcon)), findsNothing);
+
+        answer.complete(true);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+
+        expect(_inMenu(find.byType(FileIcon)), findsNothing);
+        expect(
+          find.descendant(
+            of: _inMenu(find.byType(Row)),
+            matching: find.byType(FolderIcon),
+          ),
+          findsWidgets,
+        );
+        expect(asked, hasLength(1));
+      });
+    });
 
     group('[$code] E776 the menu order and how it closes (RF-419)', () {
       for (final (surface, at) in <(String, Offset Function(WidgetTester))>[
@@ -731,20 +775,24 @@ void main() {
     group('[$code] E781 a new folder (RF-424)', () {
       Future<FolderNavigatorController> pumpNavigator(
         WidgetTester tester,
-        FakeAppController controller,
-      ) async {
+        FakeAppController controller, {
+        List<String> folders = const ['Fotos'],
+        List<RemoteRoot> roots = const [rootDocs],
+        String? enterRoot = 'root-docs',
+        bool openField = true,
+      }) async {
         await tester.binding.setSurfaceSize(const Size(600, 700));
         addTearDown(() => tester.binding.setSurfaceSize(null));
         controller.foldersResult = (_, _, _) async =>
-            const RemoteFolders(['Fotos'], more: false, partial: false);
+            RemoteFolders(folders, more: false, partial: false);
         final navigator = FolderNavigatorController(
           app: controller,
           fingerprint: mineFp,
-          roots: const [rootDocs],
+          roots: roots,
           mode: NavigatorMode.send,
         );
         addTearDown(navigator.dispose);
-        await navigator.enter('Documentos');
+        if (enterRoot != null) await navigator.enterRoot(enterRoot);
         await tester.pumpWidget(
           MaterialApp(
             theme: buildTheme(Brightness.light),
@@ -767,8 +815,10 @@ void main() {
           ),
         );
         await settleNav(tester);
-        await tester.tap(find.text(strings.navNewFolder).last);
-        await settleNav(tester);
+        if (openField) {
+          await tester.tap(find.text(strings.navNewFolder).last);
+          await settleNav(tester);
+        }
         return navigator;
       }
 
@@ -788,6 +838,121 @@ void main() {
           expect(navigator.insideNew, isFalse);
         });
       }
+
+      for (final repository in ['.git', '.GIT', '.Git', 'GIT~1']) {
+        testWidgets('"$repository" is refused here, like the receiver does, '
+            'with its own message (B7)', (tester) async {
+          final controller = FakeAppController(state: destinationState());
+          final navigator = await pumpNavigator(tester, controller);
+
+          await tester.enterText(field(), repository);
+          await tester.tap(find.text(strings.navCreate));
+          await settleNav(tester);
+
+          expect(find.text(strings.navNameRepository), findsOneWidget);
+          expect(find.text(strings.navNameInvalid), findsNothing);
+          expect(navigator.insideNew, isFalse);
+          expect(
+            navigator.validateNewFolder(repository),
+            NewFolderProblem.repository,
+          );
+        });
+      }
+
+      testWidgets('"git" and ".github" are ordinary names', (tester) async {
+        final controller = FakeAppController(state: destinationState());
+        final navigator = await pumpNavigator(tester, controller);
+
+        expect(navigator.validateNewFolder('git'), isNull);
+        expect(navigator.validateNewFolder('.github'), isNull);
+      });
+
+      testWidgets('subfolder names, crumbs and the footer hide U+200E, '
+          'U+200F and U+061C, but the request keeps the real name (M3)', (
+        tester,
+      ) async {
+        final controller = FakeAppController(state: destinationState());
+        final navigator = await pumpNavigator(
+          tester,
+          controller,
+          folders: const ['a\u200Eb', 'c\u200Fd', 'e\u061Cf'],
+          openField: false,
+        );
+
+        for (final shown in ['ab', 'cd', 'ef']) {
+          expect(
+            find.descendant(of: _navigator, matching: find.text(shown)),
+            findsOneWidget,
+          );
+        }
+        await tester.tap(find.text('cd'));
+        await settleNav(tester);
+
+        expect(
+          controller.calls.last,
+          'listRemoteFolders $mineFp root-docs c\u200Fd',
+        );
+        expect(navigator.current?.path, ['c\u200Fd']);
+        expect(
+          find.descendant(of: _navigator, matching: find.text('cd')),
+          findsNWidgets(2),
+        );
+        expect(
+          find.descendant(
+            of: _navigator,
+            matching: find.text(strings.navIn('cd')),
+          ),
+          findsOneWidget,
+        );
+        final shownTexts = [
+          for (final text in tester.widgetList<Text>(
+            find.descendant(of: _navigator, matching: find.byType(Text)),
+          ))
+            text.data ?? text.textSpan?.toPlainText() ?? '',
+        ];
+        for (final text in shownTexts) {
+          expect(text, isNot(contains('\u200E')));
+          expect(text, isNot(contains('\u200F')));
+          expect(text, isNot(contains('\u061C')));
+        }
+      });
+
+      testWidgets('two roots with the same name are told apart by their id '
+          '(B2)', (tester) async {
+        final controller = FakeAppController(state: destinationState());
+        final navigator = await pumpNavigator(
+          tester,
+          controller,
+          roots: const [
+            RemoteRoot(
+              id: 'root-a',
+              name: 'Datos',
+              home: false,
+              available: true,
+            ),
+            RemoteRoot(
+              id: 'root-b',
+              name: 'Datos',
+              home: false,
+              available: true,
+            ),
+          ],
+          enterRoot: null,
+          openField: false,
+        );
+
+        expect(
+          find.descendant(of: _navigator, matching: find.text('Datos')),
+          findsNWidgets(2),
+        );
+        await tester.tap(
+          find.descendant(of: _navigator, matching: find.text('Datos')).at(1),
+        );
+        await settleNav(tester);
+
+        expect(controller.calls.last, 'listRemoteFolders $mineFp root-b ');
+        expect(navigator.current?.rootId, 'root-b');
+      });
 
       testWidgets('a name already listed, ignoring case, says why', (
         tester,

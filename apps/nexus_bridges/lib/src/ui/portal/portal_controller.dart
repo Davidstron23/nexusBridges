@@ -21,16 +21,17 @@ sealed class PortalHit {
 }
 
 final class PortalFolderHit extends PortalHit {
-  const PortalFolderHit(this.name);
+  const PortalFolderHit(this.name, {this.rootId});
 
   final String name;
+  final String? rootId;
 
   @override
   bool operator ==(Object other) =>
-      other is PortalFolderHit && other.name == name;
+      other is PortalFolderHit && other.name == name && other.rootId == rootId;
 
   @override
-  int get hashCode => Object.hash(PortalFolderHit, name);
+  int get hashCode => Object.hash(PortalFolderHit, name, rootId);
 }
 
 final class PortalBackHit extends PortalHit {
@@ -130,6 +131,8 @@ final class PortalController extends ChangeNotifier {
     _requestId++;
     _closeNow();
   }
+
+  void cancelPending() => _requestId++;
 
   void prefetch(String fingerprint) {
     if (!_dragging || _fetches.containsKey(fingerprint)) return;
@@ -333,8 +336,12 @@ final class PortalController extends ChangeNotifier {
     final navigator = _navigator;
     if (navigator == null) return;
     switch (hit) {
-      case PortalFolderHit(:final name):
-        await navigator.enter(name);
+      case PortalFolderHit(:final name, :final rootId):
+        if (rootId != null) {
+          await navigator.enterRoot(rootId);
+        } else {
+          await navigator.enter(name);
+        }
       case PortalBackHit():
         navigator.back();
       default:
@@ -375,19 +382,18 @@ final class PortalController extends ChangeNotifier {
     if (navigator == null || hit == null) return null;
     SharedFolderDestination? destination;
     switch (hit) {
-      case PortalFolderHit(:final name):
+      case PortalFolderHit(:final name, :final rootId):
         if (navigator.atRoots) {
-          for (final root in navigator.roots) {
-            if (root.displayName(homeName: homeName()) == name) {
-              destination = SharedFolderDestination(
-                rootId: root.id,
-                rootName: root.name,
-                home: root.home,
-                path: const [],
-              );
-            }
+          final root = rootId == null ? null : navigator.rootWithId(rootId);
+          if (root != null) {
+            destination = SharedFolderDestination(
+              rootId: root.id,
+              rootName: root.name,
+              home: root.home,
+              path: const [],
+            );
           }
-        } else {
+        } else if (rootId == null) {
           final current = navigator.current;
           if (current != null && navigator.stack.last.folders.contains(name)) {
             destination = SharedFolderDestination(
@@ -398,10 +404,8 @@ final class PortalController extends ChangeNotifier {
             );
           }
         }
-      case PortalHereHit() || PortalBackgroundHit():
+      case PortalHereHit() || PortalBackgroundHit() || PortalBackHit():
         destination = navigator.current;
-      case PortalBackHit():
-        destination = null;
     }
     return destination;
   }

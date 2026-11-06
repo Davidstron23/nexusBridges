@@ -165,6 +165,24 @@ void main() {
         await tester.pump();
       });
 
+      testWidgets('a late list does not open it once the pointer left the '
+          'device (B3)', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        final pending = Completer<RemoteListing>();
+        controller.rootsResult = (_) => pending.future;
+
+        await _hold(tester, events, discOf(tester, mineFp));
+        await _over(tester, events, const Offset(5, 5));
+        await tester.pump(const Duration(milliseconds: 300));
+        pending.complete(const RemoteRoots([rootDocs]));
+        await tester.pump();
+        await tester.pump();
+
+        expect(_panel, findsNothing);
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
       testWidgets('with the list at 3 s it never opens', (tester) async {
         final (controller, events) = await pumpWithRoots(tester);
         final pending = Completer<RemoteListing>();
@@ -501,6 +519,105 @@ void main() {
         expect(controller.sendDestinations.single!.path, isEmpty);
       });
 
+      testWidgets('on Back with a folder open, to the open one (B1)', (
+        tester,
+      ) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
+        await _holdOnFolder(tester, events, 'obra');
+
+        final at = tester.getCenter(
+          _inPanel(find.text(strings.portalBack('Documentos'))),
+        );
+        await _over(tester, events, at);
+        events.add(DropDone(at, sentPaths, sentPaths.length));
+        await settleMenu(tester);
+
+        expect(_menu, findsNothing);
+        expect(_panel, findsNothing);
+        expect(controller.sendDestinations.single!.rootId, rootDocs.id);
+        expect(controller.sendDestinations.single!.path, ['obra']);
+      });
+
+      testWidgets('two roots with the same name: the drop and the hold use '
+          'the one under the pointer (B2)', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        controller.rootsResult = (_) async => const RemoteRoots([
+          RemoteRoot(id: 'root-a', name: 'Datos', home: false, available: true),
+          RemoteRoot(id: 'root-b', name: 'Datos', home: false, available: true),
+        ]);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        expect(_inPanel(find.text('Datos')), findsNWidgets(2));
+
+        final second = tester.getCenter(_inPanel(find.text('Datos')).at(1));
+        await _over(tester, events, second + const Offset(7, 0));
+        await _over(tester, events, second);
+        await tester.pump(const Duration(milliseconds: 510));
+        await tester.pump();
+        await _settlePanel(tester);
+        expect(controller.calls, contains('listRemoteFolders $mineFp root-b '));
+        expect(
+          controller.calls,
+          isNot(contains('listRemoteFolders $mineFp root-a ')),
+        );
+        events.add(const DropLeave());
+        await tester.pump();
+
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        final at = tester.getCenter(_inPanel(find.text('Datos')).at(1));
+        await _over(tester, events, at);
+        events.add(DropDone(at, sentPaths, sentPaths.length));
+        await settleMenu(tester);
+
+        expect(controller.sendDestinations.single!.rootId, 'root-b');
+      });
+
+      testWidgets('subfolders, crumbs and "Here, in" hide U+200E, U+200F and '
+          'U+061C, and a drop sends the real name (M3)', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        controller.foldersResult = (_, rootId, path) async => path.isEmpty
+            ? const RemoteFolders(
+                ['a\u200Eb', 'c\u200Fd', 'e\u061Cf'],
+                more: false,
+                partial: false,
+              )
+            : const RemoteFolders(['g\u200Fh'], more: false, partial: false);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
+
+        for (final shown in ['ab', 'cd', 'ef']) {
+          expect(_inPanel(find.text(shown)), findsOneWidget);
+        }
+        await _holdOnFolder(tester, events, 'cd');
+
+        expect(_inPanel(find.text('gh')), findsOneWidget);
+        expect(_inPanel(find.text(strings.portalHereIn('cd'))), findsOneWidget);
+        expect(_inPanel(find.text('cd')), findsOneWidget);
+        for (final text in tester.widgetList<Text>(
+          _inPanel(find.byType(Text)),
+        )) {
+          final data = text.data ?? text.textSpan?.toPlainText() ?? '';
+          expect(data, isNot(contains('\u200E')));
+          expect(data, isNot(contains('\u200F')));
+          expect(data, isNot(contains('\u061C')));
+        }
+
+        final at = tester.getCenter(_inPanel(find.text('gh')));
+        await _over(tester, events, at);
+        events.add(DropDone(at, sentPaths, sentPaths.length));
+        await settleMenu(tester);
+
+        expect(controller.sendDestinations.single!.path, [
+          'c\u200Fd',
+          'g\u200Fh',
+        ]);
+      });
+
       testWidgets('on the background at the roots, nothing and it closes', (
         tester,
       ) async {
@@ -674,6 +791,22 @@ void main() {
         ..prefetch(mineFp);
       final opened = portal.request(mineFp);
       portal.dragEnded();
+
+      pending.complete(const RemoteRoots([rootDocs]));
+      await opened;
+      await pumpEventQueue();
+
+      expect(portal.isOpen, isFalse);
+    });
+
+    test('cancelPending drops a request that is still waiting (B3)', () async {
+      final pending = Completer<RemoteListing>();
+      app.rootsResult = (_) => pending.future;
+      portal
+        ..dragStarted()
+        ..prefetch(mineFp);
+      final opened = portal.request(mineFp);
+      portal.cancelPending();
 
       pending.complete(const RemoteRoots([rootDocs]));
       await opened;

@@ -170,6 +170,7 @@ class DropController extends ChangeNotifier {
       }
     }
     if (target != _hovered) {
+      portal?.cancelPending();
       _hover(target);
     } else if (changed) {
       notifyListeners();

@@ -4,6 +4,22 @@ All notable changes to NexusBridges are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-06
+
+### Changed
+- Opening and closing Settings is smooth again.
+- The device card is tidier: the label next to the name, the status below, and "Send files…" on the right. Why you can't send yet shows when you point at the button.
+- "Folders it can use" is now "Folders you share with them", so it is clear they are folders of this computer.
+- Selectors and tabs are centred, with more room around the text.
+
+### Fixed
+- With a nickname, queues and results showed the nickname twice instead of the real name. The diagram popover now shows the real name too.
+- Shared folders that are no longer available (a removed USB drive or microSD) now say so in Configure.
+- Folder names from the other device are shown without hidden direction characters.
+- Two shared folders with the same name are no longer mixed up, and dropping on "Back" in the folder portal sends to the open folder.
+- A file that was rarely refused as protected data while the app saved its own settings now goes through.
+- A new folder called ".git" is refused when you create it, with a clear message.
+
 ## [0.1.3] - 2026-11-05
 
 ### Added
@@ -45,7 +61,8 @@ First public release, for Windows.
 - Dark interface with an animated network diagram, English and Spanish.
 - Windows installer with firewall rules limited to the local subnet.
 
-[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.0...v0.1.1

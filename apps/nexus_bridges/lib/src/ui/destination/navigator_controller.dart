@@ -7,7 +7,7 @@ enum NavigatorMode { send, favorite, portal }
 
 enum NavStatus { idle, loading, gone, busy, unreadable }
 
-enum NewFolderProblem { invalid, exists }
+enum NewFolderProblem { invalid, repository, exists }
 
 final class NavLevel {
   const NavLevel({
@@ -16,6 +16,7 @@ final class NavLevel {
     this.more = false,
     this.partial = false,
     this.isNew = false,
+    this.rootIds,
   });
 
   final String? name;
@@ -23,6 +24,7 @@ final class NavLevel {
   final bool more;
   final bool partial;
   final bool isNew;
+  final List<String>? rootIds;
 }
 
 final class FolderNavigatorController extends ChangeNotifier {
@@ -42,6 +44,7 @@ final class FolderNavigatorController extends ChangeNotifier {
         folders: [
           for (final root in _roots) root.displayName(homeName: _homeName),
         ],
+        rootIds: [for (final root in _roots) root.id],
       ),
     ];
   }
@@ -74,20 +77,28 @@ final class FolderNavigatorController extends ChangeNotifier {
   bool get canCreateFolder =>
       _mode == NavigatorMode.send && !atRoots && !insideNew;
 
+  Future<void> enterRoot(String rootId) async {
+    if (!atRoots) return;
+    final root = rootWithId(rootId);
+    if (root == null) return;
+    await _open(root, const [], root.displayName(homeName: _homeName));
+  }
+
   Future<void> enter(String name) async {
-    if (_status == NavStatus.loading || _stack.last.isNew) return;
-    final RemoteRoot root;
-    final List<String> path;
-    if (atRoots) {
-      final found = _rootNamed(name);
-      if (found == null) return;
-      root = found;
-      path = const [];
-    } else {
-      root = _root!;
-      if (!_stack.last.folders.contains(name)) return;
-      path = [..._pathOfStack(), name];
+    if (atRoots) return;
+    if (!_stack.last.folders.contains(name)) return;
+    await _open(_root!, [..._pathOfStack(), name], name);
+  }
+
+  RemoteRoot? rootWithId(String rootId) {
+    for (final root in _roots) {
+      if (root.id == rootId) return root;
     }
+    return null;
+  }
+
+  Future<void> _open(RemoteRoot root, List<String> path, String name) async {
+    if (_status == NavStatus.loading || _stack.last.isNew) return;
     final generation = ++_generation;
     _status = NavStatus.loading;
     _notify();
@@ -138,6 +149,7 @@ final class FolderNavigatorController extends ChangeNotifier {
 
   NewFolderProblem? validateNewFolder(String name) {
     if (!isValidFolderName(name)) return NewFolderProblem.invalid;
+    if (isRepositoryFolderName(name)) return NewFolderProblem.repository;
     final key = folderKey(name);
     for (final folder in _stack.last.folders) {
       if (folderKey(folder) == key) return NewFolderProblem.exists;
@@ -187,13 +199,6 @@ final class FolderNavigatorController extends ChangeNotifier {
     for (var i = 2; i < _stack.length; i++)
       if (!(skipNew && _stack[i].isNew)) _stack[i].name!,
   ];
-
-  RemoteRoot? _rootNamed(String name) {
-    for (final root in _roots) {
-      if (root.displayName(homeName: _homeName) == name) return root;
-    }
-    return null;
-  }
 
   void _toRoots() {
     _stack = [_stack.first];

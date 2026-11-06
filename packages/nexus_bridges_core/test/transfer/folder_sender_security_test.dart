@@ -441,6 +441,64 @@ void main() {
       expect(ids, isNot(contains(identityOf('$base\\outside\\loose.txt'))));
     });
 
+    test('M5: a file listed that is gone before its identity is read starts '
+        'the walk again instead of giving null', () async {
+      final base = await scratch('nexus_m5_ids_');
+      final data = '$base\\data';
+      write('$data\\paired.json', '{}');
+      write('$data\\peers.json.1.tmp', '{}');
+      var listings = 0;
+
+      final ids = fileIdsUnder(
+        data,
+        includeFolders: true,
+        afterListing: (folder) {
+          listings++;
+          final temp = File('$data\\peers.json.1.tmp');
+          if (temp.existsSync()) temp.deleteSync();
+        },
+      );
+
+      expect(ids, {identityOf(data), identityOf('$data\\paired.json')});
+      expect(listings, 2);
+    });
+
+    test('M5: files that keep going away give null after five walks, '
+        'never a partial set', () async {
+      final base = await scratch('nexus_m5_ids_');
+      final data = '$base\\data';
+      write('$data\\paired.json', '{}');
+      write('$data\\peers.json.0.tmp', '{}');
+      var listings = 0;
+
+      final ids = fileIdsUnder(
+        data,
+        afterListing: (folder) {
+          File('$data\\peers.json.$listings.tmp').deleteSync();
+          listings++;
+          write('$data\\peers.json.$listings.tmp', '{}');
+        },
+      );
+
+      expect(ids, isNull);
+      expect(listings, 5);
+    });
+
+    test(
+      'M5: a failure that is not a file gone still gives null at once',
+      () async {
+        final base = await scratch('nexus_m5_ids_');
+        final data = '$base\\data';
+        write('$data\\paired.json', '{}');
+        write('$data\\locked\\inside.bin', 'inside');
+        if (skippedUnlessDenied('$data\\locked')) return;
+        var listings = 0;
+
+        expect(fileIdsUnder(data, afterListing: (_) => listings++), isNull);
+        expect(listings, 1);
+      },
+    );
+
     test('a folder that does not exist gives an empty set, not null', () async {
       final base = await scratch('nexus_b5_ids_');
 

@@ -715,6 +715,53 @@ void main() {
 
   group('E263: the popover', () {
     for (final code in languageCodes) {
+      testWidgets('$code: with a nickname, the popover shows it with the '
+          'real name (RF-429)', (tester) async {
+        final strings = stringsFor(code);
+        final host = _Host(
+          _state([
+            DeviceEntry(
+              fingerprint: _fp('A'),
+              displayName: 'Curro',
+              alias: 'Curro',
+              realName: _nameOf('A'),
+              deviceType: DeviceType.desktop,
+              visible: true,
+              paired: true,
+              mine: true,
+              ignored: false,
+              mismatch: false,
+              possiblyReplaces: null,
+            ),
+            _entry('B'),
+          ]),
+        );
+        await _mount(tester, host, code: code);
+        await _open(tester, 'A');
+
+        expect(_popover(), findsOneWidget);
+        expect(
+          find.descendant(
+            of: _popover(),
+            matching: find.text(strings.nameWithReal('Curro', _nameOf('A'))),
+          ),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('$code: without a nickname, the popover shows only the '
+          'name', (tester) async {
+        final host = _Host(_state(_devices(2)));
+        await _mount(tester, host, code: code);
+        await _open(tester, 'A');
+
+        expect(
+          find.descendant(of: _popover(), matching: find.text(_nameOf('A'))),
+          findsOneWidget,
+        );
+      });
+
       testWidgets('$code: a visible device of mine shows its name, chip, '
           'visibility and fingerprint, and "Send file" calls onSend and '
           'closes', (tester) async {

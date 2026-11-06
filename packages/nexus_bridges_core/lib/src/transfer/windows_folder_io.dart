@@ -462,14 +462,37 @@ FileHashResult hashFileSync(
   });
 }
 
+const int _errorFileNotFound = 2;
+const int _errorPathNotFound = 3;
+const int _idsWalkAttempts = 5;
+
 Set<(int, int)>? fileIdsUnder(
   String folderPath, {
   bool includeFolders = false,
+  void Function(String folder)? afterListing,
 }) {
+  for (var attempt = 0; attempt < _idsWalkAttempts; attempt++) {
+    final (ids, vanished) = _walkIds(folderPath, includeFolders, afterListing);
+    if (ids != null || !vanished) return ids;
+  }
+  return null;
+}
+
+(Set<(int, int)>?, bool) _walkIds(
+  String folderPath,
+  bool includeFolders,
+  void Function(String folder)? afterListing,
+) {
   final ids = <(int, int)>{};
+  var vanished = false;
   bool addIdentityOf(String path) {
     final identity = _pathIdentity(path);
-    if (!identity.found) return false;
+    if (!identity.found) {
+      vanished =
+          identity.error == _errorFileNotFound ||
+          identity.error == _errorPathNotFound;
+      return false;
+    }
     ids.add((identity.volume, identity.index));
     return true;
   }
@@ -485,6 +508,7 @@ Set<(int, int)>? fileIdsUnder(
     } catch (_) {
       return isMissing(folder);
     }
+    afterListing?.call(folder);
     if (includeFolders && !addIdentityOf(folder)) return false;
     for (final entry in entries) {
       if ((entry.attributes & _attributeReparse) != 0) continue;
@@ -500,7 +524,7 @@ Set<(int, int)>? fileIdsUnder(
     return true;
   }
 
-  return visit(folderPath) ? ids : null;
+  return visit(folderPath) ? (ids, false) : (null, vanished);
 }
 
 final class _PathIdentity {

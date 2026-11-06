@@ -355,6 +355,8 @@ void main() {
         FavoriteResult.full,
       ]);
       expect(isValidFolderName('sub'), isTrue);
+      expect(isRepositoryFolderName('.Git'), isTrue);
+      expect(visibleFileName('a\u200Fb'), 'ab');
       expect(folderKey('Sub'), folderKey('SUB'));
       expect(NoticeKind.values, contains(NoticeKind.peerNotesNotSaved));
       expect(
@@ -418,7 +420,9 @@ void main() {
         'RevealResult',
         'DestinationLabel',
         'SharedFolderDestination',
+        'isRepositoryFolderName',
         'isValidFolderName',
+        'visibleFileName',
       });
     });
 

@@ -4,8 +4,6 @@ library;
 import 'dart:io';
 
 import 'package:nexus_bridges_core/src/node/node.dart';
-import 'package:nexus_bridges_core/src/transfer/transfer.dart'
-    show visibleFileName;
 import 'package:test/test.dart';
 
 import '../support/infra.dart' show scaled;

@@ -25,6 +25,10 @@ const double _menuRadius = 14;
 const Duration _openMotion = Duration(milliseconds: 400);
 const Duration _resizeMotion = Duration(milliseconds: 460);
 
+@visibleForTesting
+Future<bool> Function(String path) destinationPathIsDirectory =
+    FileSystemEntity.isDirectory;
+
 typedef OpenDestinationMenu = void Function(
   String fingerprint,
   List<String> paths,
@@ -234,6 +238,7 @@ class _DestinationMenuState extends State<DestinationMenu> {
   final Map<int, GlobalKey> _keys = {};
   FolderNavigatorController? _explorer;
   int _lastFocused = -1;
+  bool _firstIsDirectory = false;
 
   DestinationMenuController get _menu => widget.controller;
 
@@ -241,6 +246,16 @@ class _DestinationMenuState extends State<DestinationMenu> {
   void initState() {
     super.initState();
     _menu.addListener(_onMenu);
+    _checkFirstPath();
+  }
+
+  void _checkFirstPath() {
+    final paths = _menu.paths;
+    if (paths.isEmpty) return;
+    destinationPathIsDirectory(paths.first).then((isDirectory) {
+      if (!mounted || isDirectory == _firstIsDirectory) return;
+      setState(() => _firstIsDirectory = isDirectory);
+    }, onError: (Object _) {});
   }
 
   @override
@@ -346,6 +361,7 @@ class _DestinationMenuState extends State<DestinationMenu> {
                   entry: entry,
                   name: name,
                   paths: _menu.paths,
+                  isDirectory: _firstIsDirectory,
                   strings: strings,
                 ),
                 FolderNavigator(
@@ -452,7 +468,13 @@ class _DestinationMenuState extends State<DestinationMenu> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _Header(entry: entry, name: name, paths: _menu.paths, strings: strings),
+        _Header(
+          entry: entry,
+          name: name,
+          paths: _menu.paths,
+          isDirectory: _firstIsDirectory,
+          strings: strings,
+        ),
         ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: _menuMaxBody),
           child: SingleChildScrollView(
@@ -614,12 +636,14 @@ class _Header extends StatelessWidget {
     required this.entry,
     required this.name,
     required this.paths,
+    required this.isDirectory,
     required this.strings,
   });
 
   final DeviceEntry? entry;
   final String name;
   final List<String> paths;
+  final bool isDirectory;
   final AppStrings strings;
 
   @override
@@ -627,8 +651,6 @@ class _Header extends StatelessWidget {
     final colors = NbColors.of(context);
     final first = paths.isEmpty ? null : paths.first;
     final base = first?.split(RegExp(r'[\\/]')).last;
-    final isDirectory =
-        first != null && FileSystemEntity.isDirectorySync(first);
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: colors.menuBorder)),
