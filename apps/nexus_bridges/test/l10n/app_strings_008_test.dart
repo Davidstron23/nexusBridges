@@ -193,6 +193,17 @@ void main() {
       expect(en.networksInfo.toLowerCase(), contains('paused'));
     });
 
+    test('the tray switch explains closing the window', () {
+      expect(
+        stringsFor('es').systemTraySwitchHelp,
+        'Al cerrar la ventana se sigue recibiendo con la app en segundo plano',
+      );
+      expect(
+        stringsFor('en').systemTraySwitchHelp,
+        'Closing the window keeps receiving with the app in the background',
+      );
+    });
+
     test('the arguments end up in the text', () {
       for (final strings in [en, es]) {
         expect(strings.settingsSubtitle('Torre'), contains('Torre'));

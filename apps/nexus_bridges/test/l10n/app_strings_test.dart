@@ -671,8 +671,8 @@ final Map<TransferOutcome, (String, String)> _expectedSent = {
     'Esa carpeta dejó de estar disponible en el otro equipo.',
   ),
   TransferOutcome.shareRemoved: (
-    'You removed that folder from the ones the other device can use.',
-    'Quitaste esa carpeta de las que puede usar el otro equipo.',
+    'You removed that folder from the ones you share with the other device.',
+    'Quitaste esa carpeta de las que le compartes al otro equipo.',
   ),
   TransferOutcome.peerMarkedForeign: (
     "You marked the other device as someone else's.",
@@ -842,8 +842,8 @@ final Map<TransferOutcome, (String, String)> _expectedReceived = {
     'Esa carpeta dejó de estar disponible en el otro equipo.',
   ),
   TransferOutcome.shareRemoved: (
-    'You removed that folder from the ones the other device can use.',
-    'Quitaste esa carpeta de las que puede usar el otro equipo.',
+    'You removed that folder from the ones you share with the other device.',
+    'Quitaste esa carpeta de las que le compartes al otro equipo.',
   ),
   TransferOutcome.peerMarkedForeign: (
     "You marked the other device as someone else's.",

@@ -1,9 +1,13 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/configure/configure_panel.dart';
+import 'package:nexus_bridges/src/ui/configure/configure_sections.dart';
 import 'package:nexus_bridges/src/ui/destination/folder_navigator.dart';
+import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../destination/destination_fixtures.dart';
@@ -294,6 +298,93 @@ void main() {
 
         expect(find.text(strings.unpairTitle(mineName)), findsOneWidget);
         expect(controller.calls.where((c) => c.startsWith('unpair')), isEmpty);
+      });
+
+      testWidgets('the unpair button is soft red at rest and its fill, text '
+          'and icon light up together', (tester) async {
+        await pump(tester, _state());
+        await _openFromRow(tester, strings);
+        final label = _inPanel(find.text(strings.unpairButton));
+        await _scrollTo(tester, label);
+        await tester.pump(const Duration(milliseconds: 200));
+
+        final button = find.ancestor(
+          of: label.last,
+          matching: find.bySubtype<FilledButton>(),
+        );
+        final colors = NbColors.of(tester.element(button));
+        ButtonStyle style() => tester.widget<FilledButton>(button).style!;
+        Color fill() => style().backgroundColor!.resolve({})!;
+        Color ink() => style().foregroundColor!.resolve({})!;
+        expect(fill(), colors.dangerWeak);
+        expect(ink(), colors.danger);
+        expect(style().animationDuration, Duration.zero);
+
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(button));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 60));
+        expect(fill(), isNot(colors.dangerWeak));
+        expect(fill(), isNot(colors.dangerFill));
+        expect(ink(), isNot(colors.danger));
+        expect(ink(), isNot(colors.onPrimary));
+
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(fill(), colors.dangerFill);
+        expect(ink(), colors.onPrimary);
+
+        await mouse.moveTo(Offset.zero);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(fill(), colors.dangerWeak);
+      });
+
+      testWidgets('the unpair button keeps its place and its size', (
+        tester,
+      ) async {
+        await pump(tester, _state());
+        await _openFromRow(tester, strings);
+        final label = _inPanel(find.text(strings.unpairButton));
+        await _scrollTo(tester, label);
+        await tester.pump(const Duration(milliseconds: 200));
+
+        final zone = tester.getRect(_inPanel(find.byType(ConfigureDangerZone)));
+        final button = tester.getRect(
+          find.ancestor(
+            of: label.last,
+            matching: find.bySubtype<FilledButton>(),
+          ),
+        );
+        expect(button.left, closeTo(zone.left + 14, 0.01));
+        expect(button.width, lessThan(zone.width / 2));
+        expect(button.height, lessThan(46));
+      });
+
+      testWidgets('the section titles are not cut when they fit', (
+        tester,
+      ) async {
+        await pump(tester, _state());
+        await _openFromRow(tester, strings);
+
+        final title = _inPanel(find.text(strings.sharesTitle));
+        final paragraph = tester.renderObject<RenderParagraph>(title.last);
+        expect(paragraph.didExceedMaxLines, isFalse);
+      });
+
+      testWidgets('at 200 % text the unpair button does not overflow', (
+        tester,
+      ) async {
+        await pump(tester, _state(), textScale: 2);
+        await _openFromRow(tester, strings);
+        final label = _inPanel(find.text(strings.unpairButton));
+        await _scrollTo(tester, label);
+        await tester.pump(const Duration(milliseconds: 200));
+
+        expect(tester.takeException(), isNull);
+        final panel = tester.getRect(_panel);
+        expect(tester.getRect(label.last).right, lessThan(panel.right));
       });
     });
 

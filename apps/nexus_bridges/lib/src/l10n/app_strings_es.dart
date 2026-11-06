@@ -649,7 +649,7 @@ final class AppStringsEs implements AppStrings {
     TransferOutcome.destinationLost =>
       'Esa carpeta dejó de estar disponible en el otro equipo.',
     TransferOutcome.shareRemoved =>
-      'Quitaste esa carpeta de las que puede usar el otro equipo.',
+      'Quitaste esa carpeta de las que le compartes al otro equipo.',
     TransferOutcome.peerMarkedForeign => 'Marcaste al otro equipo como ajeno.',
   };
 
@@ -733,7 +733,7 @@ final class AppStringsEs implements AppStrings {
     TransferOutcome.destinationLost =>
       'Esa carpeta dejó de estar disponible en el otro equipo.',
     TransferOutcome.shareRemoved =>
-      'Quitaste esa carpeta de las que puede usar el otro equipo.',
+      'Quitaste esa carpeta de las que le compartes al otro equipo.',
     TransferOutcome.peerMarkedForeign => 'Marcaste al otro equipo como ajeno.',
   };
 
@@ -1131,7 +1131,7 @@ final class AppStringsEs implements AppStrings {
 
   @override
   String get systemTraySwitchHelp =>
-      'La X esconde la ventana y sigue recibiendo.';
+      'Al cerrar la ventana se sigue recibiendo con la app en segundo plano';
 
   @override
   String get systemTrayOffHelp =>
@@ -1238,7 +1238,8 @@ final class AppStringsEs implements AppStrings {
   String get mineCard => 'Mío';
 
   @override
-  String get mineCardHelp => 'Puede usar tus carpetas y enviarte sin preguntar';
+  String get mineCardHelp =>
+      'Puedes compartirle carpetas y te envía sin preguntar';
 
   @override
   String get foreignCard => 'Ajeno';
@@ -1248,10 +1249,11 @@ final class AppStringsEs implements AppStrings {
       'Te pide permiso cada vez y nunca ve tus carpetas';
 
   @override
-  String get sharesTitle => 'Carpetas que puede usar';
+  String get sharesTitle => 'Carpetas que le compartes';
 
   @override
-  String sharesDesc(String name) => 'Dónde puede dejar cosas $name';
+  String sharesDesc(String name) =>
+      'De este equipo. $name podrá enviarte aquí.';
 
   @override
   String sharesInfo(String name) =>
@@ -1269,7 +1271,8 @@ final class AppStringsEs implements AppStrings {
       'En pausa mientras sea ajeno. Vuelven si lo marcas como mío';
 
   @override
-  String get sharesForeignOnly => 'Solo los equipos tuyos pueden usar carpetas';
+  String get sharesForeignOnly =>
+      'Solo puedes compartir carpetas con equipos tuyos';
 
   @override
   String get shareUnavailable => 'No disponible';
@@ -1278,7 +1281,7 @@ final class AppStringsEs implements AppStrings {
   String get chipRemovable => 'USB / microSD';
 
   @override
-  String get shareRemoveTooltip => 'Dejar de usar esta carpeta';
+  String get shareRemoveTooltip => 'Dejar de compartir esta carpeta';
 
   @override
   String get shareCloudConfirm =>
@@ -1565,7 +1568,7 @@ final class AppStringsEs implements AppStrings {
 
   @override
   String outcomeShareRemoved(String name) =>
-      'Quitaste esa carpeta de las que puede usar $name';
+      'Quitaste esa carpeta de las que le compartes a $name';
 
   @override
   String outcomePeerMarkedForeign(String name) => 'Marcaste a $name como ajeno';

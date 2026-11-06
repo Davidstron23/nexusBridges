@@ -852,18 +852,9 @@ class _ConfigurePanelState extends State<ConfigurePanel>
             help: strings.unpairSectionHelp,
             button: Align(
               alignment: Alignment.centerLeft,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: colors.dangerFill,
-                  foregroundColor: colors.onPrimary,
-                ),
+              child: ConfigureDangerButton(
+                label: strings.unpairButton,
                 onPressed: () => _unpair(entry),
-                icon: const GlyphIcon(Glyphs.unlink, size: 16),
-                label: Text(
-                  strings.unpairButton,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
               ),
             ),
           ),

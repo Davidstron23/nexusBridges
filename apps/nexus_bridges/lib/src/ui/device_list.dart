@@ -31,6 +31,7 @@ DiscTone discToneFor(NodeState state, DeviceEntry entry) {
 }
 
 const double _chipShare = 0.7;
+const double _chipGap = 10;
 
 class DeviceList extends StatelessWidget {
   const DeviceList({
@@ -252,13 +253,33 @@ class _DeviceRowState extends State<DeviceRow> {
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              entry.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: NbText.bodyStrong.copyWith(
-                                fontSize: 13,
-                                color: colors.text,
+                            child: LayoutBuilder(
+                              builder: (context, constraints) => Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      entry.displayName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: NbText.bodyStrong.copyWith(
+                                        fontSize: 13,
+                                        color: colors.text,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: _chipGap),
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth:
+                                          constraints.maxWidth * _chipShare,
+                                    ),
+                                    child: StatusChip(
+                                      height: 20,
+                                      label: chipLabel,
+                                      tone: chipTone,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -297,47 +318,34 @@ class _DeviceRowState extends State<DeviceRow> {
                             ),
                         ],
                       ),
-                      const SizedBox(height: 3),
-                      LayoutBuilder(
-                        builder: (context, constraints) => Row(
-                          children: [
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: constraints.maxWidth * _chipShare,
-                              ),
-                              child: StatusChip(
-                                height: 20,
-                                label: chipLabel,
-                                tone: chipTone,
-                              ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: entry.visible
+                                  ? colors.successInk
+                                  : colors.hint,
                             ),
-                            const SizedBox(width: 8),
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: entry.visible
-                                    ? colors.successInk
-                                    : colors.hint,
-                              ),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              entry.visible
+                                  ? strings.visibleLabel
+                                  : strings.notVisibleLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: caption,
                             ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                entry.visible
-                                    ? strings.visibleLabel
-                                    : strings.notVisibleLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: caption,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                       if (explanation != null) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 5),
                         Text(explanation, style: caption),
                       ],
                       if (entry.paired && entry.mismatch) ...[
@@ -352,7 +360,7 @@ class _DeviceRowState extends State<DeviceRow> {
                         ),
                       ],
                       if (actions.isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
                         Wrap(spacing: 8, runSpacing: 4, children: actions),
                       ],
                     ],

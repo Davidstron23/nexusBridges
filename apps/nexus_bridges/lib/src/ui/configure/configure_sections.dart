@@ -8,6 +8,7 @@ import '../theme/tokens.dart';
 
 const double configureSectionIcon = 22;
 const Duration _pauseFade = Duration(milliseconds: 420);
+const Duration _dangerGlow = Duration(milliseconds: 320);
 
 class ConfigureStagger extends StatelessWidget {
   const ConfigureStagger({
@@ -99,25 +100,30 @@ class ConfigureSection extends StatelessWidget {
                     color: colors.textWeak,
                   ),
                   const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: NbText.bodyStrong.copyWith(
-                        color: colors.text,
-                        height: 20 / 14,
-                        fontVariations: [
-                          FontVariation.weight(colors.headingWeight),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: NbText.bodyStrong.copyWith(
+                              color: colors.text,
+                              height: 20 / 14,
+                              fontVariations: [
+                                FontVariation.weight(colors.headingWeight),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (info != null) ...[
+                          const SizedBox(width: 6),
+                          InfoButton(text: info),
                         ],
-                      ),
+                      ],
                     ),
                   ),
-                  if (info != null) ...[
-                    const SizedBox(width: 6),
-                    InfoButton(text: info),
-                  ],
-                  const Spacer(),
                   if (count != null)
                     Text(
                       count,
@@ -283,7 +289,7 @@ class _ConfigureOptionState extends State<ConfigureOption> {
           child: AnimatedContainer(
             duration: duration,
             curve: labEaseOut,
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
             decoration: BoxDecoration(
               color: selected
                   ? colors.primaryWeak
@@ -307,7 +313,7 @@ class _ConfigureOptionState extends State<ConfigureOption> {
                         children: [
                           GlyphIcon(
                             widget.glyph,
-                            size: 16,
+                            size: 20,
                             color: selected
                                 ? colors.primaryInk
                                 : colors.textWeak,
@@ -326,7 +332,7 @@ class _ConfigureOptionState extends State<ConfigureOption> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
                       widget.help,
                       style: NbText.caption.copyWith(
@@ -367,6 +373,85 @@ class _ConfigureOptionState extends State<ConfigureOption> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class ConfigureDangerButton extends StatefulWidget {
+  const ConfigureDangerButton({
+    required this.label,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  State<ConfigureDangerButton> createState() => _ConfigureDangerButtonState();
+}
+
+class _ConfigureDangerButtonState extends State<ConfigureDangerButton> {
+  final WidgetStatesController _states = WidgetStatesController();
+  bool _lit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _states.addListener(_onStates);
+  }
+
+  @override
+  void dispose() {
+    _states.removeListener(_onStates);
+    _states.dispose();
+    super.dispose();
+  }
+
+  void _onStates() {
+    final states = _states.value;
+    final lit =
+        states.contains(WidgetState.hovered) ||
+        states.contains(WidgetState.pressed) ||
+        states.contains(WidgetState.focused);
+    if (lit != _lit) setState(() => _lit = lit);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return RepaintBoundary(
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(end: _lit ? 1 : 0),
+        duration: animate ? _dangerGlow : Duration.zero,
+        curve: labEaseOut,
+        builder: (context, glow, _) {
+          final ink = Color.lerp(colors.danger, colors.onPrimary, glow)!;
+          return FilledButton.icon(
+            statesController: _states,
+            style: FilledButton.styleFrom(
+              backgroundColor: Color.lerp(
+                colors.dangerWeak,
+                colors.dangerFill,
+                glow,
+              ),
+              foregroundColor: ink,
+              iconColor: ink,
+              animationDuration: Duration.zero,
+              overlayColor: Colors.transparent,
+              splashFactory: NoSplash.splashFactory,
+            ),
+            onPressed: widget.onPressed,
+            icon: GlyphIcon(Glyphs.unlink, size: 16, color: ink),
+            label: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        },
       ),
     );
   }

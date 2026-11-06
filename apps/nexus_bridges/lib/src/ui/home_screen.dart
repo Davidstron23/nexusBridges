@@ -648,14 +648,14 @@ class _ColumnTabs extends StatelessWidget {
   }
 }
 
-const double _tabHeight = 32;
+const double _tabHeight = 31;
 
 double _scaledTabHeight(BuildContext context) =>
     MediaQuery.textScalerOf(context).scale(_tabHeight);
 
 const double _trackPadding = 4;
 
-const double _thumbRadius = 8;
+const double _thumbRadius = 6;
 
 const double _trackRadius = _thumbRadius + _trackPadding;
 
@@ -682,13 +682,7 @@ class _TabThumb extends StatelessWidget {
           decoration: BoxDecoration(
             color: colors.card,
             borderRadius: BorderRadius.circular(_thumbRadius),
-            boxShadow: [
-              BoxShadow(
-                color: colors.nodeShadow,
-                offset: const Offset(0, 1),
-                blurRadius: 2,
-              ),
-            ],
+            boxShadow: [BoxShadow(color: colors.nodeShadow, blurRadius: 2)],
           ),
         ),
       ),
