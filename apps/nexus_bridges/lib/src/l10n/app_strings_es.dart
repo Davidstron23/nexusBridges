@@ -847,6 +847,15 @@ final class AppStringsEs implements AppStrings {
   String get sendFoldersOption => 'Carpetas…';
 
   @override
+  String get sendFilesDetail => 'Uno o varios a la vez, también .zip y .rar';
+
+  @override
+  String get sendFoldersDetail => 'Una o varias a la vez';
+
+  @override
+  String get sendFilesHint => 'Ctrl+clic';
+
+  @override
   String preparingItems(int count) =>
       'Preparando… ${formatCount(count, 'es')} '
       "${count == 1 ? 'elemento encontrado' : 'elementos encontrados'}";
@@ -1558,6 +1567,9 @@ final class AppStringsEs implements AppStrings {
 
   @override
   String get portalDropIn => 'Suelta en una carpeta';
+
+  @override
+  String get portalDropOnto => 'Soltar en';
 
   @override
   String get portalHold =>

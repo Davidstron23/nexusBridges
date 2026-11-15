@@ -803,6 +803,54 @@ void main() {
         expect(tester.takeException(), isNull);
       });
 
+      testWidgets('$code: the popover is 220 to 300 px wide with the name and '
+          'the chip on one line', (tester) async {
+        final strings = stringsFor(code);
+        final host = _Host(_state(_devices(3)));
+        await _mount(tester, host, code: code);
+        await _open(tester, 'A');
+
+        expect(tester.getSize(_popover()).width, inInclusiveRange(220, 300));
+        final name = tester.getCenter(_inDiagram(find.text(_nameOf('A'))));
+        final chip = tester.getCenter(_inDiagram(find.text(strings.chipMine)));
+        expect((name.dy - chip.dy).abs(), lessThan(3));
+        expect(chip.dx, greaterThan(name.dx));
+      });
+
+      testWidgets('$code: "Send..." hides the popover while its menu is '
+          'open, and closing the menu closes the popover', (tester) async {
+        final strings = stringsFor(code);
+        final host = _Host(_state(_devices(3)));
+        await _mount(tester, host, code: code);
+        await _open(tester, 'A');
+        final fade = find.ancestor(
+          of: _popover(),
+          matching: find.byType(AnimatedOpacity),
+        );
+        expect(tester.widget<AnimatedOpacity>(fade.first).opacity, 1);
+
+        await tester.tap(_sendButton(strings));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(tester.widget<AnimatedOpacity>(fade.first).opacity, 0);
+        expect(find.text(strings.sendFilesOption), findsOneWidget);
+        expect(find.text(strings.sendFilesDetail), findsOneWidget);
+        expect(find.text(strings.sendFilesHint), findsOneWidget);
+        expect(find.text(strings.sendFoldersDetail), findsOneWidget);
+        expect(
+          tester.getSize(find.byKey(const ValueKey('send-menu-panel'))).width,
+          greaterThanOrEqualTo(256),
+        );
+
+        await tester.tapAt(const Offset(4, 4));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        expect(find.text(strings.sendFilesOption), findsNothing);
+        expect(_popover(), findsNothing);
+      });
+
       testWidgets('$code: a device that is not visible keeps the Mine or '
           'Someone else\'s chip, shows Not visible on its line and cannot '
           'be sent to (point 148)', (tester) async {
@@ -951,7 +999,7 @@ void main() {
         await tester.pump();
         await tester.pump(_popoverIn);
         final rect = tester.getRect(_popover());
-        expect(rect.width, closeTo(264, 0.01));
+        expect(rect.width, inInclusiveRange(220, 300));
         final expected = placePopover(
           area: _area,
           center: center,

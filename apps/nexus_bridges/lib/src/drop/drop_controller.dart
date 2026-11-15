@@ -10,7 +10,7 @@ import '../ui/portal/portal_controller.dart';
 import 'drop_events.dart';
 
 const int maxDropItems = 1000;
-const Duration portalDelay = Duration(milliseconds: 500);
+const Duration portalDelay = Duration(milliseconds: 800);
 const Duration prefetchDelay = Duration(milliseconds: 200);
 
 sealed class DropOutcome {

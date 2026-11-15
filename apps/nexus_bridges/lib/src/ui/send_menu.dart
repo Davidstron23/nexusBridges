@@ -12,6 +12,8 @@ import 'row_menu.dart';
 import 'soft_button.dart';
 
 const double _menuGap = 6;
+const double _sendMenuMinWidth = 256;
+const double _sendMenuMaxWidth = 420;
 const double _edgeMargin = 8;
 const int _shortFingerprintLength = 8;
 
@@ -162,14 +164,20 @@ class _SendMenuButtonState extends State<SendMenuButton>
         label: strings.sendFilesOption,
         glyph: Glyphs.files,
         onSelected: widget.onFiles,
+        detail: strings.sendFilesDetail,
+        hint: strings.sendFilesHint,
       ),
       RowMenuEntry(
         label: strings.sendFoldersOption,
         glyph: Glyphs.folder,
         onSelected: widget.onFolders,
+        detail: strings.sendFoldersDetail,
       ),
     ];
-    final height = entries.length * rowMenuItemHeight + 2 * rowMenuPadding + 2;
+    final height =
+        entries.fold<double>(0, (sum, e) => sum + rowMenuItemHeightOf(e)) +
+        2 * rowMenuPadding +
+        2;
     final anchor = info.anchorRect;
     final overlay = info.overlaySize;
     final fitsBelow =
@@ -224,6 +232,8 @@ class _SendMenuButtonState extends State<SendMenuButton>
                         key: const ValueKey('send-menu-panel'),
                         entries: entries,
                         onSelect: _select,
+                        minWidth: _sendMenuMinWidth,
+                        maxWidth: _sendMenuMaxWidth,
                       ),
                     ),
                   ),

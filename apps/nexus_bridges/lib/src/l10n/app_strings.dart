@@ -205,6 +205,9 @@ abstract class AppStrings {
   String get sendEllipsis;
   String get sendFilesOption;
   String get sendFoldersOption;
+  String get sendFilesDetail;
+  String get sendFoldersDetail;
+  String get sendFilesHint;
   String preparingItems(int count);
   String folderSummary(int files, String size);
   String foldersLeftOut(int count, String? size);
@@ -417,6 +420,7 @@ abstract class AppStrings {
   String get navNameExists;
   String get navBack;
   String get portalDropIn;
+  String get portalDropOnto;
   String get portalHold;
   String portalBack(String name);
   String portalHereIn(String name);

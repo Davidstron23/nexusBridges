@@ -492,13 +492,13 @@ void main() {
 
     group('[$code] E558 holding over a device asks for the portal '
         '(RF-316)', () {
-      testWidgets('0.5 s over one of mine that can receive asks once', (
+      testWidgets('0.8 s over one of mine that can receive asks once', (
         tester,
       ) async {
         final (controller, events) = await _pump(tester, code, _state());
 
         events.add(DropEnter(_row(tester, _fpA)));
-        await tester.pump(const Duration(milliseconds: 499));
+        await tester.pump(const Duration(milliseconds: 799));
         expect(controller.calls, isEmpty);
 
         await tester.pump(const Duration(milliseconds: 2));
@@ -552,8 +552,44 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
         expect(controller.calls, isEmpty);
 
-        await tester.pump(const Duration(milliseconds: 250));
+        await tester.pump(const Duration(milliseconds: 510));
         expect(controller.calls, ['requestPortal $_fpA']);
+      });
+
+      testWidgets('the ring over one of mine fills in the same 0.8 s and '
+          'resets on leaving (RF-431)', (tester) async {
+        final (_, events) = await _pump(tester, code, _state());
+
+        events.add(DropEnter(_row(tester, _fpA)));
+        await tester.pump();
+        await tester.pump();
+        expect(_flow(tester).hot, _fpA);
+        expect(_flow(tester).armable, isTrue);
+        expect(_flow(tester).arm!.value, 0);
+
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(_flow(tester).arm!.value, closeTo(0.5, 0.05));
+
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(_flow(tester).arm!.value, 1);
+
+        events.add(DropOver(_empty));
+        await tester.pump();
+        expect(_flow(tester).armable, isFalse);
+        expect(_flow(tester).arm!.value, 0);
+      });
+
+      testWidgets('over someone else the ring is whole at once: nothing to '
+          'fill (RF-431)', (tester) async {
+        final (_, events) = await _pump(tester, code, _state());
+
+        events.add(DropEnter(_row(tester, _fpB)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(_flow(tester).hot, _fpB);
+        expect(_flow(tester).armable, isFalse);
+        expect(_flow(tester).arm!.value, 0);
       });
 
       testWidgets('a foreign device never asks, and dropping still sends', (

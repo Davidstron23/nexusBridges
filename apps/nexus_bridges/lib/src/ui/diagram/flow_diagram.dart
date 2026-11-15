@@ -5,13 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
+import '../../drop/drop_controller.dart' show portalDelay;
 import '../../drop/drop_zone.dart';
 import '../../l10n/app_strings.dart';
 import '../attention.dart';
 import '../configure/configure_controller.dart';
+import '../destination/lab_button.dart';
 import '../device_list.dart' show discToneFor;
 import '../icons/device_disc.dart';
 import '../icons/glyphs.dart';
+import '../portal/portal_controller.dart';
 import '../progress/selection_progress_painter.dart';
 import '../send_menu.dart';
 import '../theme/app_theme.dart';
@@ -28,7 +31,8 @@ const Duration _doneDuration = Duration(milliseconds: 3200);
 const Duration _iconFadeDuration = Duration(milliseconds: 400);
 const Duration _spinPeriod = Duration(seconds: 6);
 const Cubic _motionCurve = Cubic(0.2, 0.8, 0.2, 1);
-const double _popoverWidth = 264;
+const double _popoverMinWidth = 220;
+const double _popoverMaxWidth = 300;
 const double _hitExtra = 6;
 const double _tipLeft = 14;
 const double _tipBottom = 12;
@@ -84,11 +88,16 @@ class _FlowDiagramState extends State<FlowDiagram>
   late final AnimationController _drag;
   late final AnimationController _spin;
   late final CurvedAnimation _dragCurve;
+  late final AnimationController _arm;
+  final ValueNotifier<String?> _openRing = ValueNotifier<String?>(null);
+  PortalController? _portal;
+  String? _armFor;
   Map<String, TravelIcon> _icons = const {};
   Map<String, TravelIcon> _iconFrom = const {};
   Timer? _doneTimer;
   String? _done;
   String? _popoverFor;
+  bool _sendMenuOpen = false;
   String? _shownHover;
   NodeState? _previous;
   bool _reduceMotion = false;
@@ -103,6 +112,7 @@ class _FlowDiagramState extends State<FlowDiagram>
     _drag = AnimationController(vsync: this, duration: dropFadeDuration);
     _spin = AnimationController(vsync: this, duration: _spinPeriod);
     _dragCurve = CurvedAnimation(parent: _drag, curve: _motionCurve);
+    _arm = AnimationController(vsync: this, duration: portalDelay);
     _drag.addStatusListener(_onDragStatus);
     _hover.addStatusListener(_onHoverStatus);
     widget.hovered.addListener(_onHovered);
@@ -148,6 +158,9 @@ class _FlowDiagramState extends State<FlowDiagram>
     _iconFade.dispose();
     _dragCurve.dispose();
     _drag.dispose();
+    _portal?.removeListener(_onPortal);
+    _openRing.dispose();
+    _arm.dispose();
     _spin.dispose();
     _clock.dispose();
     super.dispose();
@@ -229,8 +242,39 @@ class _FlowDiagramState extends State<FlowDiagram>
     }
   }
 
+  void _bindPortal(PortalController? portal) {
+    if (identical(portal, _portal)) return;
+    _portal?.removeListener(_onPortal);
+    _portal = portal;
+    portal?.addListener(_onPortal);
+    _onPortal();
+  }
+
+  void _onPortal() {
+    final portal = _portal;
+    _openRing.value = portal != null && portal.isOpen
+        ? portal.fingerprint
+        : null;
+  }
+
+  void _syncArm(String? target) {
+    if (target == _armFor) return;
+    _armFor = target;
+    if (target == null) {
+      _arm.value = 0;
+    } else if (_reduceMotion) {
+      _arm.value = 1;
+    } else {
+      _arm.forward(from: 0);
+    }
+  }
+
   void _closePopover() {
-    if (_popoverFor != null) setState(() => _popoverFor = null);
+    if (_popoverFor == null && !_sendMenuOpen) return;
+    setState(() {
+      _popoverFor = null;
+      _sendMenuOpen = false;
+    });
   }
 
   @override
@@ -273,6 +317,13 @@ class _FlowDiagramState extends State<FlowDiagram>
             if (widget.state.canSendTo(peer.fingerprint)) peer.fingerprint,
         };
         final hovering = dragging ? drop?.hovered : null;
+        final armable =
+            hovering != null &&
+            drop != null &&
+            lit.contains(hovering) &&
+            drop.isMine(hovering);
+        _bindPortal(drop?.portal);
+        _syncArm(armable ? hovering : null);
 
         final zones = <Widget>[];
         for (var i = 0; i < scene.peers.length; i++) {
@@ -364,6 +415,9 @@ class _FlowDiagramState extends State<FlowDiagram>
                     lit: lit,
                     hot: hovering,
                     configured: configured,
+                    arm: _arm,
+                    armable: armable,
+                    openRing: _openRing,
                   ),
                 ),
               ),
@@ -427,10 +481,18 @@ class _FlowDiagramState extends State<FlowDiagram>
               anchor: slot.center,
               radius: scene.layout.peerRadius,
               reduceMotion: _reduceMotion,
+              hidden: _sendMenuOpen,
               child: _FlowPopover(
                 entry: entry,
                 state: widget.state,
                 tone: discToneFor(widget.state, entry),
+                onSendMenu: (open) {
+                  if (open) {
+                    setState(() => _sendMenuOpen = true);
+                  } else {
+                    _closePopover();
+                  }
+                },
                 onFiles: () {
                   _closePopover();
                   widget.onSendFiles(entry.fingerprint);
@@ -507,11 +569,13 @@ class _PopoverLayer extends StatefulWidget {
     required this.radius,
     required this.reduceMotion,
     required this.child,
+    this.hidden = false,
   });
 
   final Offset anchor;
   final double radius;
   final bool reduceMotion;
+  final bool hidden;
   final Widget child;
 
   @override
@@ -560,7 +624,14 @@ class _PopoverLayerState extends State<_PopoverLayer>
                 center: widget.anchor,
                 radius: widget.radius,
               ),
-              child: widget.child,
+              child: AnimatedOpacity(
+                opacity: widget.hidden ? 0 : 1,
+                duration: widget.reduceMotion
+                    ? Duration.zero
+                    : _popoverDuration,
+                curve: _motionCurve,
+                child: widget.child,
+              ),
             ),
           ),
         );
@@ -576,6 +647,7 @@ class _FlowPopover extends StatelessWidget {
     required this.tone,
     required this.onFiles,
     required this.onFolders,
+    required this.onSendMenu,
     this.onConfigure,
   });
 
@@ -584,6 +656,7 @@ class _FlowPopover extends StatelessWidget {
   final DiscTone tone;
   final VoidCallback onFiles;
   final VoidCallback onFolders;
+  final ValueChanged<bool> onSendMenu;
   final VoidCallback? onConfigure;
 
   @override
@@ -594,126 +667,139 @@ class _FlowPopover extends StatelessWidget {
     final caption = NbText.caption.copyWith(color: colors.textWeak);
     final explanation = sendExplanation(strings, state, entry);
 
-    return SizedBox(
-      width: _popoverWidth,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: radius,
-          boxShadow: colors.popoverShadow,
-        ),
-        child: Card(
-          clipBehavior: Clip.antiAlias,
-          margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(borderRadius: radius),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    DeviceDisc(type: entry.deviceType, size: 32, tone: tone),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _popoverName(strings, entry),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: NbText.bodyStrong.copyWith(
-                              color: colors.text,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 2,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              StatusChip(
-                                height: 20,
-                                label: entry.mine
-                                    ? strings.chipMine
-                                    : strings.chipForeign,
-                                tone: entry.mine
-                                    ? ChipTone.run
-                                    : ChipTone.foreign,
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        minWidth: _popoverMinWidth,
+        maxWidth: _popoverMaxWidth,
+      ),
+      child: IntrinsicWidth(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: radius,
+            boxShadow: colors.popoverShadow,
+          ),
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(borderRadius: radius),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      DeviceDisc(type: entry.deviceType, size: 32, tone: tone),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              height: 22,
+                              child: Row(
                                 children: [
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: entry.visible
-                                          ? colors.successInk
-                                          : colors.hint,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
                                   Flexible(
                                     child: Text(
-                                      entry.visible
-                                          ? strings.visibleLabel
-                                          : strings.notVisibleLabel,
+                                      _popoverName(strings, entry),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: caption,
+                                      style: NbText.bodyStrong.copyWith(
+                                        color: colors.text,
+                                        height: 22 / 14,
+                                      ),
                                     ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  StatusChip(
+                                    height: 20,
+                                    label: entry.mine
+                                        ? strings.chipMine
+                                        : strings.chipForeign,
+                                    tone: entry.mine
+                                        ? ChipTone.run
+                                        : ChipTone.foreign,
                                   ),
                                 ],
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            strings.fingerprintLine(
-                              _shortOf(entry.fingerprint),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: caption,
-                          ),
-                        ],
+                            const SizedBox(height: 2),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 2,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: entry.visible
+                                            ? colors.successInk
+                                            : colors.hint,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        entry.visible
+                                            ? strings.visibleLabel
+                                            : strings.notVisibleLabel,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: caption,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              strings.fingerprintLine(
+                                _shortOf(entry.fingerprint),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: caption,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                if (explanation != null) ...[
-                  const SizedBox(height: 8),
-                  Text(explanation, style: caption),
-                ],
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: SendMenuButton(
-                    enabled: state.canSendTo(entry.fingerprint),
-                    height: 32,
-                    onFiles: onFiles,
-                    onFolders: onFolders,
+                    ],
                   ),
-                ),
-                if (onConfigure != null) ...[
-                  const SizedBox(height: 6),
+                  if (explanation != null) ...[
+                    const SizedBox(height: 8),
+                    Text(explanation, style: caption),
+                  ],
+                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
-                    child: TextButton.icon(
-                      style: smallButton.merge(
-                        TextButton.styleFrom(foregroundColor: colors.textWeak),
-                      ),
-                      onPressed: onConfigure,
-                      icon: const GlyphIcon(Glyphs.sliders, size: 14),
-                      label: Text(strings.configureEllipsis),
+                    child: SendMenuButton(
+                      enabled: state.canSendTo(entry.fingerprint),
+                      height: 32,
+                      onFiles: onFiles,
+                      onFolders: onFolders,
+                      onOpenChanged: onSendMenu,
                     ),
                   ),
+                  if (onConfigure != null) ...[
+                    const SizedBox(height: 6),
+                    LabButton(
+                      label: strings.configureEllipsis,
+                      kind: LabButtonKind.ghost,
+                      glyph: Glyphs.sliders,
+                      expand: true,
+                      onPressed: onConfigure,
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),

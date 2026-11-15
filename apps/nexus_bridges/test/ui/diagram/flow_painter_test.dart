@@ -19,6 +19,12 @@ const Timeout _short = Timeout(Duration(seconds: 20));
 
 List<PathMetric> _metrics(Path path) => path.computeMetrics().toList();
 
+double _breath(double seconds) {
+  final t = (seconds % 2.4) / 2.4;
+  final rise = t < 0.5 ? t * 2 : (1 - t) * 2;
+  return 0.3 + (0.85 - 0.3) * const Cubic(0.45, 0, 0.55, 1).transform(rise);
+}
+
 double _lengthOf(Path path) =>
     _metrics(path).fold<double>(0, (sum, metric) => sum + metric.length);
 
@@ -278,31 +284,6 @@ Offset _end(Path path) {
 
 Offset _start(Path path) =>
     _metrics(path).first.getTangentForOffset(0)!.position;
-
-double _distanceAlong(PathMetric curve, Offset point) {
-  var best = 0.0;
-  var bestDistance = double.infinity;
-  for (var d = 0.0; d <= curve.length; d += 0.25) {
-    final position = curve.getTangentForOffset(d)!.position;
-    final distance = (position - point).distance;
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = d;
-    }
-  }
-  return best;
-}
-
-List<double> _dashStarts(Path dashed, Path curve) {
-  final metric = _metrics(curve).single;
-  return [
-    for (final dash in _metrics(dashed))
-      _distanceAlong(metric, dash.getTangentForOffset(0)!.position),
-  ];
-}
-
-bool _hasNear(List<double> values, double target, [double tolerance = 0.4]) =>
-    values.any((value) => (value - target).abs() <= tolerance);
 
 int _paragraphs(List<_Call> calls) =>
     calls.where((call) => call.name == #drawParagraph).length;
@@ -593,8 +574,8 @@ void main() {
   });
 
   group('FlowBackgroundPainter', () {
-    test('paints the halo, four half rings (the two outer ones dashed) and '
-        'the radial mask inside a layer', () {
+    test('paints the halo, four solid half rings at half strength and the '
+        'radial mask inside a layer', () {
       final layout = layoutFlow(_wide, 3);
       final calls = _record(
         FlowBackgroundPainter(layout: layout, colors: NbColors.light),
@@ -617,9 +598,17 @@ void main() {
         final paint = arcs[i].paint;
         expect(paint.style, PaintingStyle.stroke);
         expect(paint.strokeWidth, 1);
-        expect(_sameColor(paint.color, NbColors.light.border), isTrue);
+        expect(
+          _sameColor(
+            paint.color,
+            NbColors.light.border.withValues(
+              alpha: NbColors.light.border.a * 0.5,
+            ),
+          ),
+          isTrue,
+        );
         final pieces = _metrics(arcs[i].path);
-        expect(pieces.length > 1, i > 1, reason: 'ring $i');
+        expect(pieces, hasLength(1), reason: 'ring $i');
         final point = pieces.first.getTangentForOffset(0)!.position;
         expect(
           (point - layout.hub).distance,
@@ -723,22 +712,26 @@ void main() {
       );
     });
 
-    test('idle and not visible: dashed base line and a card disc with a '
-        'dashed hint ring, without shadow', () {
+    test('idle and not visible: solid base line at 45 % and a card disc with a '
+        'solid hint ring, without shadow', () {
       final scene = _scene(_state(entries: [_entry('A', visible: false)]));
       final slot = scene.layout.slots.single;
       final pr = scene.layout.peerRadius;
       final calls = _record(_painter(scene), _wide);
-      final base = _lines(calls, 2, color: colors.border).single;
-      final pieces = _metrics(base.path);
-      expect(pieces.length, greaterThan(5));
+      expect(_lines(calls, 2, color: colors.border), isEmpty);
+      final base = _lines(
+        calls,
+        2,
+        color: colors.border.withValues(alpha: colors.border.a * 0.45),
+      ).single;
+      expect(_metrics(base.path), hasLength(1));
       final curveLength = _lengthOf(flowCurve(scene.layout, slot));
-      expect(_lengthOf(base.path), closeTo(curveLength * 2 / 8, 2.5));
+      expect(_lengthOf(base.path), closeTo(curveLength, 2.5));
       expect(_fills(calls, slot.center, pr, colors.card), hasLength(1));
       expect(_discFills(calls, slot.center, pr), isEmpty);
       final ring = _lines(calls, 1.2, color: colors.hint);
       expect(ring, hasLength(1));
-      expect(_metrics(ring.single.path).length, greaterThan(10));
+      expect(_metrics(ring.single.path), hasLength(1));
       expect(
         _circles(calls).any(
           (circle) =>
@@ -749,7 +742,7 @@ void main() {
       );
     });
 
-    test('waiting: dashed line in primary at 75 %, base ending 12 px before '
+    test('waiting: solid breathing line in primary, base ending 12 px before '
         'the disc, 1.5 px primary ring and a pulse', () {
       final scene = _scene(
         _state(outgoing: _out('A', OutgoingPhase.requesting)),
@@ -768,50 +761,65 @@ void main() {
       final line = _lines(
         calls,
         2.5,
-        color: colors.primary.withValues(alpha: 0.75),
+        color: colors.primary.withValues(alpha: _breath(0)),
       );
       expect(line, hasLength(1));
       final curveLength = _lengthOf(flowCurve(scene.layout, slot, gap: 12));
-      expect(_lengthOf(line.single.path), closeTo(curveLength * 4 / 9, 4.5));
+      expect(_metrics(line.single.path), hasLength(1));
+      expect(_lengthOf(line.single.path), closeTo(curveLength, 1));
       expect(_rings(calls, slot.center, pr, 1.5, colors.primary), hasLength(1));
       expect(_pulses(calls, slot.center, pr), hasLength(1));
       expect(_fills(calls, slot.center, pr + 7, colors.primaryWeak), isEmpty);
       expect(_dots(calls, colors), isEmpty);
     });
 
-    test('asking: dashed warning ring line, warning halo, 2 px warning ring '
-        'and a warning pulse', () {
-      final scene = _scene(_state(incoming: _in('A', IncomingStage.warning)));
-      final slot = scene.layout.slots.single;
-      final pr = scene.layout.peerRadius;
-      final calls = _record(_painter(scene), _wide);
-      final line = _lines(calls, 2.5, color: colors.warningRing);
-      expect(line, hasLength(1));
-      expect(_metrics(line.single.path).length, greaterThan(5));
-      expect(
-        _fills(calls, slot.center, pr + 7, colors.warningWeak),
-        hasLength(1),
-      );
-      expect(
-        _rings(calls, slot.center, pr, 2, colors.warningRing),
-        hasLength(1),
-      );
-      final pulse = _pulses(calls, slot.center, pr).single;
-      expect(
-        _sameColor(
-          pulse.paint.color.withValues(alpha: 1),
-          colors.warningRing.withValues(alpha: 1),
-        ),
-        isTrue,
-      );
-    });
+    test(
+      'asking: solid breathing warning line, warning halo, 2 px warning ring '
+      'and a warning pulse',
+      () {
+        final scene = _scene(_state(incoming: _in('A', IncomingStage.warning)));
+        final slot = scene.layout.slots.single;
+        final pr = scene.layout.peerRadius;
+        final calls = _record(_painter(scene), _wide);
+        final line = _lines(
+          calls,
+          2.5,
+          color: colors.warningRing.withValues(alpha: _breath(0)),
+        );
+        expect(line, hasLength(1));
+        expect(_metrics(line.single.path), hasLength(1));
+        expect(
+          _fills(calls, slot.center, pr + 7, colors.warningWeak),
+          hasLength(1),
+        );
+        expect(
+          _rings(calls, slot.center, pr, 2, colors.warningRing),
+          hasLength(1),
+        );
+        final pulse = _pulses(calls, slot.center, pr).single;
+        expect(
+          _sameColor(
+            pulse.paint.color.withValues(alpha: 1),
+            colors.warningRing.withValues(alpha: 1),
+          ),
+          isTrue,
+        );
+      },
+    );
 
     test('the folder question is asking too', () {
       final scene = _scene(
         _state(incoming: _in('A', IncomingStage.folderQuestion)),
       );
       final calls = _record(_painter(scene), _wide);
-      expect(_lines(calls, 2.5, color: colors.warningRing), hasLength(1));
+      expect(
+        _lines(
+          calls,
+          2.5,
+          color: colors.warningRing.withValues(alpha: _breath(0)),
+        ),
+        hasLength(1),
+      );
     });
 
     test('active: partial line of 3 px with the gradient up to the progress, '
@@ -1005,73 +1013,76 @@ void main() {
     });
   });
 
-  group('FlowPainter: the dashes move', () {
+  group('FlowPainter: the waiting and asking lines breathe', () {
     final colors = NbColors.light;
-    const twoPixels = 2 / 18;
-    const threePixels = 3 / 18;
 
-    List<double> starts(
+    List<_Stroke> breathing(
       NodeState state,
-      double seconds, {
+      double seconds,
+      Color color, {
       bool reduce = false,
     }) {
-      final scene = _scene(state);
-      final slot = scene.layout.slots.single;
       final calls = _record(
-        _painter(scene, seconds: seconds, reduceMotion: reduce),
+        _painter(_scene(state), seconds: seconds, reduceMotion: reduce),
         _wide,
       );
-      final dashed = [
-        ..._lines(calls, 2.5, color: colors.primary.withValues(alpha: 0.75)),
-        ..._lines(calls, 2.5, color: colors.warningRing),
-      ].single;
-      return _dashStarts(dashed.path, flowCurve(scene.layout, slot, gap: 12));
+      return [
+        for (final stroke in _paths(calls))
+          if (stroke.paint.style == PaintingStyle.stroke &&
+              (stroke.paint.strokeWidth - 2.5).abs() < _tolerance &&
+              stroke.paint.shader == null &&
+              (stroke.paint.color.r - color.r).abs() < 0.004 &&
+              (stroke.paint.color.g - color.g).abs() < 0.004 &&
+              (stroke.paint.color.b - color.b).abs() < 0.004)
+            stroke,
+      ];
     }
 
-    test('a send waiting moves its dashes towards the device at 18 px/s', () {
-      final state = _state(outgoing: _out('A', OutgoingPhase.waiting));
-      final first = starts(state, twoPixels);
-      expect(_hasNear(first, 2), isTrue, reason: '$first');
-      expect(_hasNear(first, 11), isTrue, reason: '$first');
-      expect(_hasNear(first, 7), isFalse, reason: '$first');
-      final later = starts(state, threePixels);
-      expect(_hasNear(later, 3), isTrue, reason: '$later');
-      expect(_hasNear(later, 12), isTrue, reason: '$later');
-    }, timeout: _short);
-
-    test('a receive waiting moves its dashes towards the hub', () {
-      final state = _state(incoming: _in('A', IncomingStage.waitingData));
-      final first = starts(state, twoPixels);
-      expect(_hasNear(first, 7), isTrue, reason: '$first');
-      expect(_hasNear(first, 16), isTrue, reason: '$first');
-      expect(_hasNear(first, 2), isFalse, reason: '$first');
-      final later = starts(state, threePixels);
-      expect(_hasNear(later, 6), isTrue, reason: '$later');
-      expect(_hasNear(later, 15), isTrue, reason: '$later');
-    }, timeout: _short);
-
-    test('asking moves its dashes towards the hub', () {
-      final state = _state(incoming: _in('A', IncomingStage.warning));
-      final first = starts(state, twoPixels);
-      expect(_hasNear(first, 7), isTrue, reason: '$first');
-      expect(_hasNear(first, 2), isFalse, reason: '$first');
-    }, timeout: _short);
-
-    test('with reduced motion the dashes stand still at phase 0', () {
-      for (final state in [
+    final cases = <(String, NodeState, Color)>[
+      (
+        'a send waiting',
         _state(outgoing: _out('A', OutgoingPhase.waiting)),
+        colors.primary,
+      ),
+      (
+        'a receive waiting',
+        _state(incoming: _in('A', IncomingStage.waitingData)),
+        colors.primary,
+      ),
+      (
+        'asking',
         _state(incoming: _in('A', IncomingStage.warning)),
-      ]) {
-        for (final seconds in [twoPixels, 1.3]) {
-          final values = starts(state, seconds, reduce: true);
-          expect(_hasNear(values, 0), isTrue, reason: '$values');
-          expect(_hasNear(values, 9), isTrue, reason: '$values');
-          expect(_hasNear(values, 18), isTrue, reason: '$values');
-          expect(_hasNear(values, 2), isFalse, reason: '$values');
-          expect(_hasNear(values, 7), isFalse, reason: '$values');
+        colors.warningRing,
+      ),
+    ];
+
+    for (final (name, state, color) in cases) {
+      test('$name: one solid line whose opacity goes 0.3, 0.575, 0.85 and '
+          'back over 2.4 s', () {
+        for (final (seconds, alpha) in [
+          (0.0, 0.3),
+          (0.6, 0.575),
+          (1.2, 0.85),
+          (1.8, 0.575),
+          (2.4, 0.3),
+          (3.6, 0.85),
+        ]) {
+          final lines = breathing(state, seconds, color);
+          expect(lines, hasLength(1), reason: '$seconds');
+          expect(_metrics(lines.single.path), hasLength(1), reason: '$seconds');
+          expect(lines.single.paint.color.a, closeTo(alpha, 0.005));
         }
-      }
-    }, timeout: _short);
+      });
+
+      test('$name: with reduced motion it stays at 0.75 whatever the clock '
+          'says', () {
+        for (final seconds in [0.0, 0.6, 1.2, 5.0]) {
+          final lines = breathing(state, seconds, color, reduce: true);
+          expect(lines, hasLength(1), reason: '$seconds');
+          expect(lines.single.paint.color.a, closeTo(0.75, 0.005));
+        }
+      });
+    }
   });
 
   group('FlowPainter: the dot and the file that travels', () {
@@ -1282,10 +1293,21 @@ void main() {
       final colors = NbColors.light;
       final pr = scene.layout.peerRadius;
       final calls = _record(_painter(scene, seconds: 0.3), _wide);
-      final base = _lines(calls, 2, color: colors.border);
+      final base = [
+        ..._lines(calls, 2, color: colors.border),
+        ..._lines(
+          calls,
+          2,
+          color: colors.border.withValues(alpha: colors.border.a * 0.45),
+        ),
+      ];
       final state = [
         ..._lines(calls, 3),
-        ..._lines(calls, 2.5, color: colors.warningRing),
+        ..._lines(
+          calls,
+          2.5,
+          color: colors.warningRing.withValues(alpha: _breath(0.3)),
+        ),
       ];
       final discs = [
         ..._discFills(calls, scene.layout.slots[0].center, pr),
@@ -1338,6 +1360,209 @@ void main() {
             textDirection: TextDirection.rtl,
           ),
         ),
+        isTrue,
+      );
+    });
+  });
+
+  group('FlowPainter: the destination ring (RF-431)', () {
+    final colors = NbColors.light;
+
+    List<_Call> ring({
+      required String? hot,
+      bool armable = true,
+      double arm = 0,
+      String? open,
+      bool reduce = false,
+    }) {
+      final scene = _scene(_state(entries: [_entry('A'), _entry('B')]));
+      return _record(
+        FlowPainter(
+          scene: scene,
+          colors: colors,
+          clock: const AlwaysStoppedAnimation<double>(0),
+          hover: const AlwaysStoppedAnimation<double>(0),
+          reduceMotion: reduce,
+          textDirection: TextDirection.ltr,
+          dragFade: const AlwaysStoppedAnimation<double>(1),
+          dragSpin: const AlwaysStoppedAnimation<double>(0.3),
+          lit: const {'A', 'B'},
+          hot: hot,
+          arm: AlwaysStoppedAnimation<double>(arm),
+          armable: armable,
+          openRing: ValueNotifier<String?>(open),
+        ),
+        _wide,
+      );
+    }
+
+    List<_Stroke> dashed(List<_Call> calls) => [
+      for (final stroke in _paths(calls))
+        if (stroke.paint.style == PaintingStyle.stroke &&
+            stroke.paint.strokeWidth == 2 &&
+            stroke.paint.shader == null &&
+            (stroke.paint.color.r - colors.primary.r).abs() < 0.004 &&
+            (stroke.paint.color.b - colors.primary.b).abs() < 0.004 &&
+            _metrics(stroke.path).length > 10)
+          stroke,
+    ];
+
+    List<_Call> arcs(List<_Call> calls) =>
+        calls.where((call) => call.name == #drawArc).toList();
+
+    List<_Call> ovals(List<_Call> calls) =>
+        calls.where((call) => call.name == #drawOval).toList();
+
+    test('a device that can receive and is not under the drag has a dashed '
+        'ring and nothing else', () {
+      final calls = ring(hot: null);
+
+      expect(dashed(calls), hasLength(2));
+      expect(arcs(calls), isEmpty);
+      expect(ovals(calls), isEmpty);
+      expect(
+        _sameColor(
+          dashed(calls).first.paint.color,
+          colors.primary.withValues(alpha: colors.primary.a * 0.85),
+        ),
+        isTrue,
+      );
+    });
+
+    test('under the drag at 0 % the dashes are still there and the arc has '
+        'not started', () {
+      final calls = ring(hot: 'A', arm: 0);
+
+      expect(dashed(calls), hasLength(2));
+      expect(arcs(calls), isEmpty);
+      expect(ovals(calls), isEmpty);
+    });
+
+    test('at half the 0.8 s the dashes are off and the arc covers half of the '
+        'circle from the top, with no empty track', () {
+      final scene = _scene(_state(entries: [_entry('A'), _entry('B')]));
+      final center = scene.layout.slots.first.center;
+      final pr = scene.layout.peerRadius;
+      final calls = ring(hot: 'A', arm: 0.5);
+
+      expect(dashed(calls), hasLength(1));
+      final drawn = arcs(calls);
+      expect(drawn, hasLength(2));
+      for (final call in drawn) {
+        final rect = call.args[0] as Rect;
+        expect(_near(rect.center, center), isTrue);
+        expect(rect.width / 2, closeTo(pr + 9, _tolerance));
+        expect(call.args[1] as double, closeTo(-math.pi / 2, 0.0001));
+        expect(call.args[2] as double, closeTo(math.pi, 0.0001));
+        expect(call.args[3], isFalse);
+        final paint = call.args[4] as Paint;
+        expect(paint.strokeWidth, 3);
+        expect(paint.strokeCap, StrokeCap.round);
+      }
+      expect((drawn.first.args[4] as Paint).maskFilter, isNotNull);
+      expect((drawn.last.args[4] as Paint).maskFilter, isNull);
+      expect(ovals(calls), isEmpty);
+    });
+
+    test('the arc sweeps in proportion to the fill', () {
+      for (final fill in [0.1, 0.25, 0.9]) {
+        final drawn = arcs(ring(hot: 'A', arm: fill));
+        expect(drawn, hasLength(2), reason: '$fill');
+        expect(
+          drawn.last.args[2] as double,
+          closeTo(2 * math.pi * fill, 0.0001),
+          reason: '$fill',
+        );
+      }
+    });
+
+    for (final reduce in [false, true]) {
+      test('at 100 % without the portal open the ring stays whole as two '
+          'full arcs from the top${reduce ? ' (reduced motion)' : ''}', () {
+        final scene = _scene(_state(entries: [_entry('A'), _entry('B')]));
+        final center = scene.layout.slots.first.center;
+        final pr = scene.layout.peerRadius;
+        final calls = ring(hot: 'A', arm: 1, reduce: reduce);
+
+        final drawn = arcs(calls);
+        expect(drawn, hasLength(2));
+        for (final call in drawn) {
+          final rect = call.args[0] as Rect;
+          expect(_near(rect.center, center), isTrue);
+          expect(rect.width / 2, closeTo(pr + 9, _tolerance));
+          expect(call.args[1] as double, closeTo(-math.pi / 2, 0.0001));
+          expect(call.args[2] as double, closeTo(2 * math.pi, 0.0001));
+          final paint = call.args[4] as Paint;
+          expect(paint.strokeWidth, 3);
+          expect(paint.strokeCap, StrokeCap.round);
+        }
+        expect((drawn.first.args[4] as Paint).maskFilter, isNotNull);
+        expect((drawn.last.args[4] as Paint).maskFilter, isNull);
+        expect(ovals(calls), isEmpty);
+        expect(dashed(calls), hasLength(1));
+      });
+    }
+
+    test('with the portal open the ring is whole and solid at 3 px, with no '
+        'arc and no dashes', () {
+      final scene = _scene(_state(entries: [_entry('A'), _entry('B')]));
+      final pr = scene.layout.peerRadius;
+      final calls = ring(hot: 'A', arm: 1, open: 'A');
+
+      final whole = ovals(calls);
+      expect(whole, hasLength(1));
+      final paint = whole.single.args[1] as Paint;
+      expect(paint.strokeWidth, 3);
+      expect(paint.style, PaintingStyle.stroke);
+      expect(_sameColor(paint.color, colors.primary), isTrue);
+      expect((whole.single.args[0] as Rect).width / 2, closeTo(pr + 9, 0.01));
+      expect(arcs(calls), isEmpty);
+      expect(dashed(calls), hasLength(1));
+    });
+
+    test('over a device that is not mine the ring is whole at once', () {
+      final calls = ring(hot: 'A', armable: false, arm: 0);
+
+      expect(ovals(calls), hasLength(1));
+      expect((ovals(calls).single.args[1] as Paint).strokeWidth, 3);
+      expect(arcs(calls), isEmpty);
+      expect(dashed(calls), hasLength(1));
+    });
+
+    test('repaints when the arm, the armable flag or the open ring change', () {
+      final scene = _scene(_state());
+      FlowPainter build({
+        Animation<double>? arm,
+        bool armable = false,
+        ValueNotifier<String?>? open,
+      }) => FlowPainter(
+        scene: scene,
+        colors: colors,
+        clock: const AlwaysStoppedAnimation<double>(0),
+        hover: const AlwaysStoppedAnimation<double>(0),
+        reduceMotion: false,
+        textDirection: TextDirection.ltr,
+        arm: arm,
+        armable: armable,
+        openRing: open,
+      );
+      final arm = AlwaysStoppedAnimation<double>(0.2);
+      final open = ValueNotifier<String?>(null);
+      final base = build(arm: arm, open: open);
+
+      expect(base.shouldRepaint(build(arm: arm, open: open)), isFalse);
+      expect(
+        base.shouldRepaint(
+          build(arm: const AlwaysStoppedAnimation<double>(0.2), open: open),
+        ),
+        isTrue,
+      );
+      expect(
+        base.shouldRepaint(build(arm: arm, armable: true, open: open)),
+        isTrue,
+      );
+      expect(
+        base.shouldRepaint(build(arm: arm, open: ValueNotifier<String?>(null))),
         isTrue,
       );
     });

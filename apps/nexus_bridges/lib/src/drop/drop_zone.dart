@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
-import '../ui/diagram/flow_painter.dart' show dashPath;
 import '../ui/icons/glyphs.dart';
 import '../ui/modal/timeline.dart';
 import '../ui/theme/app_theme.dart';
@@ -14,7 +13,7 @@ const double _dimmedOpacity = 0.32;
 const double _ringInset = 5;
 const double _ringRadius = 10;
 const double _ringWidth = 1.5;
-const double _ringOpacity = 0.55;
+const double _ringOpacity = 0.35;
 const double _pillHeight = 32;
 const double _pillShift = 10;
 const double _tipMaxWidth = 290;
@@ -188,18 +187,7 @@ class _RingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = _ringWidth
       ..color = line.withValues(alpha: line.a * alpha);
-    final outline = Path()..addRRect(box);
-    if (hotness >= 1) {
-      canvas.drawPath(outline, paint);
-    } else {
-      canvas.drawPath(dashPath(outline, const [4, 4]), paint);
-      if (hotness > 0) {
-        canvas.drawPath(
-          outline,
-          paint..color = line.withValues(alpha: line.a * alpha * hotness),
-        );
-      }
-    }
+    canvas.drawRRect(box, paint);
   }
 
   @override

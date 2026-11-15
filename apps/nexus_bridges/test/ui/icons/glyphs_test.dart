@@ -865,8 +865,8 @@ void main() {
         );
       });
 
-      testWidgets('not visible in ${brightness.name}: no fill, dashed hint '
-          'outline and hint icon', (tester) async {
+      testWidgets('not visible in ${brightness.name}: no fill, solid hint '
+          'outline at 80 % and hint icon', (tester) async {
         final colors = _colorsFor(brightness);
         await _pump(
           tester,
@@ -879,7 +879,7 @@ void main() {
           painter,
           paints
             ..path(
-              color: colors.hint,
+              color: colors.hint.withValues(alpha: colors.hint.a * 0.8),
               strokeWidth: _f32(1.2),
               style: PaintingStyle.stroke,
             )
@@ -899,8 +899,8 @@ void main() {
             );
             final circumference = 2 * math.pi * (19 - 0.6);
             final bounds = _tightBounds(arguments[0] as Path);
-            return metrics.length > 10 &&
-                (drawn - circumference / 2).abs() < 3 &&
+            return metrics.length == 1 &&
+                (drawn - circumference).abs() < 1 &&
                 bounds.left >= 0 &&
                 bounds.top >= 0 &&
                 bounds.right <= 38 &&

@@ -177,7 +177,7 @@ Future<void> settleMenu(WidgetTester tester) async {
 Future<void> settleNav(WidgetTester tester) async {
   await tester.pump();
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 600));
+  await tester.pump(const Duration(milliseconds: 750));
   await tester.pump();
 }
 

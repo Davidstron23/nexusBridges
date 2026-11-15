@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/drop/drop_events.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/destination/destination_menu.dart';
+import 'package:nexus_bridges/src/ui/diagram/flow_painter.dart';
 import 'package:nexus_bridges/src/ui/portal/portal_controller.dart';
 import 'package:nexus_bridges/src/ui/portal/portal_panel.dart';
+import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../drop/fake_drop_events.dart';
@@ -19,9 +21,19 @@ final Finder _menu = find.byType(DestinationMenu);
 
 Finder _inPanel(Finder finder) => find.descendant(of: _panel, matching: finder);
 
+FlowPainter _flow(WidgetTester tester) {
+  for (final paint in tester.widgetList<CustomPaint>(
+    find.byType(CustomPaint),
+  )) {
+    final painter = paint.foregroundPainter;
+    if (painter is FlowPainter) return painter;
+  }
+  throw StateError('no flow painter');
+}
+
 Future<void> _settlePanel(WidgetTester tester) async {
   await tester.pump();
-  await tester.pump(const Duration(milliseconds: 500));
+  await tester.pump(const Duration(milliseconds: 750));
   await tester.pump();
 }
 
@@ -33,7 +45,7 @@ Future<void> _hold(
   events.add(DropEnter(at));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 210));
-  await tester.pump(const Duration(milliseconds: 300));
+  await tester.pump(const Duration(milliseconds: 600));
   await tester.pump();
 }
 
@@ -52,12 +64,32 @@ Future<void> _holdOnFolder(
   String label,
 ) async {
   final at = tester.getCenter(_inPanel(find.text(label)));
-  await _over(tester, events, at + const Offset(7, 0));
+  await _over(tester, events, const Offset(5, 5));
   await _over(tester, events, at);
-  await tester.pump(const Duration(milliseconds: 510));
+  await tester.pump(const Duration(milliseconds: 1210));
   await tester.pump();
   await _settlePanel(tester);
 }
+
+Finder _rowBox(String label) => find
+    .ancestor(
+      of: _inPanel(find.text(label)),
+      matching: find.byType(AnimatedContainer),
+    )
+    .first;
+
+BoxDecoration _rowDecoration(WidgetTester tester, String label) =>
+    tester.widget<AnimatedContainer>(_rowBox(label)).decoration!
+        as BoxDecoration;
+
+double _bar(WidgetTester tester, String label) => tester
+    .widget<FractionallySizedBox>(
+      find.descendant(
+        of: _rowBox(label),
+        matching: find.byType(FractionallySizedBox),
+      ),
+    )
+    .widthFactor!;
 
 void _folders(DelegatingController controller) {
   controller.foldersResult = (_, rootId, path) async {
@@ -101,17 +133,18 @@ void main() {
         ('disc', (tester) => discOf(tester, mineFp)),
         ('row', (tester) => rowOf(tester, mineFp)),
       ]) {
-        testWidgets('on the $surface it opens at 0.5 s with the available '
-            'roots and only them', (tester) async {
+        testWidgets('on the $surface it opens at 0.8 s, not at 0.79, with the '
+            'available roots and only them', (tester) async {
           final (controller, events) = await pumpWithRoots(tester);
 
           events.add(DropEnter(at(tester)));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 210));
           expect(controller.prefetched, [mineFp]);
-          await tester.pump(const Duration(milliseconds: 270));
+          await tester.pump(const Duration(milliseconds: 580));
+          await tester.pump();
           expect(_panel, findsNothing);
-          await tester.pump(const Duration(milliseconds: 30));
+          await tester.pump(const Duration(milliseconds: 10));
           await tester.pump();
 
           expect(_panel, findsOneWidget);
@@ -126,6 +159,30 @@ void main() {
           await tester.pump();
         });
       }
+
+      testWidgets('the ring fills while holding, is whole with the portal open '
+          'and goes when it closes', (tester) async {
+        final (_, events) = await pumpWithRoots(tester);
+        final disc = discOf(tester, mineFp);
+
+        events.add(DropEnter(disc));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(_flow(tester).armable, isTrue);
+        expect(_flow(tester).openRing!.value, isNull);
+        expect(_flow(tester).arm!.value, closeTo(0.5, 0.05));
+
+        await tester.pump(const Duration(milliseconds: 420));
+        await tester.pump();
+        expect(_panel, findsOneWidget);
+        expect(_flow(tester).openRing!.value, mineFp);
+        expect(_flow(tester).hot, mineFp);
+
+        events.add(const DropLeave());
+        await tester.pump();
+        expect(_flow(tester).openRing!.value, isNull);
+      });
 
       testWidgets('opened from the disc it stays put when the pointer moves '
           'onto it', (tester) async {
@@ -153,7 +210,7 @@ void main() {
 
         await _hold(tester, events, discOf(tester, mineFp));
         expect(_panel, findsNothing);
-        await tester.pump(const Duration(milliseconds: 690));
+        await tester.pump(const Duration(milliseconds: 390));
         expect(_panel, findsNothing);
 
         pending.complete(const RemoteRoots([rootDocs]));
@@ -212,7 +269,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 50));
         }
         await _over(tester, events, disc);
-        await tester.pump(const Duration(milliseconds: 600));
+        await tester.pump(const Duration(milliseconds: 900));
         await tester.pump();
 
         expect(controller.rootRequests, 1);
@@ -350,14 +407,14 @@ void main() {
         await tester.pump();
       });
 
-      testWidgets('less than 0.5 s on a folder does not enter', (tester) async {
+      testWidgets('less than 1.2 s on a folder does not enter', (tester) async {
         final (controller, events) = await pumpWithRoots(tester);
         await _hold(tester, events, rowOf(tester, mineFp));
         await _settlePanel(tester);
 
         final at = tester.getCenter(_inPanel(find.text('Documentos')));
         await _over(tester, events, at);
-        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 1100));
         await _over(tester, events, const Offset(5, 5));
         await tester.pump(const Duration(milliseconds: 200));
 
@@ -369,22 +426,185 @@ void main() {
         await tester.pump();
       });
 
-      testWidgets('the new row under the pointer does not start by itself', (
-        tester,
-      ) async {
+      testWidgets('the armed row has a solid primary border and weak fill, and '
+          'its 2 px bar fills in the 1.2 s', (tester) async {
+        final (_, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        final colors = NbColors.of(tester.element(_panel));
+
+        expect(_rowDecoration(tester, 'Documentos').border!.top.color.a, 0);
+        expect(_bar(tester, 'Documentos'), 0);
+
+        await _over(
+          tester,
+          events,
+          tester.getCenter(_inPanel(find.text('Documentos'))),
+        );
+        await tester.pump(const Duration(milliseconds: 600));
+
+        final decoration = _rowDecoration(tester, 'Documentos');
+        final border = decoration.border! as Border;
+        expect(border.top.style, BorderStyle.solid);
+        expect(border.top.width, 1.5);
+        expect(border.top.color, colors.primary);
+        expect(decoration.color, colors.primaryWeak);
+        expect(_bar(tester, 'Documentos'), closeTo(0.5, 0.1));
+
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(_bar(tester, 'Documentos'), greaterThan(0.9));
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
+      testWidgets('the locked row after entering shows as under the pointer '
+          'but its bar never fills', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
+        final before = controller.calls.length;
+
+        await _over(
+          tester,
+          events,
+          tester.getCenter(_inPanel(find.text('fotos'))),
+        );
+        await tester.pump(const Duration(milliseconds: 800));
+
+        expect(_bar(tester, 'fotos'), 0);
+        expect(
+          (_rowDecoration(tester, 'fotos').border! as Border).top.color,
+          NbColors.of(tester.element(_panel)).primary,
+        );
+        await tester.pump(const Duration(milliseconds: 800));
+        expect(controller.calls.length, before);
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
+      testWidgets('it enters at 1.2 s and not at 1.19 s', (tester) async {
         final (controller, events) = await pumpWithRoots(tester);
         await _hold(tester, events, rowOf(tester, mineFp));
         await _settlePanel(tester);
 
-        final at = tester.getCenter(_inPanel(find.text('Documentos')));
-        await _over(tester, events, at);
-        await tester.pump(const Duration(milliseconds: 510));
+        await _over(
+          tester,
+          events,
+          tester.getCenter(_inPanel(find.text('Documentos'))),
+        );
+        await tester.pump(const Duration(milliseconds: 1190));
+        expect(
+          controller.calls.where((c) => c.startsWith('listRemoteFolders')),
+          isEmpty,
+        );
+        await tester.pump(const Duration(milliseconds: 10));
         await tester.pump();
+
+        expect(
+          controller.calls.where((c) => c.startsWith('listRemoteFolders')),
+          ['listRemoteFolders $mineFp root-docs '],
+        );
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
+      testWidgets('the row under the pointer after entering neither arms nor '
+          'enters while the pointer moves inside it', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
         await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
         final before = controller.calls.length;
 
-        await _over(tester, events, at + const Offset(2, 0));
+        final at = tester.getCenter(_inPanel(find.text('fotos')));
+        await _over(tester, events, at);
+        await _over(tester, events, at + const Offset(30, 0));
+        await tester.pump(const Duration(milliseconds: 600));
+        await _over(tester, events, at + const Offset(-20, 3));
+        await tester.pump(const Duration(milliseconds: 1300));
+
+        expect(controller.calls.length, before);
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
+      testWidgets('after entering, passing to another row arms that one and '
+          'enters at 1.2 s', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
+
+        final first = tester.getCenter(_inPanel(find.text('fotos')));
+        await _over(tester, events, first);
+        await tester.pump(const Duration(milliseconds: 500));
+        await _over(
+          tester,
+          events,
+          tester.getCenter(_inPanel(find.text('obra'))),
+        );
+        await tester.pump(const Duration(milliseconds: 1190));
+        expect(
+          controller.calls,
+          isNot(contains('listRemoteFolders $mineFp root-docs obra')),
+        );
+        await tester.pump(const Duration(milliseconds: 10));
+        await tester.pump();
+
+        expect(
+          controller.calls,
+          contains('listRemoteFolders $mineFp root-docs obra'),
+        );
+        expect(
+          controller.calls,
+          isNot(contains('listRemoteFolders $mineFp root-docs fotos')),
+        );
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
+      testWidgets('after entering, leaving the row and coming back to it arms '
+          'it again', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
+
+        final at = tester.getCenter(_inPanel(find.text('fotos')));
+        await _over(tester, events, at);
         await tester.pump(const Duration(milliseconds: 700));
+        await _over(tester, events, const Offset(5, 5));
+        await _over(tester, events, at);
+        await tester.pump(const Duration(milliseconds: 1190));
+        expect(
+          controller.calls,
+          isNot(contains('listRemoteFolders $mineFp root-docs fotos')),
+        );
+        await tester.pump(const Duration(milliseconds: 10));
+        await tester.pump();
+
+        expect(
+          controller.calls,
+          contains('listRemoteFolders $mineFp root-docs fotos'),
+        );
+        events.add(const DropLeave());
+        await tester.pump();
+      });
+
+      testWidgets('after going up with Back, the row under the pointer is '
+          'locked the same way', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+        await _holdOnFolder(tester, events, 'Documentos');
+        await _holdOnFolder(tester, events, strings.portalBack(mineName));
+        final before = controller.calls.length;
+
+        final at = tester.getCenter(_inPanel(find.text('Documentos')));
+        await _over(tester, events, at);
+        await _over(tester, events, at + const Offset(25, 0));
+        await tester.pump(const Duration(milliseconds: 1500));
 
         expect(controller.calls.length, before);
         events.add(const DropLeave());
@@ -541,6 +761,31 @@ void main() {
         expect(controller.sendDestinations.single!.path, ['obra']);
       });
 
+      testWidgets('a drop during the change of folder goes to the new list, '
+          'never to the one leaving', (tester) async {
+        final (controller, events) = await pumpWithRoots(tester);
+        await _hold(tester, events, rowOf(tester, mineFp));
+        await _settlePanel(tester);
+
+        await _over(
+          tester,
+          events,
+          tester.getCenter(_inPanel(find.text('Documentos'))),
+        );
+        await tester.pump(const Duration(milliseconds: 1200));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(_inPanel(find.text(home)), findsOneWidget);
+        expect(_inPanel(find.text('fotos')), findsOneWidget);
+
+        final leaving = tester.getCenter(_inPanel(find.text(home)));
+        await _over(tester, events, leaving);
+        events.add(DropDone(leaving, sentPaths, sentPaths.length));
+        await settleMenu(tester);
+
+        expect(controller.sendDestinations.single!.rootId, rootDocs.id);
+      });
+
       testWidgets('two roots with the same name: the drop and the hold use '
           'the one under the pointer (B2)', (tester) async {
         final (controller, events) = await pumpWithRoots(tester);
@@ -553,9 +798,9 @@ void main() {
         expect(_inPanel(find.text('Datos')), findsNWidgets(2));
 
         final second = tester.getCenter(_inPanel(find.text('Datos')).at(1));
-        await _over(tester, events, second + const Offset(7, 0));
+        await _over(tester, events, const Offset(5, 5));
         await _over(tester, events, second);
-        await tester.pump(const Duration(milliseconds: 510));
+        await tester.pump(const Duration(milliseconds: 1210));
         await tester.pump();
         await _settlePanel(tester);
         expect(controller.calls, contains('listRemoteFolders $mineFp root-b '));

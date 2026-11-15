@@ -9,14 +9,16 @@ import '../modal/timeline.dart';
 import '../settings/settings_field.dart';
 import '../theme/app_theme.dart';
 import '../theme/tokens.dart';
+import 'keyboard_navigation.dart';
+import 'lab_button.dart';
 import 'navigator_controller.dart';
+import 'pane_switcher.dart';
 
-const double navigatorWidth = 392;
-const double navigatorBodyHeight = 300;
-const Duration _paneMotion = Duration(milliseconds: 420);
-const Duration _growMotion = Duration(milliseconds: 420);
+const double navigatorWidth = 344;
+const double navigatorBodyHeight = 250;
+const Duration _growMotion = paneInMotion;
 const Duration _rowFade = Duration(milliseconds: 180);
-const double _paneShift = 0.36;
+const Duration _nudgeMotion = Duration(milliseconds: 350);
 const double _rowHeight = 40;
 const double _rowRadius = 8;
 const double _crumbHeight = 28;
@@ -28,6 +30,7 @@ class NavIconButton extends StatefulWidget {
     required this.onPressed,
     this.size = 34,
     this.glyphSize = 16,
+    this.nudge = 0,
     super.key,
   });
 
@@ -36,6 +39,7 @@ class NavIconButton extends StatefulWidget {
   final VoidCallback? onPressed;
   final double size;
   final double glyphSize;
+  final double nudge;
 
   @override
   State<NavIconButton> createState() => _NavIconButtonState();
@@ -46,10 +50,24 @@ class _NavIconButtonState extends State<NavIconButton> {
   bool _focused = false;
 
   @override
+  void initState() {
+    super.initState();
+    ensureKeyboardNavigation();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: keyboardNavigation,
+      builder: (context, keyboard, _) => _build(context, keyboard),
+    );
+  }
+
+  Widget _build(BuildContext context, bool keyboard) {
     final colors = NbColors.of(context);
     final animate = !MediaQuery.disableAnimationsOf(context);
-    final lit = _hovered || _focused;
+    final ring = _focused && keyboard;
+    final lit = _hovered || ring;
     final enabled = widget.onPressed != null;
     return Tooltip(
       message: widget.tooltip,
@@ -86,15 +104,25 @@ class _NavIconButtonState extends State<NavIconButton> {
                 color: lit && enabled
                     ? colors.controlHover
                     : colors.controlHover.withValues(alpha: 0),
-                border: _focused
+                border: ring
                     ? Border.all(color: colors.primary, width: 2)
                     : null,
               ),
               child: Center(
-                child: GlyphIcon(
-                  widget.glyph,
-                  size: widget.glyphSize,
-                  color: lit && enabled ? colors.text : colors.textWeak,
+                child: AnimatedSlide(
+                  offset: Offset(
+                    _hovered && enabled && animate
+                        ? widget.nudge / widget.glyphSize
+                        : 0,
+                    0,
+                  ),
+                  duration: animate ? _nudgeMotion : Duration.zero,
+                  curve: labEaseOut,
+                  child: GlyphIcon(
+                    widget.glyph,
+                    size: widget.glyphSize,
+                    color: lit && enabled ? colors.text : colors.textWeak,
+                  ),
                 ),
               ),
             ),
@@ -158,6 +186,12 @@ class _NavRowState extends State<NavRow> with SingleTickerProviderStateMixin {
   }
 
   @override
+  void initState() {
+    super.initState();
+    ensureKeyboardNavigation();
+  }
+
+  @override
   void dispose() {
     _in.dispose();
     super.dispose();
@@ -165,9 +199,17 @@ class _NavRowState extends State<NavRow> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: keyboardNavigation,
+      builder: (context, keyboard, _) => _build(context, keyboard),
+    );
+  }
+
+  Widget _build(BuildContext context, bool keyboard) {
     final colors = NbColors.of(context);
     final animate = !MediaQuery.disableAnimationsOf(context);
-    final lit = (_hovered || _focused || widget.focused) && widget.enabled;
+    final ring = _focused && keyboard;
+    final lit = (_hovered || ring || widget.focused) && widget.enabled;
     final ink = widget.foreground ?? colors.text;
     final row = Semantics(
       button: true,
@@ -203,7 +245,7 @@ class _NavRowState extends State<NavRow> with SingleTickerProviderStateMixin {
                   ? colors.controlHover
                   : colors.controlHover.withValues(alpha: 0),
               borderRadius: BorderRadius.circular(_rowRadius),
-              border: _focused
+              border: ring
                   ? Border.all(color: colors.menuBorder)
                   : Border.all(color: colors.menuBorder.withValues(alpha: 0)),
             ),
@@ -301,6 +343,7 @@ class FolderNavigator extends StatefulWidget {
     required this.onPick,
     required this.onExit,
     this.exitTooltip,
+    this.growsFooter = true,
     super.key,
   });
 
@@ -309,6 +352,7 @@ class FolderNavigator extends StatefulWidget {
   final VoidCallback onPick;
   final VoidCallback onExit;
   final String? exitTooltip;
+  final bool growsFooter;
 
   @override
   State<FolderNavigator> createState() => _FolderNavigatorState();
@@ -420,7 +464,6 @@ class _FolderNavigatorState extends State<FolderNavigator> {
     final nav = _nav;
     final isSend = nav.mode == NavigatorMode.send;
     final level = nav.stack.last;
-    final destination = nav.current;
     final canPick =
         !nav.atRoots &&
         nav.status != NavStatus.loading &&
@@ -450,13 +493,9 @@ class _FolderNavigatorState extends State<FolderNavigator> {
                   child: ClipRect(child: _body(strings, level)),
                 ),
                 if (isSend) _newFolderRow(strings, colors),
-                _footer(
-                  strings,
-                  colors,
-                  canPick,
-                  pickLabel,
-                  isSend,
-                  destination,
+                _reveal(
+                  shown: !nav.atRoots,
+                  child: _footer(strings, colors, canPick, pickLabel, isSend),
                 ),
               ],
             ),
@@ -496,15 +535,21 @@ class _FolderNavigatorState extends State<FolderNavigator> {
               tooltip: strings.navBack,
               onPressed: _back,
               glyphSize: 18,
+              nudge: -2,
             ),
             const SizedBox(width: 8),
             Expanded(
               child: ClipRect(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  reverse: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: crumbs),
+                child: LayoutBuilder(
+                  builder: (context, box) => SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    reverse: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: box.maxWidth),
+                      child: Row(children: crumbs),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -516,39 +561,35 @@ class _FolderNavigatorState extends State<FolderNavigator> {
 
   Widget _body(AppStrings strings, NavLevel level) {
     final nav = _nav;
-    final animate = !MediaQuery.disableAnimationsOf(context);
-    final key = ValueKey<String>(
-      '${nav.stack.length}:${level.name}:${level.isNew}',
+    return PaneSwitcher(
+      paneKey: '${nav.stack.length}:${level.name}:${level.isNew}',
+      forward: _forward,
+      fill: true,
+      child: _pane(strings, level),
     );
-    return AnimatedSwitcher(
-      duration: animate ? _paneMotion : Duration.zero,
-      switchInCurve: labEaseOut,
-      switchOutCurve: labEaseOut,
-      layoutBuilder: (current, previous) =>
-          Stack(fit: StackFit.expand, children: [...previous, ?current]),
-      transitionBuilder: (child, animation) {
-        final incoming = child.key == key;
-        final forward = _forward;
-        final begin = incoming
-            ? (forward ? _paneShift : -_paneShift)
-            : (forward ? -_paneShift * 0.83 : _paneShift * 0.83);
-        return AnimatedBuilder(
-          animation: animation,
-          child: child,
-          builder: (context, child) {
-            final t = animation.value;
-            final shift = incoming ? begin * (1 - t) : begin * (1 - t);
-            return Opacity(
-              opacity: t,
-              child: FractionalTranslation(
-                translation: Offset(shift, 0),
-                child: child,
-              ),
-            );
-          },
+  }
+
+  Widget _reveal({required bool shown, required Widget child}) {
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: shown ? 1 : 0),
+      duration: animate ? _growMotion : Duration.zero,
+      curve: labEaseOut,
+      builder: (context, t, child) {
+        if (!widget.growsFooter) {
+          if (!shown) return const SizedBox(width: double.infinity);
+          return Opacity(opacity: t, child: child);
+        }
+        if (t <= 0) return const SizedBox(width: double.infinity);
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: t,
+            child: Opacity(opacity: t, child: child),
+          ),
         );
       },
-      child: KeyedSubtree(key: key, child: _pane(strings, level)),
+      child: child,
     );
   }
 
@@ -701,44 +742,57 @@ class _FolderNavigatorState extends State<FolderNavigator> {
     bool canPick,
     String pickLabel,
     bool isSend,
-    Object? destination,
   ) {
     final nav = _nav;
     final level = nav.stack.last;
+    final folder = visibleFileName(level.name ?? '');
+    final where = strings.navIn('\u0000').split('\u0000');
+    final weak = NbText.caption.copyWith(color: colors.textWeak, fontSize: 12);
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: colors.menuBorder)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.fromLTRB(6, 10, 12, 10),
         child: Row(
           children: [
             if (isSend) ...[
-              TextButton.icon(
-                style: smallButton.merge(
-                  TextButton.styleFrom(foregroundColor: colors.textWeak),
-                ),
+              LabButton(
+                label: strings.navNewFolder,
+                kind: LabButtonKind.quiet,
+                glyph: Glyphs.folderPlus,
+                glyphSize: 17,
+                gap: 7,
+                padding: const EdgeInsets.only(left: 8, right: 10),
                 onPressed: nav.canCreateFolder ? _toggleCreate : null,
-                icon: const GlyphIcon(Glyphs.folderPlus, size: 14),
-                label: Text(strings.navNewFolder),
               ),
               const SizedBox(width: 8),
             ],
             Expanded(
-              child: Text(
-                nav.atRoots
-                    ? strings.navChoose
-                    : strings.navIn(visibleFileName(level.name ?? '')),
+              child: Text.rich(
+                TextSpan(
+                  style: weak,
+                  children: [
+                    TextSpan(text: where.first),
+                    TextSpan(
+                      text: folder,
+                      style: weak.copyWith(
+                        color: colors.text,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (where.length > 1) TextSpan(text: where.last),
+                  ],
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: NbText.caption.copyWith(color: colors.textWeak),
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton(
-              style: smallButton,
+            LabButton(
+              label: pickLabel,
+              kind: LabButtonKind.primary,
               onPressed: canPick ? widget.onPick : null,
-              child: Text(pickLabel),
             ),
           ],
         ),
