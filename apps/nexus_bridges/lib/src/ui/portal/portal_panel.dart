@@ -5,23 +5,22 @@ import '../../app_controller.dart';
 import '../../l10n/app_strings.dart';
 import '../destination/folder_navigator.dart';
 import '../destination/navigator_controller.dart';
-import '../icons/device_disc.dart';
+import '../destination/pane_switcher.dart';
 import '../icons/glyphs.dart';
-import '../diagram/flow_painter.dart' show dashPath;
 import '../modal/timeline.dart';
 import '../theme/app_theme.dart';
 import '../theme/tokens.dart';
 import 'portal_controller.dart';
 
-const double portalWidth = 284;
+const double portalWidth = 300;
 const double _rowHeight = 40;
 const double _gap = 22;
 const double _verticalShift = 70;
 const double _chrome = 340;
 const double _minList = 80;
 const double _maxList = 360;
-const Duration _openMotion = Duration(milliseconds: 420);
-const Duration _paneMotion = Duration(milliseconds: 420);
+const Duration _openMotion = Duration(milliseconds: 600);
+const Duration _rowMotion = Duration(milliseconds: 250);
 
 class PortalHost extends StatelessWidget {
   const PortalHost({required this.portal, required this.controller, super.key});
@@ -162,7 +161,7 @@ class _PortalPanelState extends State<PortalPanel> {
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: animate ? 0 : 1, end: 1),
       duration: animate ? _openMotion : Duration.zero,
-      curve: const Cubic(0.2, 0.8, 0.2, 1),
+      curve: labEaseOut,
       builder: (context, t, child) => Opacity(
         opacity: t.clamp(0.0, 1.0),
         child: Transform.translate(
@@ -186,49 +185,23 @@ class _PortalPanelState extends State<PortalPanel> {
           width: portalWidth,
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _head(strings, colors, entry, name),
-                if (!nav.atRoots) _crumbs(colors, name),
-                ClipRect(
-                  child: AnimatedSwitcher(
-                    duration: animate ? _paneMotion : Duration.zero,
-                    switchInCurve: labEaseOut,
-                    switchOutCurve: labEaseOut,
-                    layoutBuilder: (current, previous) => Stack(
-                      alignment: Alignment.topCenter,
-                      children: [...previous, ?current],
-                    ),
-                    transitionBuilder: (child, animation) {
-                      final incoming =
-                          child.key == ValueKey<int>(nav.stack.length);
-                      final begin = incoming
-                          ? (_forward ? 0.36 : -0.36)
-                          : (_forward ? -0.3 : 0.3);
-                      return AnimatedBuilder(
-                        animation: animation,
-                        child: child,
-                        builder: (context, child) => Opacity(
-                          opacity: animation.value,
-                          child: FractionalTranslation(
-                            translation: Offset(
-                              begin * (1 - animation.value),
-                              0,
-                            ),
-                            child: child,
-                          ),
-                        ),
-                      );
-                    },
-                    child: KeyedSubtree(
-                      key: ValueKey<int>(nav.stack.length),
-                      child: _rows(strings, colors, name, maxList),
-                    ),
+            child: AnimatedSize(
+              duration: animate ? paneInMotion : Duration.zero,
+              curve: labEaseOut,
+              alignment: Alignment.topCenter,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _head(strings, colors, name),
+                  if (!nav.atRoots) _crumbs(colors, name),
+                  PaneSwitcher(
+                    paneKey: nav.stack.length,
+                    forward: _forward,
+                    child: _rows(strings, colors, name, maxList),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -236,35 +209,31 @@ class _PortalPanelState extends State<PortalPanel> {
     );
   }
 
-  Widget _head(
-    AppStrings strings,
-    NbColors colors,
-    DeviceEntry? entry,
-    String name,
-  ) {
+  Widget _head(AppStrings strings, NbColors colors, String name) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 4, 6, 8),
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          DeviceDisc(type: entry?.deviceType, size: 30, tone: DiscTone.sending),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: NbText.bodyStrong.copyWith(color: colors.text),
-                ),
-                Text(
-                  strings.portalDropIn,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: NbText.caption.copyWith(color: colors.textWeak),
-                ),
-              ],
+          Text(
+            strings.portalDropOnto.toUpperCase(),
+            maxLines: 1,
+            style: NbText.label.copyWith(
+              color: colors.hint,
+              fontSize: 10.5,
+              height: 12 / 10.5,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 10.5 * 0.08,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: NbText.title.copyWith(
+              color: colors.text,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -359,8 +328,12 @@ class _PortalPanelState extends State<PortalPanel> {
     if (level.partial) children.add(NavNotice(text: strings.navPartial));
     if (nav.atRoots) {
       children.add(
-        Padding(
+        Container(
+          margin: const EdgeInsets.only(top: 6),
           padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: colors.menuBorder)),
+          ),
           child: Text(
             strings.portalHold,
             style: NbText.caption.copyWith(
@@ -400,10 +373,13 @@ class _FolderList extends StatefulWidget {
 class _FolderListState extends State<_FolderList> {
   final GlobalKey _viewport = GlobalKey();
   final ScrollController _scroll = ScrollController();
+  bool _bound = false;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_bound || PaneLeaving.of(context)) return;
+    _bound = true;
     widget.portal.bindList(_viewport, _scroll);
   }
 
@@ -473,113 +449,90 @@ class _PortalRowState extends State<_PortalRow> {
   Widget build(BuildContext context) {
     final colors = NbColors.of(context);
     final portal = widget.portal;
-    portal.registerRow(widget.hit, _key);
-    final hot = portal.armed == widget.hit;
+    final leaving = PaneLeaving.of(context);
+    if (!leaving) portal.registerRow(widget.hit, _key);
+    final hot = !leaving && portal.armed == widget.hit;
     final arming =
-        hot && (widget.hit is PortalFolderHit || widget.hit is PortalBackHit);
+        hot &&
+        portal.locked != widget.hit &&
+        (widget.hit is PortalFolderHit || widget.hit is PortalBackHit);
     final animate = !MediaQuery.disableAnimationsOf(context);
-    return Container(
+    return SizedBox(
       key: _key,
       height: _rowHeight,
-      margin: const EdgeInsets.only(bottom: 0),
-      child: CustomPaint(
-        foregroundPainter: _DashedBorder(
-          color: hot ? colors.primary : colors.primary.withValues(alpha: 0),
-        ),
-        child: AnimatedContainer(
-          duration: animate ? const Duration(milliseconds: 200) : Duration.zero,
-          decoration: BoxDecoration(
-            color: hot
-                ? colors.primaryWeak
-                : colors.primaryWeak.withValues(alpha: 0),
-            borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: animate ? _rowMotion : Duration.zero,
+        decoration: BoxDecoration(
+          color: hot
+              ? colors.primaryWeak
+              : colors.primaryWeak.withValues(alpha: 0),
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            width: 1.5,
+            color: hot ? colors.primary : colors.primary.withValues(alpha: 0),
           ),
-          child: Stack(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Row(
-                  children: [
+        ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                children: [
+                  GlyphIcon(
+                    widget.glyph,
+                    size: 18,
+                    color: widget.muted ? colors.textWeak : colors.primaryInk,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: NbText.bodySm.copyWith(
+                        color: colors.text,
+                        fontWeight: FontWeight.w500,
+                        height: 17 / 13,
+                      ),
+                    ),
+                  ),
+                  if (widget.chevron)
                     GlyphIcon(
-                      widget.glyph,
-                      size: 18,
-                      color: widget.muted ? colors.textWeak : colors.primaryInk,
+                      Glyphs.chevronRight,
+                      size: 13,
+                      color: colors.hint,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        widget.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: NbText.bodySm.copyWith(
-                          color: colors.text,
-                          fontWeight: FontWeight.w500,
-                          height: 17 / 13,
-                        ),
-                      ),
-                    ),
-                    if (widget.chevron)
-                      GlyphIcon(
-                        Glyphs.chevronRight,
-                        size: 13,
-                        color: colors.hint,
-                      ),
-                  ],
-                ),
+                ],
               ),
-              Positioned(
-                left: 8,
-                right: 8,
-                bottom: 3,
-                child: TweenAnimationBuilder<double>(
-                  key: ValueKey(arming),
-                  tween: Tween<double>(begin: 0, end: arming ? 1 : 0),
-                  duration: arming && animate ? portalHoldDelay : Duration.zero,
-                  builder: (context, t, _) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: FractionallySizedBox(
-                      widthFactor: t,
-                      child: SizedBox(
-                        height: 2,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: colors.primary,
-                            borderRadius: BorderRadius.circular(1),
-                          ),
+            ),
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 3,
+              child: TweenAnimationBuilder<double>(
+                key: ValueKey(arming),
+                tween: Tween<double>(begin: 0, end: arming ? 1 : 0),
+                duration: arming && animate ? portal.holdDelay : Duration.zero,
+                builder: (context, t, _) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: t,
+                    child: SizedBox(
+                      height: 2,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.primary,
+                          borderRadius: BorderRadius.circular(1),
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
-}
-
-class _DashedBorder extends CustomPainter {
-  const _DashedBorder({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (color.a == 0) return;
-    final rect = (Offset.zero & size).deflate(0.75);
-    final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(rect, const Radius.circular(9)));
-    canvas.drawPath(
-      dashPath(path, const [4, 3]),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5
-        ..color = color,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorder oldDelegate) => oldDelegate.color != color;
 }

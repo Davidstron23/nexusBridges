@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/foundation.dart' show ValueListenable, setEquals;
 import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart' show DeviceType;
 
@@ -18,8 +18,11 @@ const double _clockSeconds = 14.4;
 const double _dotPeriod = 1.8;
 const double _iconLag = 0.9;
 const double _pulsePeriod = 1.6;
-const double _dashSpeed = 18;
-const double _dashPeriod = 9;
+const double _breathPeriod = 2.4;
+const double _breathLow = 0.3;
+const double _breathHigh = 0.85;
+const double _breathRest = 0.75;
+const Cubic _breathCurve = Cubic(0.45, 0, 0.55, 1);
 const double _dotRadius = 4.5;
 const double _travelIconHeight = 24;
 const double _travelIconWidth = 20;
@@ -43,7 +46,15 @@ const double _headerTop = 14;
 const double _headerGap = 8;
 const List<double> _ringFactors = [0.32, 0.58, 0.84, 1.1];
 const double _dropRingGap = 5;
-const double _dropRingTravel = 48;
+const double _targetRingGap = 9;
+const double _targetRingWidth = 2;
+const double _targetRingAlpha = 0.85;
+const double _dropRingTravel = 16 * 6 / 1.4;
+const double _armWidth = 3;
+const double _armGlowSigma = 2.5;
+const double _armDashFade = 0.25 / 0.8;
+const double _ringAlpha = 0.5;
+const double _offlineLineAlpha = 0.45;
 const double _dimmedPeer = 0.26;
 const double _dimmedLine = 0.18;
 
@@ -110,7 +121,7 @@ class FlowBackgroundPainter extends CustomPainter {
     final ring = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = colors.border;
+      ..color = colors.border.withValues(alpha: colors.border.a * _ringAlpha);
     for (var i = 0; i < _ringFactors.length; i++) {
       final arc = Path()
         ..addArc(
@@ -118,7 +129,7 @@ class FlowBackgroundPainter extends CustomPainter {
           -math.pi / 2,
           math.pi,
         );
-      canvas.drawPath(i > 1 ? dashPath(arc, const [2, 6]) : arc, ring);
+      canvas.drawPath(arc, ring);
     }
     canvas.drawRect(
       bounds,
@@ -162,6 +173,9 @@ class FlowPainter extends CustomPainter {
     this.lit = const {},
     this.hot,
     this.configured,
+    this.arm,
+    this.armable = false,
+    this.openRing,
   }) : super(
          repaint: Listenable.merge([
            clock,
@@ -170,6 +184,8 @@ class FlowPainter extends CustomPainter {
            ?iconFade,
            ?dragFade,
            ?dragSpin,
+           ?arm,
+           ?openRing,
          ]),
        );
 
@@ -187,6 +203,9 @@ class FlowPainter extends CustomPainter {
   final Set<String> lit;
   final String? hot;
   final String? configured;
+  final Animation<double>? arm;
+  final bool armable;
+  final ValueListenable<String?>? openRing;
 
   final Map<_TextKey, TextPainter> _texts = {};
 
@@ -324,13 +343,14 @@ class FlowPainter extends CustomPainter {
     Path curve,
     double opacity,
   ) {
+    final alpha = peer.visible ? opacity : opacity * _offlineLineAlpha;
     canvas.drawPath(
-      peer.visible ? curve : dashPath(curve, const [2, 6]),
+      curve,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
         ..strokeCap = StrokeCap.round
-        ..color = colors.border.withValues(alpha: colors.border.a * opacity),
+        ..color = colors.border.withValues(alpha: colors.border.a * alpha),
     );
   }
 
@@ -341,7 +361,6 @@ class FlowPainter extends CustomPainter {
     double elapsed,
   ) {
     final link = peer.link;
-    final dashShift = reduceMotion ? 0.0 : (elapsed * _dashSpeed) % _dashPeriod;
     Paint line(double width, Color color) => Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = width
@@ -353,22 +372,30 @@ class FlowPainter extends CustomPainter {
         return;
       case LinkState.waiting:
         canvas.drawPath(
-          dashPath(curve, const [
-            4,
-            5,
-          ], phase: link.towardsHub ? dashShift : -dashShift),
-          line(2.5, colors.primary.withValues(alpha: 0.75)),
+          curve,
+          line(2.5, colors.primary.withValues(alpha: _breathAlpha(elapsed))),
         );
       case LinkState.asking:
         canvas.drawPath(
-          dashPath(curve, const [4, 5], phase: dashShift),
-          line(2.5, colors.warningRing),
+          curve,
+          line(
+            2.5,
+            colors.warningRing.withValues(alpha: _breathAlpha(elapsed)),
+          ),
         );
       case LinkState.done:
         canvas.drawPath(curve, line(2.5, colors.success));
       case LinkState.active:
         _paintActiveLine(canvas, peer, curve, elapsed, line(3, colors.primary));
     }
+  }
+
+  double _breathAlpha(double elapsed) {
+    if (reduceMotion) return _breathRest;
+    final t = (elapsed % _breathPeriod) / _breathPeriod;
+    final rise = t < 0.5 ? t * 2 : (1 - t) * 2;
+    return _breathLow +
+        (_breathHigh - _breathLow) * _breathCurve.transform(rise);
   }
 
   double progressOf(LinkView link) {
@@ -527,26 +554,56 @@ class FlowPainter extends CustomPainter {
     double fade,
   ) {
     final isHot = peer.fingerprint == hot;
-    final circle = Path()
-      ..addOval(
-        Rect.fromCircle(
-          center: slot.center,
-          radius: scene.layout.peerRadius + _dropRingGap,
-        ),
+    final bounds = Rect.fromCircle(
+      center: slot.center,
+      radius: scene.layout.peerRadius + _targetRingGap,
+    );
+    final open = isHot && openRing?.value == peer.fingerprint;
+    final progress = isHot && armable ? (arm?.value ?? 0) : 0.0;
+    final dashAlpha = !isHot
+        ? 1.0
+        : armable && !reduceMotion
+        ? (1 - progress / _armDashFade).clamp(0.0, 1.0)
+        : 0.0;
+    if (dashAlpha > 0 && !open) {
+      final travel = reduceMotion
+          ? 0.0
+          : (dragSpin?.value ?? 0) * _dropRingTravel;
+      canvas.drawPath(
+        dashPath(Path()..addOval(bounds), const [3, 5], phase: -travel),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = _targetRingWidth
+          ..color = colors.primary.withValues(
+            alpha: colors.primary.a * _targetRingAlpha * dashAlpha * fade,
+          ),
       );
-    final travel = reduceMotion
-        ? 0.0
-        : (dragSpin?.value ?? 0) * _dropRingTravel;
-    canvas.drawPath(
-      isHot ? circle : dashPath(circle, const [3, 5], phase: -travel),
+    }
+    if (!isHot) return;
+    final solid = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _armWidth
+      ..strokeCap = StrokeCap.round
+      ..color = colors.primary.withValues(alpha: colors.primary.a * fade);
+    if (open || !armable) {
+      canvas.drawOval(bounds, solid);
+      return;
+    }
+    if (progress <= 0) return;
+    final sweep = 2 * math.pi * math.min(progress, 1);
+    canvas.drawArc(
+      bounds,
+      -math.pi / 2,
+      sweep,
+      false,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = isHot ? 2 : 1.5
+        ..strokeWidth = _armWidth
         ..strokeCap = StrokeCap.round
-        ..color = colors.primary.withValues(
-          alpha: colors.primary.a * (isHot ? 1 : 0.85) * fade,
-        ),
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, _armGlowSigma)
+        ..color = colors.primary.withValues(alpha: colors.primary.a * fade),
     );
+    canvas.drawArc(bounds, -math.pi / 2, sweep, false, solid);
   }
 
   void _paintPeer(
@@ -571,10 +628,7 @@ class FlowPainter extends CustomPainter {
     if (state == LinkState.idle && !peer.visible) {
       canvas.drawCircle(center, radius, Paint()..color = colors.card);
       canvas.drawPath(
-        dashPath(
-          Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
-          const [3, 3],
-        ),
+        Path()..addOval(Rect.fromCircle(center: center, radius: radius)),
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.2
@@ -805,18 +859,13 @@ class FlowPainter extends CustomPainter {
     ChipTone tone,
     double maxWidth,
   ) {
-    final (Color? fill, Color ink, Color? edge, bool dashed) = switch (tone) {
-      ChipTone.run => (colors.primaryWeak, colors.primaryInk, null, false),
-      ChipTone.ok => (colors.successWeak, colors.successInk, null, false),
-      ChipTone.fail => (colors.dangerWeak, colors.danger, null, false),
-      ChipTone.wait => (colors.surfaceWeak, colors.textWeak, null, false),
-      ChipTone.foreign => (
-        colors.surfaceWeak,
-        colors.textWeak,
-        colors.border,
-        false,
-      ),
-      ChipTone.notVisible => (null, colors.textWeak, colors.hint, true),
+    final (Color? fill, Color ink, Color? edge) = switch (tone) {
+      ChipTone.run => (colors.primaryWeak, colors.primaryInk, null),
+      ChipTone.ok => (colors.successWeak, colors.successInk, null),
+      ChipTone.fail => (colors.dangerWeak, colors.danger, null),
+      ChipTone.wait => (colors.surfaceWeak, colors.textWeak, null),
+      ChipTone.foreign => (colors.surfaceWeak, colors.textWeak, colors.border),
+      ChipTone.notVisible => (null, colors.textWeak, colors.hint),
     };
     final label = _text(
       text,
@@ -833,7 +882,7 @@ class FlowPainter extends CustomPainter {
     if (edge != null) {
       final outline = Path()..addRRect(shape);
       canvas.drawPath(
-        dashed ? dashPath(outline, const [2, 2]) : outline,
+        outline,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1
@@ -893,5 +942,8 @@ class FlowPainter extends CustomPainter {
       !identical(oldDelegate.dragSpin, dragSpin) ||
       !setEquals(oldDelegate.lit, lit) ||
       oldDelegate.hot != hot ||
-      oldDelegate.configured != configured;
+      oldDelegate.configured != configured ||
+      !identical(oldDelegate.arm, arm) ||
+      oldDelegate.armable != armable ||
+      !identical(oldDelegate.openRing, openRing);
 }

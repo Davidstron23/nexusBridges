@@ -723,3 +723,41 @@ final class NbColors extends ThemeExtension<NbColors> {
     );
   }
 }
+
+const List<BoxShadow> labButtonRestShadow = [
+  BoxShadow(
+    color: Color.fromRGBO(40, 18, 140, 0.35),
+    offset: Offset(0, 1),
+    blurRadius: 2,
+  ),
+  BoxShadow(
+    color: Color.fromRGBO(109, 74, 255, 0),
+    offset: Offset(0, 8),
+    blurRadius: 18,
+    spreadRadius: -8,
+  ),
+];
+
+const List<BoxShadow> labButtonHoverShadow = [
+  BoxShadow(
+    color: Color.fromRGBO(40, 18, 140, 0.3),
+    offset: Offset(0, 2),
+    blurRadius: 4,
+  ),
+  BoxShadow(
+    color: Color.fromRGBO(109, 74, 255, 0.75),
+    offset: Offset(0, 10),
+    blurRadius: 22,
+    spreadRadius: -8,
+  ),
+];
+
+const List<BoxShadow> labButtonNoShadow = [
+  BoxShadow(color: Color(0x00000000), offset: Offset(0, 1), blurRadius: 2),
+  BoxShadow(
+    color: Color(0x00000000),
+    offset: Offset(0, 8),
+    blurRadius: 18,
+    spreadRadius: -8,
+  ),
+];

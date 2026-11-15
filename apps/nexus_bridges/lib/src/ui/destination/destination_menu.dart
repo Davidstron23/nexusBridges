@@ -6,7 +6,6 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../app_controller.dart';
 import '../../l10n/app_strings.dart';
-import '../icons/device_disc.dart';
 import '../icons/file_icon.dart';
 import '../icons/folder_icon.dart';
 import '../icons/glyphs.dart';
@@ -18,12 +17,13 @@ import '../theme/tokens.dart';
 import 'destination_controller.dart';
 import 'folder_navigator.dart';
 import 'navigator_controller.dart';
+import 'pane_switcher.dart' show paneInMotion;
 
 const double destinationMenuWidth = 328;
 const double _menuMaxBody = 360;
 const double _menuRadius = 14;
 const Duration _openMotion = Duration(milliseconds: 400);
-const Duration _resizeMotion = Duration(milliseconds: 460);
+const Duration _resizeMotion = paneInMotion;
 
 @visibleForTesting
 Future<bool> Function(String path) destinationPathIsDirectory =
@@ -354,23 +354,15 @@ class _DestinationMenuState extends State<DestinationMenu> {
             bindings: {
               const SingleActivator(LogicalKeyboardKey.escape): _closeExplorer,
             },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _Header(
-                  entry: entry,
-                  name: name,
-                  paths: _menu.paths,
-                  isDirectory: _firstIsDirectory,
-                  strings: strings,
-                ),
-                FolderNavigator(
-                  controller: explorer,
-                  deviceName: name,
-                  onPick: _pickExplored,
-                  onExit: _closeExplorer,
-                ),
-              ],
+            child: SizedBox(
+              width: navigatorWidth,
+              child: FolderNavigator(
+                controller: explorer,
+                deviceName: name,
+                onPick: _pickExplored,
+                onExit: _closeExplorer,
+                growsFooter: false,
+              ),
             ),
           )
         : SizedBox(
@@ -469,7 +461,6 @@ class _DestinationMenuState extends State<DestinationMenu> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Header(
-          entry: entry,
           name: name,
           paths: _menu.paths,
           isDirectory: _firstIsDirectory,
@@ -492,15 +483,7 @@ class _DestinationMenuState extends State<DestinationMenu> {
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Text(
-              strings.destKeys,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: NbText.caption.copyWith(
-                color: colors.hint,
-                fontSize: 11.5,
-              ),
-            ),
+            child: _KeyHints(text: strings.destKeys),
           ),
         ),
       ],
@@ -631,16 +614,72 @@ DeviceEntry? _entryOf(NodeState? state, String fingerprint) {
   return null;
 }
 
+class _KeyHints extends StatelessWidget {
+  const _KeyHints({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = NbColors.of(context);
+    final words = NbText.caption.copyWith(color: colors.hint, fontSize: 11.5);
+    final groups = <Widget>[];
+    for (final group in text.split(' · ')) {
+      final parts = <Widget>[];
+      for (final token in group.split(' ')) {
+        if (token.isEmpty) continue;
+        final first = token.characters.first;
+        final isKey =
+            first.toLowerCase() == first.toUpperCase() ||
+            first != first.toLowerCase();
+        if (parts.isNotEmpty) parts.add(const SizedBox(width: 4));
+        parts.add(
+          isKey
+              ? DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: colors.controlHover,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 3,
+                    ),
+                    child: Text(
+                      token,
+                      style: NbText.label.copyWith(
+                        color: colors.textWeak,
+                        fontSize: 10.5,
+                        height: 1,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                )
+              : Text(token, style: words),
+        );
+      }
+      if (groups.isNotEmpty) groups.add(const SizedBox(width: 12));
+      groups.add(Row(mainAxisSize: MainAxisSize.min, children: parts));
+    }
+    return ClipRect(
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const NeverScrollableScrollPhysics(),
+        child: Row(children: groups),
+      ),
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   const _Header({
-    required this.entry,
     required this.name,
     required this.paths,
     required this.isDirectory,
     required this.strings,
   });
 
-  final DeviceEntry? entry;
   final String name;
   final List<String> paths;
   final bool isDirectory;
@@ -651,34 +690,40 @@ class _Header extends StatelessWidget {
     final colors = NbColors.of(context);
     final first = paths.isEmpty ? null : paths.first;
     final base = first?.split(RegExp(r'[\\/]')).last;
+    final title = strings.destTitle('\u0000').split('\u0000');
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: colors.menuBorder)),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                DeviceDisc(type: entry?.deviceType, size: 30),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    strings.destTitle(name),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: NbText.bodyStrong.copyWith(
+            Text.rich(
+              TextSpan(
+                style: NbText.body.copyWith(
+                  color: colors.textWeak,
+                  height: 20 / 14,
+                ),
+                children: [
+                  TextSpan(text: title.first),
+                  TextSpan(
+                    text: name,
+                    style: TextStyle(
                       color: colors.text,
-                      height: 20 / 14,
+                      fontVariations: const [FontVariation.weight(650)],
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-              ],
+                  if (title.length > 1) TextSpan(text: title.last),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             if (base != null) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   isDirectory
@@ -701,11 +746,6 @@ class _Header extends StatelessWidget {
                 ],
               ),
             ],
-            const SizedBox(height: 8),
-            Text(
-              strings.destQuestion,
-              style: NbText.caption.copyWith(color: colors.textWeak),
-            ),
           ],
         ),
       ),

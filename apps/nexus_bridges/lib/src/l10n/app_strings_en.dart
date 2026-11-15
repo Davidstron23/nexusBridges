@@ -834,6 +834,15 @@ final class AppStringsEn implements AppStrings {
   String get sendFoldersOption => 'Folders…';
 
   @override
+  String get sendFilesDetail => 'One or several at once, also .zip and .rar';
+
+  @override
+  String get sendFoldersDetail => 'One or several at once';
+
+  @override
+  String get sendFilesHint => 'Ctrl+click';
+
+  @override
   String preparingItems(int count) =>
       'Preparing… ${formatCount(count, 'en')} '
       "${count == 1 ? 'item' : 'items'} found";
@@ -1531,6 +1540,9 @@ final class AppStringsEn implements AppStrings {
 
   @override
   String get portalDropIn => 'Drop on a folder';
+
+  @override
+  String get portalDropOnto => 'Drop into';
 
   @override
   String get portalHold => 'Hold on a folder to open it. Drop to send there';

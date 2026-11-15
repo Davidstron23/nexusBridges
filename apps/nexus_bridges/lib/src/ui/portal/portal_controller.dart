@@ -6,11 +6,10 @@ import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 import '../../app_controller.dart';
 import '../destination/navigator_controller.dart';
 
-const Duration portalHoldDelay = Duration(milliseconds: 500);
+const Duration portalHoldDelay = Duration(milliseconds: 1200);
 const Duration portalGrace = Duration(milliseconds: 400);
 const Duration portalRootsWait = Duration(seconds: 2);
 const Duration portalCacheLife = Duration(seconds: 5);
-const double portalMoveLock = 6;
 const double portalEdgeBand = 48;
 const double portalEdgeSlowest = 1.5;
 const double portalEdgeFastest = 6;
@@ -103,7 +102,8 @@ final class PortalController extends ChangeNotifier {
   String? _fingerprint;
   Rect? _anchor;
   PortalHit? _armed;
-  Offset? _lock;
+  PortalHit? _locked;
+  bool _lockPending = false;
   Timer? _holdTimer;
   Timer? _closeTimer;
   bool _dragging = false;
@@ -117,6 +117,8 @@ final class PortalController extends ChangeNotifier {
   FolderNavigatorController? get navigator => _navigator;
 
   PortalHit? get armed => _armed;
+
+  PortalHit? get locked => _locked;
 
   Rect? get anchor => _fingerprint == null ? null : _anchor;
 
@@ -193,7 +195,8 @@ final class PortalController extends ChangeNotifier {
       mode: NavigatorMode.portal,
       homeName: homeName(),
     )..addListener(_onNavigator);
-    _lock = null;
+    _locked = null;
+    _lockPending = false;
     _notify();
   }
 
@@ -312,10 +315,19 @@ final class PortalController extends ChangeNotifier {
       return;
     }
     _stopScroll();
-    final lock = _lock;
-    if (lock != null) {
-      if ((position - lock).distance < portalMoveLock) return;
-      _lock = null;
+    if (_lockPending) {
+      _lockPending = false;
+      if (hit is PortalFolderHit || hit is PortalBackHit) {
+        _holdTimer?.cancel();
+        _holdTimer = null;
+        _locked = hit;
+        _armed = hit;
+        _notify();
+        return;
+      }
+    } else if (_locked != null) {
+      if (hit == _locked) return;
+      _locked = null;
     }
     if (hit == _armed) return;
     _holdTimer?.cancel();
@@ -327,12 +339,12 @@ final class PortalController extends ChangeNotifier {
       _holdTimer = Timer(holdDelay, () {
         _holdTimer = null;
         if (_armed != target || !isOpen) return;
-        unawaited(_navigate(target!, position));
+        unawaited(_navigate(target!));
       });
     }
   }
 
-  Future<void> _navigate(PortalHit hit, Offset position) async {
+  Future<void> _navigate(PortalHit hit) async {
     final navigator = _navigator;
     if (navigator == null) return;
     switch (hit) {
@@ -349,7 +361,8 @@ final class PortalController extends ChangeNotifier {
     }
     if (_disposed || _navigator != navigator) return;
     _armed = null;
-    _lock = position;
+    _locked = null;
+    _lockPending = true;
     _notify();
   }
 
@@ -358,6 +371,8 @@ final class PortalController extends ChangeNotifier {
     _stopScroll();
     _holdTimer?.cancel();
     _holdTimer = null;
+    _locked = null;
+    _lockPending = false;
     if (_armed != null) {
       _armed = null;
       _notify();
@@ -422,7 +437,8 @@ final class PortalController extends ChangeNotifier {
     _fingerprint = null;
     _anchor = null;
     _armed = null;
-    _lock = null;
+    _locked = null;
+    _lockPending = false;
     _rows.clear();
     if (navigator != null) {
       navigator.removeListener(_onNavigator);

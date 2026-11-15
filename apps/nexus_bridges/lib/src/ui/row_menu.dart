@@ -15,13 +15,22 @@ final class RowMenuEntry {
     required this.glyph,
     required this.onSelected,
     this.danger = false,
+    this.detail,
+    this.hint,
   });
 
   final String label;
   final Glyph glyph;
   final VoidCallback onSelected;
   final bool danger;
+  final String? detail;
+  final String? hint;
 }
+
+const double rowMenuDetailItemHeight = 48;
+
+double rowMenuItemHeightOf(RowMenuEntry entry) =>
+    entry.detail == null ? rowMenuItemHeight : rowMenuDetailItemHeight;
 
 const double rowMenuRadius = 12;
 const double rowMenuPadding = 6;
@@ -293,11 +302,15 @@ class RowMenuPanel extends StatelessWidget {
   const RowMenuPanel({
     required this.entries,
     required this.onSelect,
+    this.minWidth = rowMenuMinWidth,
+    this.maxWidth = _menuMaxWidth,
     super.key,
   });
 
   final List<RowMenuEntry> entries;
   final ValueChanged<RowMenuEntry> onSelect;
+  final double minWidth;
+  final double maxWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -306,9 +319,9 @@ class RowMenuPanel extends StatelessWidget {
       explicitChildNodes: true,
       child: Container(
         key: const ValueKey('row-menu-panel'),
-        constraints: const BoxConstraints(
-          minWidth: rowMenuMinWidth,
-          maxWidth: _menuMaxWidth,
+        constraints: BoxConstraints(
+          minWidth: minWidth,
+          maxWidth: math.max(minWidth, maxWidth),
         ),
         padding: const EdgeInsets.all(rowMenuPadding),
         decoration: BoxDecoration(
@@ -378,7 +391,7 @@ class _RowMenuItemState extends State<RowMenuItem> {
             behavior: HitTestBehavior.opaque,
             onTap: widget.onSelect,
             child: AnimatedContainer(
-              height: rowMenuItemHeight,
+              height: rowMenuItemHeightOf(entry),
               duration: duration,
               curve: Curves.ease,
               padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -400,18 +413,47 @@ class _RowMenuItemState extends State<RowMenuItem> {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      entry.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: NbText.bodySm.copyWith(
-                        color: labelInk,
-                        fontWeight: FontWeight.w500,
-                      ),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: NbText.bodySm.copyWith(
+                            color: labelInk,
+                            fontWeight: FontWeight.w500,
+                            height: 18 / 13,
+                          ),
+                        ),
+                        if (entry.detail != null)
+                          Text(
+                            entry.detail!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: NbText.caption.copyWith(
+                              color: colors.textWeak,
+                              fontSize: 12,
+                              height: 16 / 12,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  if (entry.hint != null) ...[
+                    const SizedBox(width: 12),
+                    Text(
+                      entry.hint!,
+                      maxLines: 1,
+                      style: NbText.caption.copyWith(
+                        color: colors.hint,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ] else
+                    const SizedBox(width: 12),
                 ],
               ),
             ),

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
 import '../../l10n/app_strings.dart';
-import '../diagram/flow_painter.dart';
 import '../theme/tokens.dart';
 import 'glyphs.dart';
 
@@ -67,11 +66,11 @@ class _DiscPainter extends CustomPainter {
       final outline = Path()
         ..addOval(Rect.fromCircle(center: center, radius: radius - width / 2));
       canvas.drawPath(
-        dashPath(outline, const [3, 3]),
+        outline,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = width
-          ..color = colors.hint,
+          ..color = colors.hint.withValues(alpha: colors.hint.a * 0.8),
       );
     } else {
       canvas.drawCircle(

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -7,10 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexus_bridges/src/l10n/app_strings.dart';
 import 'package:nexus_bridges/src/ui/destination/destination_menu.dart';
 import 'package:nexus_bridges/src/ui/destination/folder_navigator.dart';
+import 'package:nexus_bridges/src/ui/destination/keyboard_navigation.dart';
+import 'package:nexus_bridges/src/ui/destination/lab_button.dart';
 import 'package:nexus_bridges/src/ui/destination/navigator_controller.dart';
 import 'package:nexus_bridges/src/ui/icons/file_icon.dart';
+import 'package:nexus_bridges/src/ui/icons/device_disc.dart';
 import 'package:nexus_bridges/src/ui/icons/folder_icon.dart';
 import 'package:nexus_bridges/src/ui/theme/app_theme.dart';
+import 'package:nexus_bridges/src/ui/theme/tokens.dart';
 import 'package:nexus_bridges/src/ui/tray_panel.dart';
 import 'package:nexus_bridges_core/nexus_bridges_core.dart';
 
@@ -26,6 +31,26 @@ Finder _inMenu(Finder finder) => find.descendant(of: _menu, matching: finder);
 NavRow _row(WidgetTester tester, String label) => tester.widget<NavRow>(
   find.ancestor(of: find.text(label), matching: find.byType(NavRow)).first,
 );
+
+Finder _richText(String plain, {Finder? within}) => find.descendant(
+  of: within ?? find.byType(MaterialApp),
+  matching: find.byWidgetPredicate(
+    (widget) => widget is RichText && widget.text.toPlainText() == plain,
+  ),
+);
+
+bool _lit(WidgetTester tester, String label) {
+  final row = find.ancestor(
+    of: find.text(label),
+    matching: find.byType(NavRow),
+  );
+  final box = tester.widget<AnimatedContainer>(
+    find
+        .descendant(of: row.first, matching: find.byType(AnimatedContainer))
+        .first,
+  );
+  return ((box.decoration! as BoxDecoration).color?.a ?? 0) > 0;
+}
 
 Future<void> _openFromRow(
   WidgetTester tester,
@@ -372,6 +397,83 @@ void main() {
       });
     });
 
+    group('[$code] E776 the menu header and the keys (RF-419, cambio 1)', () {
+      Future<void> openMenu(WidgetTester tester) async {
+        final (controller, events) = await pumpDestinationHome(
+          tester,
+          code,
+          destinationState(),
+        );
+        controller.rootsResult = (_) async => const RemoteRoots([rootDocs]);
+        await dropOn(tester, events, rowOf(tester, mineFp));
+        await settleMenu(tester);
+        await tester.pump(const Duration(milliseconds: 500));
+      }
+
+      testWidgets('the header is one line, "Send to" and the name in bold, '
+          'with no disc and no question', (tester) async {
+        await openMenu(tester);
+        final colors = NbColors.of(tester.element(_menu));
+
+        expect(_richText(strings.destTitle(mineName)), findsOneWidget);
+        expect(find.text(strings.destQuestion), findsNothing);
+        expect(_inMenu(find.byType(DeviceDisc)), findsNothing);
+        final rich = tester.widget<RichText>(
+          _richText(strings.destTitle(mineName)),
+        );
+        final parts = <TextSpan>[];
+        (rich.text as TextSpan).visitChildren((span) {
+          if (span is TextSpan && span.text != null) parts.add(span);
+          return true;
+        });
+        final name = parts.singleWhere((span) => span.text == mineName);
+        expect(name.style!.fontWeight, FontWeight.w600);
+        expect(name.style!.color, colors.text);
+        final lead = parts.firstWhere((span) => span.text != mineName);
+        expect(lead.style?.fontWeight, isNull);
+        expect(
+          tester.getSize(_richText(strings.destTitle(mineName))).height,
+          20,
+        );
+      });
+
+      testWidgets('the footer shows each key in its own box and the words '
+          'outside', (tester) async {
+        await openMenu(tester);
+        final colors = NbColors.of(tester.element(_menu));
+        final keys = code == 'es'
+            ? ['↑', '↓', 'Intro', 'Esc']
+            : ['↑', '↓', 'Enter', 'Esc'];
+        final words = code == 'es'
+            ? ['elegir', 'enviar', 'cancelar']
+            : ['choose', 'send', 'cancel'];
+
+        bool boxed(String token) => find
+            .ancestor(
+              of: _inMenu(find.text(token)),
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is DecoratedBox &&
+                    widget.decoration is BoxDecoration &&
+                    (widget.decoration as BoxDecoration).color ==
+                        colors.controlHover &&
+                    (widget.decoration as BoxDecoration).borderRadius ==
+                        BorderRadius.circular(4),
+              ),
+            )
+            .evaluate()
+            .isNotEmpty;
+
+        for (final key in keys) {
+          expect(boxed(key), isTrue, reason: key);
+        }
+        for (final word in words) {
+          expect(_inMenu(find.text(word)), findsOneWidget, reason: word);
+          expect(boxed(word), isFalse, reason: word);
+        }
+      });
+    });
+
     group('[$code] E777 someone else sends without a menu (RF-420)', () {
       testWidgets('a drop goes to the default folder and asks for nothing', (
         tester,
@@ -593,7 +695,7 @@ void main() {
         await _enter(tester, 'Documentos');
         await _enter(tester, 'fotos');
         expect(find.text('2026'), findsOneWidget);
-        expect(find.text(strings.navIn('fotos')), findsOneWidget);
+        expect(_richText(strings.navIn('fotos')), findsOneWidget);
         expect(
           controller.calls.where((c) => c.startsWith('listRemoteFolders')),
           [
@@ -613,17 +715,19 @@ void main() {
         await tester.tap(find.byTooltip(strings.navBack));
         await settleNav(tester);
         expect(find.text(home), findsOneWidget);
-        expect(
-          tester
-              .widget<FilledButton>(
-                find.widgetWithText(FilledButton, strings.navSendHere),
-              )
-              .onPressed,
-          isNull,
-        );
+        expect(find.text(strings.navSendHere), findsNothing);
+        expect(find.text(strings.navNewFolder), findsNothing);
 
         await _enter(tester, 'Documentos');
         await _enter(tester, 'obra');
+        expect(
+          tester
+              .widget<LabButton>(
+                find.widgetWithText(LabButton, strings.navSendHere),
+              )
+              .onPressed,
+          isNotNull,
+        );
         await tester.tap(find.text(strings.navSendHere));
         await settleNav(tester);
 
@@ -632,6 +736,176 @@ void main() {
         expect(destination.path, ['obra']);
         expect(destination.newFolder, isNull);
         expect(_menu, findsNothing);
+      });
+
+      testWidgets('the roots have no footer at all, not even disabled, and it '
+          'comes in with the first folder and goes with Back (RF-423)', (
+        tester,
+      ) async {
+        await openBrowse(tester);
+
+        expect(find.text(strings.navSendHere), findsNothing);
+        expect(find.text(strings.navNewFolder), findsNothing);
+        expect(find.byType(LabButton), findsNothing);
+        expect(_richText(strings.navIn('Documentos')), findsNothing);
+
+        await _enter(tester, 'Documentos');
+        expect(find.text(strings.navSendHere), findsOneWidget);
+        expect(find.text(strings.navNewFolder), findsOneWidget);
+        expect(_richText(strings.navIn('Documentos')), findsOneWidget);
+
+        await tester.tap(find.byTooltip(strings.navBack));
+        await settleNav(tester);
+        expect(find.text(strings.navSendHere), findsNothing);
+        expect(find.text(strings.navNewFolder), findsNothing);
+        expect(find.byType(LabButton), findsNothing);
+      });
+
+      testWidgets('the footer says "In folder" with only the name in bold', (
+        tester,
+      ) async {
+        await openBrowse(tester);
+        await _enter(tester, 'Documentos');
+
+        final rich = tester.widget<RichText>(
+          _richText(strings.navIn('Documentos')),
+        );
+        final parts = <(String, FontWeight?)>[];
+        (rich.text as TextSpan).visitChildren((span) {
+          if (span is TextSpan && span.text != null) {
+            parts.add((span.text!, span.style?.fontWeight));
+          }
+          return true;
+        });
+        final name = parts.singleWhere((part) => part.$1 == 'Documentos');
+        expect(name.$2, FontWeight.w600);
+        expect(
+          parts.where((part) => part.$1 != 'Documentos').map((p) => p.$2),
+          everyElement(isNull),
+        );
+      });
+
+      testWidgets('the explorer replaces the whole menu and is 344 px wide '
+          'by 250 px of list', (tester) async {
+        await openBrowse(tester);
+
+        expect(_menu, findsOneWidget);
+        expect(_inMenu(find.byType(DeviceDisc)), findsNothing);
+        expect(find.text(strings.destQuestion), findsNothing);
+        expect(find.text(strings.destExplore), findsNothing);
+        expect(_richText(strings.destTitle(mineName)), findsNothing);
+        expect(tester.getSize(_navigator).width, navigatorWidth);
+        final list = tester.getSize(
+          find.descendant(
+            of: _navigator,
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is SizedBox && widget.height == navigatorBodyHeight,
+            ),
+          ),
+        );
+        expect(list.height, navigatorBodyHeight);
+      });
+
+      testWidgets('with the mouse only the row under it is lit, and nothing '
+          'stays lit after going back', (tester) async {
+        keyboardNavigation.value = false;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(
+          () => FocusManager.instance.highlightStrategy =
+              FocusHighlightStrategy.automatic,
+        );
+        await openBrowse(tester);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        addTearDown(mouse.removePointer);
+
+        expect(_lit(tester, 'Documentos'), isFalse);
+        expect(_lit(tester, home), isFalse);
+
+        await mouse.moveTo(tester.getCenter(find.text(home)));
+        await tester.pump();
+        expect(_lit(tester, home), isTrue);
+        expect(_lit(tester, 'Documentos'), isFalse);
+
+        await mouse.moveTo(tester.getCenter(find.text('Documentos')));
+        await mouse.down(tester.getCenter(find.text('Documentos')));
+        await mouse.up();
+        await settleNav(tester);
+        await mouse.moveTo(tester.getCenter(find.byTooltip(strings.navBack)));
+        await mouse.down(tester.getCenter(find.byTooltip(strings.navBack)));
+        await mouse.up();
+        await settleNav(tester);
+
+        expect(find.text('Documentos'), findsOneWidget);
+        expect(_lit(tester, 'Documentos'), isFalse);
+        expect(_lit(tester, home), isFalse);
+      });
+
+      testWidgets('with the arrows the focused row shows, one at a time, and '
+          'the mouse takes the highlight back', (tester) async {
+        keyboardNavigation.value = false;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(
+          () => FocusManager.instance.highlightStrategy =
+              FocusHighlightStrategy.automatic,
+        );
+        await openBrowse(tester);
+        addTearDown(() => keyboardNavigation.value = false);
+
+        expect(_lit(tester, 'Documentos'), isFalse);
+        keyboardNavigation.value = true;
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        final shown = [
+          for (final label in ['Documentos', home])
+            if (_lit(tester, label)) label,
+        ];
+        expect(shown, hasLength(1));
+
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        addTearDown(mouse.removePointer);
+        await mouse.moveTo(tester.getCenter(find.text('Documentos')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(keyboardNavigation.value, isFalse);
+        expect(_lit(tester, 'Documentos'), isTrue);
+        expect(_lit(tester, home), isFalse);
+      });
+
+      testWidgets('800 ms after entering a folder "Send here" is whole inside '
+          'the menu and a tap on it sends there (RF-423)', (tester) async {
+        final controller = await openBrowse(tester);
+
+        await tester.tap(find.text('Documentos'));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 800));
+
+        final menu = tester.getRect(_menu);
+        final button = tester.getRect(
+          find.widgetWithText(LabButton, strings.navSendHere),
+        );
+        expect(menu.contains(button.topLeft), isTrue);
+        expect(menu.contains(button.bottomRight - const Offset(1, 1)), isTrue);
+        final newFolder = tester.getRect(
+          find.widgetWithText(LabButton, strings.navNewFolder),
+        );
+        expect(
+          menu.contains(newFolder.bottomLeft - const Offset(-1, 1)),
+          isTrue,
+        );
+
+        await tester.tap(find.text(strings.navSendHere));
+        await tester.pump();
+        await tester.pump();
+
+        final destination = controller.sendDestinations.single!;
+        expect(destination.rootId, rootDocs.id);
+        expect(destination.path, isEmpty);
       });
 
       testWidgets('a breadcrumb jumps back and asks for nothing', (
@@ -898,10 +1172,7 @@ void main() {
           findsNWidgets(2),
         );
         expect(
-          find.descendant(
-            of: _navigator,
-            matching: find.text(strings.navIn('cd')),
-          ),
+          _richText(strings.navIn('cd'), within: _navigator),
           findsOneWidget,
         );
         final shownTexts = [
