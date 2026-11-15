@@ -13,6 +13,8 @@ import 'transfer.dart' show FolderSummaryView, TransferOutcome;
 import 'windows_folder_io.dart';
 
 const Duration _cancelGrace = Duration(milliseconds: 500);
+const int _hashWorkers = 4;
+const int _parallelHashMinFiles = 16;
 
 final class FolderPlan {
   const FolderPlan({
@@ -66,10 +68,14 @@ final class _PlanRequest {
     required this.flagAddress,
     required this.cancelSlot,
     required this.cancelMutex,
+    required this.workerSlots,
+    required this.workerMutexes,
   });
 
   final int cancelSlot;
   final int cancelMutex;
+  final List<int> workerSlots;
+  final List<int> workerMutexes;
   final String rootRealPath;
   final String name;
   final List<String> exclusions;
@@ -83,6 +89,159 @@ final class _ExcludedFound {
   const _ExcludedFound(this.paths);
 
   final List<String> paths;
+}
+
+final class _HashedMore {
+  const _HashedMore(this.count);
+
+  final int count;
+}
+
+const String _workerExited = 'hash-worker-exited';
+
+final class _WorkerStarted {
+  const _WorkerStarted(this.isolate);
+
+  final Isolate isolate;
+}
+
+final class _HashWorkerRequest {
+  const _HashWorkerRequest({
+    required this.indexes,
+    required this.paths,
+    required this.protectedIds,
+    required this.flagAddress,
+    required this.cancelSlot,
+    required this.cancelMutex,
+    required this.progressPort,
+    required this.resultPort,
+  });
+
+  final List<int> indexes;
+  final List<String> paths;
+  final Set<(int, int)> protectedIds;
+  final int flagAddress;
+  final int cancelSlot;
+  final int cancelMutex;
+  final SendPort progressPort;
+  final SendPort resultPort;
+}
+
+final class _HashWorkerResult {
+  const _HashWorkerResult(this.indexes, this.results);
+
+  final List<int> indexes;
+  final List<FileHashResult> results;
+}
+
+void _hashWorkerMain(_HashWorkerRequest request) {
+  final flag = Pointer<Uint8>.fromAddress(request.flagAddress);
+  final results = <FileHashResult>[];
+  final clock = Stopwatch()..start();
+  var lastReport = Duration.zero;
+  var pending = 0;
+  final buffer = allocateReadBuffer();
+  try {
+    final cancelPort = ReadCancelPort(request.cancelSlot, request.cancelMutex);
+    for (var k = 0; k < request.paths.length; k++) {
+      if (flag.value != 0) {
+        results.add(const FileHashCancelled());
+        break;
+      }
+      final result = hashFileSync(
+        request.paths[k],
+        buffer: buffer,
+        isCancelled: () => flag.value != 0,
+        isProtected: (volume, index) =>
+            request.protectedIds.contains((volume, index)),
+        cancelPort: cancelPort,
+      );
+      results.add(result);
+      if (result is FileHashed) {
+        pending++;
+        if (clock.elapsed - lastReport >= Limits.transferProgressInterval) {
+          lastReport = clock.elapsed;
+          request.progressPort.send(_HashedMore(pending));
+          pending = 0;
+        }
+      } else if (result is! FileHashSkipped) {
+        break;
+      }
+    }
+  } catch (_) {
+    results.add(const FileHashFailed());
+  } finally {
+    freeReadBuffer(buffer);
+  }
+  if (pending > 0) request.progressPort.send(_HashedMore(pending));
+  Isolate.exit(request.resultPort, _HashWorkerResult(request.indexes, results));
+}
+
+Future<Map<int, FileHashResult>> _hashInParallel(
+  _PlanRequest request,
+  Pointer<Uint8> flag,
+  List<int> fileIndexes,
+  List<String> paths,
+  Set<(int, int)> protectedIds,
+) async {
+  final workers = fileIndexes.length < _hashWorkers
+      ? fileIndexes.length
+      : _hashWorkers;
+  final port = ReceivePort();
+  final isolates = <Isolate>[];
+  final byIndex = <int, FileHashResult>{};
+  var received = 0;
+  var exited = 0;
+  try {
+    for (var w = 0; w < workers; w++) {
+      final indexes = <int>[];
+      final workerPaths = <String>[];
+      for (var k = w; k < fileIndexes.length; k += workers) {
+        indexes.add(fileIndexes[k]);
+        workerPaths.add(paths[k]);
+      }
+      final isolate = await Isolate.spawn(
+        _hashWorkerMain,
+        _HashWorkerRequest(
+          indexes: indexes,
+          paths: workerPaths,
+          protectedIds: protectedIds,
+          flagAddress: request.flagAddress,
+          cancelSlot: request.workerSlots[w],
+          cancelMutex: request.workerMutexes[w],
+          progressPort: request.port,
+          resultPort: port.sendPort,
+        ),
+        onExit: port.sendPort,
+        paused: true,
+      );
+      isolates.add(isolate);
+      request.port.send(_WorkerStarted(isolate));
+      isolate.addOnExitListener(request.port, response: _workerExited);
+      isolate.resume(isolate.pauseCapability!);
+    }
+    final done = Completer<void>();
+    port.listen((message) {
+      if (message is _HashWorkerResult) {
+        received++;
+        for (var k = 0; k < message.results.length; k++) {
+          byIndex[message.indexes[k]] = message.results[k];
+        }
+      } else if (message == null) {
+        exited++;
+      }
+      if ((received == workers || exited == workers) && !done.isCompleted) {
+        done.complete();
+      }
+    });
+    await done.future;
+    return byIndex;
+  } finally {
+    port.close();
+    for (final isolate in isolates) {
+      isolate.kill(priority: Isolate.immediate);
+    }
+  }
 }
 
 final class _MeasureRequest {
@@ -117,18 +276,18 @@ void _measureMain(_MeasureRequest request) {
 String _join(String folder, String name) =>
     folder.endsWith(r'\') ? '$folder$name' : '$folder\\$name';
 
-void _planMain(_PlanRequest request) {
+Future<void> _planMain(_PlanRequest request) async {
   final flag = Pointer<Uint8>.fromAddress(request.flagAddress);
   PlanResult result;
   try {
-    result = _runPlan(request, flag);
+    result = await _runPlan(request, flag);
   } catch (_) {
     result = const PlanStopped(TransferOutcome.unreadable);
   }
   Isolate.exit(request.port, result);
 }
 
-PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
+Future<PlanResult> _runPlan(_PlanRequest request, Pointer<Uint8> flag) async {
   bool cancelled() => flag.value != 0;
   final clock = Stopwatch()..start();
   var lastReport = Duration.zero;
@@ -174,19 +333,34 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
   final indexes = <int>[];
   final dangerous = <String, bool>{};
   var programs = false;
-  final buffer = allocateReadBuffer();
+  final fileIndexes = <int>[
+    for (var i = 1; i <= builder.length; i++)
+      if (builder.isFile(i)) i,
+  ];
+  final parallel = fileIndexes.length >= _parallelHashMinFiles;
+  final parallelResults = parallel
+      ? await _hashInParallel(request, flag, fileIndexes, [
+          for (final i in fileIndexes)
+            _join(request.rootRealPath, builder.relativePath(i)),
+        ], protectedIds)
+      : null;
+  final buffer = parallel ? nullptr : allocateReadBuffer();
   try {
-    for (var i = 1; i <= builder.length; i++) {
-      if (!builder.isFile(i)) continue;
+    for (final i in fileIndexes) {
       if (cancelled()) return const PlanCancelled();
       final relative = builder.relativePath(i);
-      final result = hashFileSync(
-        _join(request.rootRealPath, relative),
-        buffer: buffer,
-        isCancelled: cancelled,
-        isProtected: isProtected,
-        cancelPort: ReadCancelPort(request.cancelSlot, request.cancelMutex),
-      );
+      final FileHashResult result;
+      if (parallelResults == null) {
+        result = hashFileSync(
+          _join(request.rootRealPath, relative),
+          buffer: buffer,
+          isCancelled: cancelled,
+          isProtected: isProtected,
+          cancelPort: ReadCancelPort(request.cancelSlot, request.cancelMutex),
+        );
+      } else {
+        result = parallelResults[i] ?? const FileHashFailed();
+      }
       switch (result) {
         case FileHashCancelled():
           return const PlanCancelled();
@@ -205,7 +379,7 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
           builder.setFile(i, size, sha256);
           volumes.add(volume);
           indexes.add(index);
-          hashed++;
+          if (!parallel) hashed++;
       }
       if (!programs) {
         final name = builder.nameOf(i);
@@ -229,7 +403,7 @@ PlanResult _runPlan(_PlanRequest request, Pointer<Uint8> flag) {
       report(builder.length);
     }
   } finally {
-    freeReadBuffer(buffer);
+    if (!parallel) freeReadBuffer(buffer);
   }
   final manifest = builder.build();
   final encodedLength = encodedManifestLength(manifest);
@@ -264,6 +438,10 @@ final class FolderPlanJob {
   FolderPlanJob._(this._onProgress)
     : _flag = calloc<Uint8>(),
       _gate = ReadCancelGate.create(),
+      _workerGates = List<ReadCancelGate>.generate(
+        _hashWorkers,
+        (_) => ReadCancelGate.create(),
+      ),
       _port = ReceivePort() {
     _port.listen(_onMessage);
   }
@@ -271,7 +449,13 @@ final class FolderPlanJob {
   final void Function(int entries, int hashed)? _onProgress;
   final Pointer<Uint8> _flag;
   final ReadCancelGate _gate;
+  final List<ReadCancelGate> _workerGates;
   final ReceivePort _port;
+  final List<Isolate> _workers = <Isolate>[];
+  int _entries = 0;
+  int _hashed = 0;
+  int _workersStarted = 0;
+  int _workersExited = 0;
   Timer? _hardKillTimer;
   final Completer<PlanResult> _result = Completer<PlanResult>();
   final Completer<FolderMeasure> _excluded = Completer<FolderMeasure>();
@@ -304,6 +488,8 @@ final class FolderPlanJob {
       flagAddress: job._flag.address,
       cancelSlot: job._gate.slotAddress,
       cancelMutex: job._gate.mutexAddress,
+      workerSlots: [for (final gate in job._workerGates) gate.slotAddress],
+      workerMutexes: [for (final gate in job._workerGates) gate.mutexAddress],
     );
     job._launch(request);
     return job;
@@ -337,12 +523,26 @@ final class FolderPlanJob {
 
   void _scheduleKill() {
     _killTimer ??= Timer(Limits.workerStopGrace, () {
-      _gate.cancelPending();
+      _cancelPending();
       _finish(const PlanCancelled());
       _hardKillTimer ??= Timer(_cancelGrace, () {
         _isolate?.kill(priority: Isolate.immediate);
+        _killWorkers();
       });
     });
+  }
+
+  void _cancelPending() {
+    _gate.cancelPending();
+    for (final gate in _workerGates) {
+      gate.cancelPending();
+    }
+  }
+
+  void _killWorkers() {
+    for (final worker in _workers) {
+      worker.kill(priority: Isolate.immediate);
+    }
   }
 
   void _scheduleMeasureKill() {
@@ -353,7 +553,21 @@ final class FolderPlanJob {
 
   void _onMessage(Object? message) {
     if (message is List<int>) {
-      _onProgress?.call(message[0], message[1]);
+      _entries = message[0];
+      if (message[1] > _hashed) _hashed = message[1];
+      _onProgress?.call(_entries, _hashed);
+    } else if (message is _HashedMore) {
+      _hashed += message.count;
+      _onProgress?.call(_entries, _hashed);
+    } else if (message == _workerExited) {
+      _workersExited++;
+      _maybeRelease();
+    } else if (message is _WorkerStarted) {
+      _workers.add(message.isolate);
+      _workersStarted++;
+      if (_cancelRequested && _result.isCompleted) {
+        message.isolate.kill(priority: Isolate.immediate);
+      }
     } else if (message is _ExcludedFound) {
       _startMeasure(message.paths);
     } else if (message is PlanResult) {
@@ -422,12 +636,17 @@ final class FolderPlanJob {
 
   void _maybeRelease() {
     if (_released || !_planExited || _measureActive) return;
+    if (_workersExited < _workersStarted) return;
     _released = true;
     _killTimer?.cancel();
     _hardKillTimer?.cancel();
     _measureKillTimer?.cancel();
     _port.close();
+    _killWorkers();
     calloc.free(_flag);
     _gate.dispose();
+    for (final gate in _workerGates) {
+      gate.dispose();
+    }
   }
 }
