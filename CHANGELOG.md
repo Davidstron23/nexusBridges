@@ -4,6 +4,19 @@ All notable changes to NexusBridges are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-16
+
+### Changed
+- Browsing folders on the other device is calmer: hold over a folder for 0.8 s to open it and 1.2 s to go in, with a ring that fills while you wait. After going in, move away and come back to go deeper, so folders no longer open one after another by themselves.
+- Smoother, slower transitions between folders, solid borders, and a key hint at the bottom of the folder browser.
+- The folder browser in the destination menu keeps its width and no longer highlights two rows at once with the keyboard and the mouse.
+- "Preparing" and "Waiting" show a soft pulsing line instead of a moving dashed one.
+- Preparing a folder is about four times faster: its files are checked in parallel.
+
+### Fixed
+- A send could still be refused as protected data, now and then, while the app was saving its own settings.
+- On a slow start, Settings could show no receive folder until something else changed.
+
 ## [0.1.4] - 2026-11-06
 
 ### Changed
@@ -61,7 +74,8 @@ First public release, for Windows.
 - Dark interface with an animated network diagram, English and Spanish.
 - Windows installer with firewall rules limited to the local subnet.
 
-[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Davidstron23/nexusBridges/compare/v0.1.1...v0.1.2
