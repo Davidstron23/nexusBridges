@@ -464,7 +464,8 @@ FileHashResult hashFileSync(
 
 const int _errorFileNotFound = 2;
 const int _errorPathNotFound = 3;
-const int _idsWalkAttempts = 5;
+const int _idsWalkAttempts = 8;
+const Duration _idsWalkPause = Duration(milliseconds: 2);
 
 Set<(int, int)>? fileIdsUnder(
   String folderPath, {
@@ -472,6 +473,7 @@ Set<(int, int)>? fileIdsUnder(
   void Function(String folder)? afterListing,
 }) {
   for (var attempt = 0; attempt < _idsWalkAttempts; attempt++) {
+    if (attempt > 0) sleep(_idsWalkPause * (1 << (attempt - 1)));
     final (ids, vanished) = _walkIds(folderPath, includeFolders, afterListing);
     if (ids != null || !vanished) return ids;
   }

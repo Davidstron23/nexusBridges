@@ -952,10 +952,10 @@ final class TransferCoordinator {
 
   Stream<TransferResultView> get finished => _finished.stream;
 
-  void start() {
-    if (_closed || _timer != null) return;
+  Future<void> start() {
+    if (_closed || _timer != null) return Future<void>.value();
     _timer = Timer.periodic(_tickInterval, (_) => _tick());
-    unawaited(_receiver.start().then((_) => _syncFolderPath()));
+    return _receiver.start().then((_) => _notify());
   }
 
   Future<void> cleanupAtStart() => _receiver.cleanupAtStart();
@@ -1052,21 +1052,6 @@ final class TransferCoordinator {
     if (current == _lastNotified) return;
     _lastNotified = current;
     _changes.add(null);
-  }
-
-  void _syncFolderPath() {
-    final last = _lastNotified;
-    if (_closed || last == null) return;
-    _lastNotified = (
-      last.$1,
-      last.$2,
-      last.$3,
-      last.$4,
-      last.$5,
-      last.$6,
-      last.$7,
-      receiveFolderPath,
-    );
   }
 
   void _emit(TransferEvent event) {

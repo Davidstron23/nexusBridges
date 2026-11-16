@@ -12,6 +12,7 @@ import 'package:nexus_bridges_core/src/transfer/transfer.dart';
 import 'package:nexus_bridges_core/src/transport/transport.dart';
 import 'package:test/test.dart';
 
+import '../support/infra.dart' show scaled;
 import 'folder_writer_support.dart' show content;
 import 'receiver_folder_support.dart';
 import 'receiver_harness.dart';
@@ -864,8 +865,8 @@ void main() {
     test(
       'no data for the idle time ends in idle and cuts the upload',
       () async {
-        final s = await stack(idleTimeout: const Duration(milliseconds: 400));
-        s.clock.followRealTime();
+        const idle = Duration(milliseconds: 400);
+        final s = await stack(idleTimeout: idle);
         seedReceiveFolder(s);
         final before = snapshotOf(s.receiveDir);
         final (:job, :permit) = await accepted(s, withParent);
@@ -875,9 +876,14 @@ void main() {
           () => s.incoming?.receivedBytes == 90 * kib,
           reason: 'first file written',
         );
+        expect(
+          s.coordinator.lastReceived?.outcome,
+          isNot(TransferOutcome.idle),
+        );
+        s.clock.advance(idle * 2);
 
         expect(
-          await run.result.timeout(const Duration(seconds: 20)),
+          await run.result.timeout(scaled(const Duration(seconds: 20))),
           isA<StreamPostFailed>(),
         );
 
@@ -1051,7 +1057,7 @@ void main() {
         if (bytes != lastBytes) {
           expect(
             at - lastAt,
-            lessThan(const Duration(seconds: 1)),
+            lessThan(scaled(const Duration(seconds: 1))),
             reason: 'a change at least once a second',
           );
           lastBytes = bytes;

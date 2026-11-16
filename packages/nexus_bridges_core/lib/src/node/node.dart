@@ -1631,7 +1631,7 @@ final class NexusNode {
     _coordinatorEventsSubscription = coordinator.events.listen(
       (event) => _enqueue('pairing event', () async => _onPairingEvent(event)),
     );
-    transfers.start();
+    unawaited(transfers.start());
     _transfersChangesSubscription = transfers.changes.listen((_) => _emit());
     _transfersEventsSubscription = transfers.events.listen(
       (event) =>
