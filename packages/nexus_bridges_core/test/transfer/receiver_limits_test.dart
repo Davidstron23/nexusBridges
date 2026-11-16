@@ -1109,6 +1109,27 @@ void main() {
       .skip(skip)
       .where((c) => c.toUpperCase().contains(path.toUpperCase()));
 
+  group('E204 the remembered folder loaded after the start', () {
+    test('a load that ends after the start announces a change with the '
+        'remembered folder', () async {
+      final load = heldGate();
+      final s = await heldStack(holdLoad: load);
+      await eventually(() => s.store.loads == 1, reason: 'load started');
+      expect(s.coordinator.receiveFolderPath, isNull);
+      final changes = <void>[];
+      final subscription = s.coordinator.changes.listen(changes.add);
+      addTearDown(subscription.cancel);
+
+      load.complete();
+
+      await eventually(
+        () => changes.isNotEmpty,
+        reason: 'a change after the load',
+      );
+      expect(s.coordinator.receiveFolderPath, s.receiveDir);
+    });
+  });
+
   group('E204 Q-1 the load of the remembered folder races the 1.5 s', () {
     test('with the load held the offer gets 202 at 1.5 s with the "this time" '
         'question, nothing is created, and once loaded the next offer uses '

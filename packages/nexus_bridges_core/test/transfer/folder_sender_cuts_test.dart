@@ -12,6 +12,7 @@ import 'package:nexus_bridges_core/src/transfer/windows_folder_io.dart'
     show DataCheck, checkAgainstData;
 import 'package:test/test.dart';
 
+import '../support/infra.dart';
 import 'folder_sender_test.dart'
     show
         EntryHook,
@@ -70,6 +71,22 @@ final class HeldUpload {
   final Future<TransferResultView?> returned;
 }
 
+final class HeldExclusions implements ExclusionSource {
+  final Completer<void> _gate = Completer<void>();
+  int loads = 0;
+
+  void release() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<List<String>?> load() async {
+    loads++;
+    await _gate.future;
+    return null;
+  }
+}
+
 Future<HeldUpload> uploadingHeldAtSecondFile() async {
   final gate = Completer<void>();
   final hook = EntryHook();
@@ -98,17 +115,26 @@ void main() {
     test(
       'preparing: cancelledHere, no offer and nothing at the receiver',
       () async {
-        final (a, b) = await stacks();
+        final held = HeldExclusions();
+        addTearDown(held.release);
+        final (a, b) = await stacks(exclusions: held);
         final root = '${a.sourceDir}\\big';
         for (var i = 0; i < 6; i++) {
-          write('$root\\f$i.bin', content(i, 64 * 1024 * kib));
+          write('$root\\f$i.bin', content(i, 4 * kib));
         }
 
         final returned = startSend(a, b, root);
         await a.reached(OutgoingPhase.preparing);
-        await settle(const Duration(milliseconds: 150));
+        await eventually(
+          () => held.loads == 1,
+          reason: 'the preparation is held at the exclusions',
+        );
+        expect(a.outgoing?.phase, OutgoingPhase.preparing);
         a.coordinator.cancelOutgoing();
-        final result = await returned.timeout(const Duration(seconds: 10));
+        held.release();
+        final result = await returned.timeout(
+          scaled(const Duration(seconds: 10)),
+        );
 
         expect(result?.outcome, TransferOutcome.cancelledHere);
         expect(result?.isFolder, isTrue);

@@ -536,7 +536,13 @@ final class ReceiverStack {
     addTearDown(stack.close);
     await stack.server.syncInterfaces([loopbackInterface()]);
     expect(stack.server.openInterfaceIds, hasLength(1));
-    stack.coordinator.start();
+    final started = stack.coordinator.start();
+    if (holdLoad == null) {
+      await started;
+      await Future<void>.delayed(Duration.zero);
+      stack.views.clear();
+      stack.busyOnChange.clear();
+    }
     return stack;
   }
 

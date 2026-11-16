@@ -60,7 +60,7 @@ bool skippedWithoutAdminShare(String local) {
 }
 
 (int, int) identityOf(String path) => using((Arena arena) {
-  final Win32Result(value: handle) = CreateFile(
+  final Win32Result(value: handle, error: openError) = CreateFile(
     arena.pcwstr(path),
     0x80,
     FILE_SHARE_MODE(7),
@@ -69,7 +69,7 @@ bool skippedWithoutAdminShare(String local) {
     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
     null,
   );
-  expect(handle.isValid, isTrue, reason: 'identity of $path');
+  expect(handle.isValid, isTrue, reason: 'identity of $path error $openError');
   try {
     final info = arena<BY_HANDLE_FILE_INFORMATION>();
     final Win32Result(value: informed) = GetFileInformationByHandle(
@@ -84,6 +84,29 @@ bool skippedWithoutAdminShare(String local) {
   } finally {
     handle.close();
   }
+});
+
+HANDLE markDeletePending(String path) => using((Arena arena) {
+  final Win32Result(value: handle) = CreateFile(
+    arena.pcwstr(path),
+    0x10000 | 0x80000000,
+    FILE_SHARE_MODE(7),
+    null,
+    OPEN_EXISTING,
+    FILE_FLAGS_AND_ATTRIBUTES(0x80),
+    null,
+  );
+  expect(handle.isValid, isTrue, reason: 'open $path');
+  final flag = arena<Uint8>(4);
+  flag.value = 1;
+  final Win32Result(value: marked) = SetFileInformationByHandle(
+    handle,
+    FileDispositionInfo,
+    flag,
+    4,
+  );
+  expect(marked, isTrue, reason: 'delete pending on $path');
+  return handle;
 });
 
 String? shortPathOf(String path) => using((Arena arena) {
@@ -455,7 +478,7 @@ void main() {
         afterListing: (folder) {
           listings++;
           final temp = File('$data\\peers.json.1.tmp');
-          if (temp.existsSync()) temp.deleteSync();
+          if (temp.existsSync()) temp.renameSync('$base\\gone.tmp');
         },
       );
 
@@ -463,7 +486,7 @@ void main() {
       expect(listings, 2);
     });
 
-    test('M5: files that keep going away give null after five walks, '
+    test('M5: files that keep going away give null after eight walks, '
         'never a partial set', () async {
       final base = await scratch('nexus_m5_ids_');
       final data = '$base\\data';
@@ -474,14 +497,65 @@ void main() {
       final ids = fileIdsUnder(
         data,
         afterListing: (folder) {
-          File('$data\\peers.json.$listings.tmp').deleteSync();
+          File('$data\\peers.json.$listings.tmp')
+              .renameSync('$base\\gone$listings.tmp');
           listings++;
           write('$data\\peers.json.$listings.tmp', '{}');
         },
       );
 
       expect(ids, isNull);
-      expect(listings, 5);
+      expect(listings, 8);
+    });
+
+    test(
+      'M5: entries gone in the first walks and then settled give the whole '
+      'set, with the identity of the file renamed to its final name',
+      () async {
+        final base = await scratch('nexus_m5_ids_');
+        final data = '$base\\data';
+        write('$data\\paired.json', '{}');
+        write('$data\\peers.json.0.tmp', '{}');
+        var listings = 0;
+
+        final ids = fileIdsUnder(
+          data,
+          includeFolders: true,
+          afterListing: (folder) {
+            if (listings < 4) {
+              File('$data\\peers.json.$listings.tmp')
+                  .renameSync('$base\\gone$listings.tmp');
+              write('$data\\peers.json.${listings + 1}.tmp', '{}');
+            } else if (listings == 4) {
+              File('$data\\peers.json.4.tmp').renameSync('$data\\peers.json');
+            }
+            listings++;
+          },
+        );
+
+        expect(ids, {
+          identityOf(data),
+          identityOf('$data\\paired.json'),
+          identityOf('$data\\peers.json'),
+        });
+        expect(listings, 6);
+      },
+    );
+
+    test('M5: a file that cannot be opened for a reason other than gone gives '
+        'null at the first walk without retrying', () async {
+      final base = await scratch('nexus_m5_ids_');
+      final data = '$base\\data';
+      write('$data\\paired.json', '{}');
+      write('$data\\pending.bin', 'pending');
+      final held = markDeletePending('$data\\pending.bin');
+      addTearDown(held.close);
+      var listings = 0;
+
+      final ids = fileIdsUnder(data, afterListing: (_) => listings++);
+
+      expect(ids, isNull);
+      expect(listings, 1);
     });
 
     test(
